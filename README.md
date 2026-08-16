@@ -25,6 +25,22 @@ React Three Fiber v9 + Rapier, WebGL, presupuesto de frame de 16,6 ms.
 muestra el libro en texto, para validar el camino de datos antes de que exista
 la escena. Se borra cuando esté el módulo 7.
 
+`src/dev/PerfHud.tsx` muestra en vivo el criterio de aceptación de la Parte E
+(`renderer.info.render.calls <= 12`, frame ms, peor frame del período).
+
+### Por qué no usamos `r3f-perf`
+
+El prompt maestro pedía montar `<Perf />` desde el primer día. No se puede con
+esta matriz: `r3f-perf@7.2.3` —la última publicada— depende de
+`@react-three/drei@^9.103.0`, y drei@9 declara peers de React 18 y
+`@react-three/fiber@^8`. npm resuelve instalando un **segundo drei anidado**
+escrito contra la API de R3F v8, junto al drei@10 del proyecto, ambos
+importando el mismo fiber@9. Es la mezcla v8/v9 que la Parte A prohíbe, y era
+la única fuente de los 8 warnings `ERESOLVE` del install.
+
+`PerfHud.tsx` lee `gl.info` directamente —que es de dónde `r3f-perf` saca sus
+números— en unas 50 líneas, sin dependencias y sin conflictos de peers.
+
 ---
 
 ## Setup
