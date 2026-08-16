@@ -3,6 +3,7 @@ import type { Match } from '../game/match';
 import {
   EVENT_HIT,
   EVENT_KO,
+  EVENT_SKILL,
   EVENT_SUPER,
   FIGHTER_HALF_HEIGHT,
   PLATFORM_COUNT,
@@ -141,6 +142,11 @@ export async function startGame(
         if (kind === EVENT_HIT) spark(x, y, 0.5 * match.events.magnitude[e], 0.25, 0xfff0c0);
         else if (kind === EVENT_KO) spark(x, y, 1.6, 0.7, 0xffffff);
         else if (kind === EVENT_SUPER) spark(x, y, match.events.magnitude[e], 0.5, 0xffd700);
+        // Habilidad común: un anillo del color del equipo. Cuando existan los
+        // rigs, acá además se reproduce `skillAnimation(personaje, magnitude)`.
+        else if (kind === EVENT_SKILL) {
+          spark(x, y, 1.1, 0.4, match.events.team[e] === TEAM_GREEN ? 0x66ffb0 : 0xff88aa);
+        }
       }
     }
     if (steps >= MAX_STEPS) accumulator = 0;

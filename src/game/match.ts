@@ -91,6 +91,21 @@ const MAX_SPAWNS_PER_STEP = 4;
 
 const BLAST = { minX: -15, maxX: 15, minY: -11, maxY: 26 };
 
+/**
+ * Las habilidades comunes salen solas cada 8 a 12 segundos por peleador.
+ *
+ * No dependen del contacto ni de que el mercado haga nada: son el ritmo base de
+ * la pelea, lo que hace que siempre esté pasando algo aunque el libro esté
+ * quieto. El super, en cambio, sale al completar los tres pasos de gigantismo,
+ * y ese sí lo maneja la liquidez.
+ */
+const SKILL_MIN_INTERVAL = 8;
+const SKILL_MAX_INTERVAL = 12;
+/** Alcance de una habilidad común. Bastante menos que el super. */
+const SKILL_RADIUS = 2.3;
+const SKILL_FORCE = 7;
+const SKILL_DAMAGE = 12;
+
 /* --- eventos para la capa de render ---------------------------------- */
 
 export const EVENT_HIT = 0;
@@ -98,6 +113,7 @@ export const EVENT_KO = 1;
 export const EVENT_SUPER = 2;
 export const EVENT_LAND = 3;
 export const EVENT_GROW = 4;
+export const EVENT_SKILL = 5;
 
 /**
  * Cola de eventos del paso. La capa de render la drena y la vacía: es cómo la
@@ -166,6 +182,12 @@ export interface Match {
   stage: Uint8Array;
   scale: Float32Array;
   claims: Uint8Array;
+  /** Cuándo le toca la próxima habilidad común, en segundos del reloj. */
+  nextSkill: Float32Array;
+  /** Cuál usó la última vez: se alternan. */
+  lastSkill: Uint8Array;
+  /** Semilla del PRNG. La simulación no usa Math.random. */
+  seed: number;
 
   /** Quién está creciendo por equipo, -1 si nadie. */
   growing: Int8Array;
@@ -201,6 +223,9 @@ export function createMatch(): Match {
     stage: new Uint8Array(CAPACITY),
     scale: new Float32Array(CAPACITY).fill(1),
     claims: new Uint8Array(CAPACITY),
+    nextSkill: new Float32Array(CAPACITY),
+    lastSkill: new Uint8Array(CAPACITY),
+    seed: 0x5eed_1234,
     growing: Int8Array.from([-1, -1]),
     lastStep: new Float32Array(2),
     clock: 0,
@@ -227,6 +252,25 @@ export function createMatch(): Match {
 }
 
 const move: MoveResult = createMoveResult();
+
+/**
+ * mulberry32. La simulación no llama a `Math.random` en ningún lado: con una
+ * semilla fija, la misma grabación reproducida dos veces da la misma pelea.
+ * Eso es lo que hace que el replay del VPS sirva para comparar dos corridas, y
+ * se perdería con un solo `Math.random` en el camino.
+ */
+function nextRandom(m: Match): number {
+  m.seed = (m.seed + 0x6d2b79f5) >>> 0;
+  let t = m.seed;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
+function scheduleSkill(m: Match, i: number, now: number): void {
+  m.nextSkill[i] = now + SKILL_MIN_INTERVAL
+    + nextRandom(m) * (SKILL_MAX_INTERVAL - SKILL_MIN_INTERVAL);
+}
 
 /**
  * Altura objetivo de cada plataforma desde el snapshot del libro.
@@ -343,6 +387,35 @@ export function stepMatch(
     m.grounded[i] = move.grounded ? 1 : 0;
     if (move.grounded) m.jumps[i] = MAX_JUMPS;
     if (move.landed) emit(m.events, EVENT_LAND, m.x[i], m.y[i], 1, m.team[i]);
+  }
+
+  /* --- habilidades comunes -------------------------------------------- */
+  for (let i = 0; i < CAPACITY; i++) {
+    if (m.slot[i] !== SLOT_ACTIVE) continue;
+    if (now < m.nextSkill[i]) continue;
+    if (now - m.hitstun[i] < HITSTUN) continue;
+    scheduleSkill(m, i, now);
+    m.lastSkill[i] = m.lastSkill[i] === 0 ? 1 : 0;
+    emit(m.events, EVENT_SKILL, m.x[i], m.y[i], m.lastSkill[i], m.team[i]);
+    m.shake = Math.max(m.shake, 0.35);
+
+    for (let j = 0; j < CAPACITY; j++) {
+      if (j === i || m.slot[j] !== SLOT_ACTIVE || m.team[j] === m.team[i]) continue;
+      const dx = m.x[j] - m.x[i];
+      const dy = m.y[j] - m.y[i];
+      const distance = Math.hypot(dx, dy);
+      if (distance > SKILL_RADIUS) continue;
+      const nx = distance > 1e-6 ? dx / distance : 1;
+      const ny = distance > 1e-6 ? dy / distance : 0;
+      const falloff = 1 - distance / SKILL_RADIUS;
+      m.vx[j] = nx * SKILL_FORCE * (0.5 + falloff);
+      m.vy[j] = ny * SKILL_FORCE * 0.3 + SKILL_FORCE * 0.35;
+      m.grounded[j] = 0;
+      m.damage[j] += SKILL_DAMAGE;
+      m.hitstun[j] = now;
+      m.lastHit[j] = now;
+      emit(m.events, EVENT_HIT, m.x[j], m.y[j], 1.2, m.team[j]);
+    }
   }
 
   /* --- empujones ----------------------------------------------------- */
@@ -469,6 +542,8 @@ function activate(
   m.whale[slot] = whale ? 1 : 0;
   m.stage[slot] = 0;
   m.scale[slot] = 1;
+  m.lastSkill[slot] = 1;
+  scheduleSkill(m, slot, now);
 
   // Repartidos por carril: los tres apareciendo en el mismo punto caen uno
   // encima del otro y arrancan la pelea amontonados.
