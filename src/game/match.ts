@@ -83,7 +83,15 @@ const JUMP_SPEED = 11;
 const MAX_JUMPS = 2;
 const AIR_CONTROL = 0.12;
 const LOOKAHEAD = 0.7;
+/** Cuánto queda sin control tras recibir un lanzamiento. */
 const HITSTUN = 0.34;
+/**
+ * El cuerpo a cuerpo aturde mucho menos: si aturdiera como una especial, dos
+ * peleadores en contacto se paralizarían mutuamente y no pasaría nada más.
+ */
+const MELEE_STUN = 0.12;
+/** Separación del cuerpo a cuerpo. Alcanza para no solaparse, no para lanzar. */
+const MELEE_NUDGE = 1.6;
 const CONTACT = 0.85;
 const SPAWN_Y = 8;
 const SPAWN_X = 5.5;
@@ -101,9 +109,8 @@ const BLAST = { minX: -15, maxX: 15, minY: -11, maxY: 26 };
  */
 const SKILL_MIN_INTERVAL = 8;
 const SKILL_MAX_INTERVAL = 12;
-/** Alcance de una habilidad común. Bastante menos que el super. */
+/** Alcance de una habilidad especial. Bastante menos que el super. */
 const SKILL_RADIUS = 2.3;
-const SKILL_FORCE = 7;
 const SKILL_DAMAGE = 12;
 
 /* --- eventos para la capa de render ---------------------------------- */
@@ -411,9 +418,13 @@ export function stepMatch(
       if (distance > SKILL_RADIUS) continue;
       const nx = distance > 1e-6 ? dx / distance : 1;
       const ny = distance > 1e-6 ? dy / distance : 0;
-      const falloff = 1 - distance / SKILL_RADIUS;
-      m.vx[j] = nx * SKILL_FORCE * (0.5 + falloff);
-      m.vy[j] = ny * SKILL_FORCE * 0.3 + SKILL_FORCE * 0.35;
+      const falloff = 0.55 + 0.45 * (1 - distance / SKILL_RADIUS);
+      // Acá sí entra el knockback por daño acumulado: cuanto más viene
+      // recibiendo el rival, más lejos lo manda esta misma habilidad. Es lo que
+      // hace que la pelea escale en vez de ser plana.
+      const force = knockback(m.damage[j], m.weight[j], m.weight[i]) * falloff;
+      m.vx[j] = nx * force * 1.15;
+      m.vy[j] = ny * force * 0.3 + force * 0.5;
       m.grounded[j] = 0;
       m.damage[j] += SKILL_DAMAGE;
       m.hitstun[j] = now;
@@ -434,11 +445,16 @@ export function stepMatch(
       if (now - m.lastHit[i] < HIT_COOLDOWN || now - m.lastHit[j] < HIT_COOLDOWN) continue;
 
       const nx = distance > 1e-6 ? dx / distance : 1;
-      const ny = distance > 1e-6 ? dy / distance : 0;
-      applyPush(m, j, nx, ny, m.weight[i]);
-      applyPush(m, i, -nx, -ny, m.weight[j]);
+
+      // El cuerpo a cuerpo NO lanza: acumula daño y separa apenas. Lanzar es
+      // trabajo de las especiales y del super. Es la regla de Smash, y es lo
+      // que hace que el daño acumulado signifique algo: sin ella, cada roce
+      // manda a volar y no hay nada que construir.
+      m.vx[j] += nx * MELEE_NUDGE;
+      m.vx[i] -= nx * MELEE_NUDGE;
       m.lastHit[i] = now; m.lastHit[j] = now;
-      m.hitstun[i] = now; m.hitstun[j] = now;
+      m.hitstun[i] = now - HITSTUN + MELEE_STUN;
+      m.hitstun[j] = now - HITSTUN + MELEE_STUN;
       m.damage[i] += hitDamage(m.weight[j]);
       m.damage[j] += hitDamage(m.weight[i]);
 
@@ -511,19 +527,6 @@ export function stepMatch(
   if (trades.count > CAPACITY * 6) trades.clear();
 
   summarize(m);
-}
-
-function applyPush(m: Match, i: number, nx: number, ny: number, attackerWeight: number): void {
-  const force = knockback(m.damage[i], m.weight[i], attackerWeight);
-  // Sobre todo horizontal: en Smash se gana sacando por el costado. Con
-  // demasiada componente vertical los peleadores se apilan en la misma losa.
-  m.vx[i] = nx * force * 0.95;
-  // El empujón hacia arriba sólo despega al que está PARADO. Sumándoselo
-  // también al que ya está en el aire, una cadena de golpes lo sostiene
-  // flotando indefinidamente: se pasaban la pelea sin tocar el piso.
-  const lift = m.grounded[i] === 1 ? force * 0.45 : 0;
-  m.vy[i] = ny * force * 0.3 + lift;
-  m.grounded[i] = 0;
 }
 
 function firstActive(m: Match, team: number): number {
