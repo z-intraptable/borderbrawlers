@@ -1,45 +1,89 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { CuboidCollider, RigidBody } from '@react-three/rapier';
-import type { RapierCollider } from '@react-three/rapier';
+import type { RapierRigidBody } from '@react-three/rapier';
 import type { ProcessedBook } from '../types/binance';
 import { BOOK_LEVELS } from '../types/binance';
 import type { FeedStats } from '../net/feedCore';
+import type { Skyline } from '../game/fighters';
 
 /**
- * Módulo 3 — el escenario.
+ * Módulo 3 — el escenario, que ahora es también el piso de la pelea.
  *
- * Dos capas deliberadamente desacopladas:
+ * Tres capas:
  *
- *   VISUAL  40 instancias en UN draw call, refrescadas a 10 Hz con el snapshot.
- *   FÍSICA  3 colliders en total (2 muros + la plataforma del spread), a 4 Hz.
+ *   BARRAS      40 instancias en UN draw call, la liquidez cruda, a 10 Hz.
+ *   PLATAFORMAS 9 losas en UN draw call, lo único que se pisa.
+ *   FÍSICA      9 colliders, uno por losa.
  *
- * No se envuelve el instancedMesh en <RigidBody>: un InstancedMesh es un único
- * Object3D y no admite un collider por instancia. <InstancedRigidBodies> sí
- * existe, pero crea un cuerpo real por instancia — ahorra draw calls, no ahorra
- * simulación — y como la altura es el volumen, cambiar la forma de 40 colliders
- * diez veces por segundo implica recrearlos y bloquea el hilo principal.
+ * Dos decisiones que sostienen todo lo demás:
+ *
+ * 1. **Las losas son `kinematicPosition`, no `fixed`.** Un cuerpo fijo que se
+ *    teletransporta con `setTranslation` no barre contra los dinámicos: los
+ *    personajes se hundirían o quedarían trabados cuando la plataforma crece
+ *    abajo de ellos. Con cuerpos cinemáticos movidos por
+ *    `setNextKinematicTranslation`, Rapier resuelve el contacto y el personaje
+ *    viaja arriba de la plataforma que sube, que es justo lo que se quiere ver.
+ *
+ * 2. **Las losas no cambian de tamaño: sólo de altura.** El invariante viejo
+ *    decía "sólo 3 colliders" porque recrear 40 colliders diez veces por segundo
+ *    bloquea el hilo principal — y sigue siendo cierto. Acá no se recrea ni se
+ *    redimensiona nada: 9 cuerpos con medias extensiones constantes que sólo se
+ *    mueven en Y. Es más barato que el `setHalfExtents` a 4 Hz que había antes,
+ *    y encima da un escenario estable en X, que es condición para que un salto
+ *    se pueda calcular.
  */
 
 export const INSTANCE_COUNT = BOOK_LEVELS * 2;
 
 /** Semiancho del escenario en unidades de mundo. */
 export const STAGE_HALF_WIDTH = 9;
-/** Semiancho del hueco central donde vive la plataforma del spread. */
-export const SPREAD_HALF_WIDTH = 0.9;
-/** Y del piso de las plataformas. Los personajes caen desde arriba. */
+/**
+ * Semiancho de la plataforma central, la que siempre está.
+ *
+ * Ancha a propósito: es el escenario principal, como el de Battlefield en
+ * Smash. Con 0,9 los seis peleadores no entraban y terminaban apilados uno
+ * sobre la cabeza del otro en vez de peleando.
+ */
+export const SPREAD_HALF_WIDTH = 2.4;
+/** Y de referencia del escenario. */
 export const STAGE_FLOOR_Y = 0;
 
-const PLATFORM_WIDTH = 0.34;
-const PLATFORM_DEPTH = 0.9;
+/* --- geometría de las plataformas ---------------------------------- */
+
+export const PLATFORMS_PER_SIDE = 4;
+/** 4 por lado más la central. */
+export const PLATFORM_COUNT = PLATFORMS_PER_SIDE * 2 + 1;
+
+const PLATFORM_HALF_HEIGHT = 0.16;
+const PLATFORM_DEPTH = 1.2;
+/** Desde dónde arrancan las plataformas laterales. */
+const SIDE_INNER = 3.1;
+const SIDE_SLOT = (STAGE_HALF_WIDTH - SIDE_INNER) / PLATFORMS_PER_SIDE;
+/**
+ * Semiancho de cada losa. El hueco que queda entre losas (~0,5) es
+ * deliberado: sin pozos no hay nada que saltar y la pelea es una fila india.
+ */
+const PLATFORM_HALF_WIDTH = SIDE_SLOT / 2 - 0.25;
+
+/** Altura mínima: si el mercado se seca, igual tiene que quedar dónde pelear. */
+const PLATFORM_MIN_Y = 0.6;
+const PLATFORM_MAX_Y = 7.5;
+/**
+ * Tope de velocidad vertical de una plataforma, en unidades por segundo. Es la
+ * red de contención contra el caso feo: una losa que sube de golpe atraviesa al
+ * personaje que tiene encima en vez de empujarlo.
+ */
+const PLATFORM_MAX_SPEED = 2.2;
+const PLATFORM_LAMBDA = 2.5;
+
+/* --- barras del libro ---------------------------------------------- */
+
+const BAR_WIDTH = 0.3;
+const BAR_DEPTH = 0.5;
 const HEIGHT_GAIN = 2.4;
 const MIN_HEIGHT = 0.12;
-
-/** Ningún collider más fino que 0,2: los finos son la causa #1 de tunneling. */
-const MIN_HALF_EXTENT = 0.15;
-const PHYSICS_HZ = 4;
-const PHYSICS_INTERVAL = 1 / PHYSICS_HZ;
 
 /** Un nivel por encima de este múltiplo de la mediana se dibuja en HDR. */
 const HDR_THRESHOLD = 2.5;
@@ -47,17 +91,21 @@ const HDR_GAIN = 2.6;
 
 const BULL = new THREE.Color('#00FF66');
 const BEAR = new THREE.Color('#FF0055');
+/** Las losas van en un gris frío que no compite con los equipos. */
+const PLATFORM_COLOR = new THREE.Color('#8fa3c8');
+const PLATFORM_EDGE = new THREE.Color('#dbe6ff');
 
 /* Temporales a nivel de módulo. Nada de esto se asigna dentro del bucle. */
 const dummy = new THREE.Object3D();
 const scratchColor = new THREE.Color();
-/** Rapier acepta cualquier {x,y,z}; se reutiliza para no asignar por update. */
-const halfExtents = { x: 0, y: 0, z: 0 };
-const translation = { x: 0, y: 0, z: 0 };
+/** Rapier acepta cualquier {x,y,z}; se reutiliza para no asignar por frame. */
+const kinematic = { x: 0, y: 0, z: 0 };
 
 export interface OrderBookWallsProps {
   book: ProcessedBook;
   stats: FeedStats;
+  /** El escenario lo escribe; la IA de los peleadores lo lee. */
+  skyline: Skyline;
   /**
    * Se resuelve en el montaje y NO debe cambiar en caliente: alternar el tipo
    * de material fuerza compilar y linkear un WebGLProgram nuevo, con freeze.
@@ -65,33 +113,54 @@ export interface OrderBookWallsProps {
   lowQuality?: boolean;
 }
 
-export function OrderBookWalls({ book, stats, lowQuality = false }: OrderBookWallsProps): React.JSX.Element {
-  const mesh = useRef<THREE.InstancedMesh | null>(null);
-  const bidWall = useRef<RapierCollider | null>(null);
-  const askWall = useRef<RapierCollider | null>(null);
+/** Centro en X de cada plataforma. Fijo: sólo se mueve la altura. */
+function platformCenterX(index: number): number {
+  if (index === 0) return 0;
+  const side = index <= PLATFORMS_PER_SIDE ? -1 : 1;
+  const slot = (index - 1) % PLATFORMS_PER_SIDE;
+  return side * (SIDE_INNER + SIDE_SLOT * slot + SIDE_SLOT / 2);
+}
+
+function platformHalfWidth(index: number): number {
+  return index === 0 ? SPREAD_HALF_WIDTH : PLATFORM_HALF_WIDTH;
+}
+
+export function OrderBookWalls({ book, stats, skyline, lowQuality = false }: OrderBookWallsProps): React.JSX.Element {
+  const bars = useRef<THREE.InstancedMesh | null>(null);
+  const slabs = useRef<THREE.InstancedMesh | null>(null);
+  const bodies = useRef<(RapierRigidBody | null)[]>([]);
 
   const lastDrawnId = useRef(-1);
-  const physicsClock = useRef(0);
   /** Semiespan de precio del escenario, amortiguado para que no salte. */
   const span = useRef(1);
+  /** Altura objetivo y actual de cada plataforma. */
+  const targetY = useMemo(() => new Float64Array(PLATFORM_COUNT).fill(PLATFORM_MIN_Y), []);
+  const currentY = useMemo(() => new Float64Array(PLATFORM_COUNT).fill(PLATFORM_MIN_Y), []);
+
+  // Los rangos en X son fijos, así que el skyline se dibuja una sola vez.
+  useEffect(() => {
+    for (let i = 0; i < PLATFORM_COUNT; i++) {
+      const cx = platformCenterX(i);
+      const half = platformHalfWidth(i);
+      skyline.minX[i] = cx - half;
+      skyline.maxX[i] = cx + half;
+      skyline.topY[i] = i === 0 ? STAGE_FLOOR_Y : PLATFORM_MIN_Y;
+    }
+    targetY[0] = STAGE_FLOOR_Y;
+    currentY[0] = STAGE_FLOOR_Y;
+  }, [skyline, targetY, currentY]);
 
   useEffect(() => {
-    const m = mesh.current;
+    const m = bars.current;
     if (m === null) return;
-
     m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 
     // `instanceColor` arranca en null. La transición null → no-null en el primer
-    // setColorAt cambia los parámetros del programa y fuerza una recompilación de
-    // shader en medio de la escena. Se inicializan las 40 acá, antes del primer
-    // render, aunque todavía no tengan el color definitivo.
-    for (let i = 0; i < INSTANCE_COUNT; i++) {
-      m.setColorAt(i, i < BOOK_LEVELS ? BULL : BEAR);
-    }
+    // setColorAt fuerza una recompilación de shader en medio de la escena, así
+    // que se inicializan todas antes del primer render.
+    for (let i = 0; i < INSTANCE_COUNT; i++) m.setColorAt(i, i < BOOK_LEVELS ? BULL : BEAR);
     if (m.instanceColor !== null) m.instanceColor.needsUpdate = true;
 
-    // Todas fuera de cámara hasta el primer snapshot, para no mostrar 40 cubos
-    // apilados en el origen durante el handshake del WebSocket.
     dummy.position.set(0, -999, 0);
     dummy.scale.set(0.001, 0.001, 0.001);
     dummy.updateMatrix();
@@ -100,101 +169,102 @@ export function OrderBookWalls({ book, stats, lowQuality = false }: OrderBookWal
     m.frustumCulled = false;
   }, []);
 
+  useEffect(() => {
+    const m = slabs.current;
+    if (m === null) return;
+    m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    for (let i = 0; i < PLATFORM_COUNT; i++) {
+      m.setColorAt(i, i === 0 ? PLATFORM_EDGE : PLATFORM_COLOR);
+    }
+    if (m.instanceColor !== null) m.instanceColor.needsUpdate = true;
+    m.frustumCulled = false;
+  }, []);
+
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.1);
-    const m = mesh.current;
-    if (m === null) return;
 
-    physicsClock.current += dt;
-    const doPhysics = physicsClock.current >= PHYSICS_INTERVAL;
-
-    // Sin snapshot nuevo no hay nada que redibujar. El acumulador de física NO
-    // se resetea acá: hacerlo descartaba el tick pendiente en 5 de cada 6
-    // frames (60 Hz de render contra 10 Hz de snapshots) y los muros terminaban
-    // redimensionándose ~0,7 veces por segundo en vez de 4.
-    if (book.lastUpdateId === lastDrawnId.current) return;
-    lastDrawnId.current = book.lastUpdateId;
-
-    const mid = book.mid;
-    if (mid <= 0) return;
-
-    const qtyRef = stats.bookQtyMedian > 0 ? stats.bookQtyMedian : 1;
-
-    // Semiespan objetivo: el nivel más lejano del snapshot. Amortiguado, porque
-    // un span crudo hace que el escenario respire con cada snapshot.
-    let farthest = 0;
-    if (book.bidCount > 0) farthest = Math.max(farthest, mid - book.bidPrices[book.bidCount - 1]);
-    if (book.askCount > 0) farthest = Math.max(farthest, book.askPrices[book.askCount - 1] - mid);
-    if (farthest > 0) {
-      span.current = THREE.MathUtils.damp(span.current, farthest, 3, dt);
-    }
-    const usable = STAGE_HALF_WIDTH - SPREAD_HALF_WIDTH;
-    const xScale = usable / Math.max(span.current, 1e-9);
-
-    /* --- matrices de instancia -------------------------------------- */
-    // Un solo Object3D dummy reutilizado: position → scale → updateMatrix →
-    // setMatrixAt. Cero Object3D / Vector3 / Matrix4 / Color creados acá.
-    let bidReach = 0;
-    let askReach = 0;
-    let bidHeight = 0;
-    let askHeight = 0;
-
-    for (let i = 0; i < BOOK_LEVELS; i++) {
-      // Bids a la izquierda (índices 0..19), asks a la derecha (20..39).
-      writeSide(m, i, i, book.bidPrices, book.bidQtys, book.bidCount, mid, -1, xScale, qtyRef);
-      writeSide(m, BOOK_LEVELS + i, i, book.askPrices, book.askQtys, book.askCount, mid, 1, xScale, qtyRef);
+    /* --- 1. barras del libro, sólo si hay snapshot nuevo -------------- */
+    const m = bars.current;
+    if (m !== null && book.lastUpdateId !== lastDrawnId.current && book.mid > 0) {
+      lastDrawnId.current = book.lastUpdateId;
+      redrawBook(m, book, stats, span, dt, targetY);
     }
 
-    for (let i = 0; i < book.bidCount; i++) {
-      const x = (mid - book.bidPrices[i]) * xScale + SPREAD_HALF_WIDTH;
-      if (x > bidReach) bidReach = x;
-      bidHeight += heightFor(book.bidQtys[i], qtyRef);
+    /* --- 2. plataformas, todos los frames ---------------------------- */
+    // Un cuerpo cinemático quiere su destino cada frame: es lo que hace que
+    // Rapier lo barra contra los dinámicos en vez de teletransportarlo.
+    const slab = slabs.current;
+    for (let i = 0; i < PLATFORM_COUNT; i++) {
+      const goal = THREE.MathUtils.clamp(targetY[i], PLATFORM_MIN_Y, PLATFORM_MAX_Y);
+      const next = THREE.MathUtils.damp(currentY[i], goal, PLATFORM_LAMBDA, dt);
+      const limit = PLATFORM_MAX_SPEED * dt;
+      const step = THREE.MathUtils.clamp(next - currentY[i], -limit, limit);
+      currentY[i] = i === 0 ? STAGE_FLOOR_Y : currentY[i] + step;
+      skyline.topY[i] = currentY[i];
+
+      const body = bodies.current[i];
+      if (body !== null && body !== undefined) {
+        kinematic.x = platformCenterX(i);
+        kinematic.y = currentY[i] - PLATFORM_HALF_HEIGHT;
+        kinematic.z = 0;
+        body.setNextKinematicTranslation(kinematic);
+      }
+
+      if (slab !== null) {
+        dummy.position.set(platformCenterX(i), currentY[i] - PLATFORM_HALF_HEIGHT, 0);
+        dummy.scale.set(platformHalfWidth(i) * 2, PLATFORM_HALF_HEIGHT * 2, PLATFORM_DEPTH);
+        dummy.updateMatrix();
+        slab.setMatrixAt(i, dummy.matrix);
+      }
     }
-    for (let i = 0; i < book.askCount; i++) {
-      const x = (book.askPrices[i] - mid) * xScale + SPREAD_HALF_WIDTH;
-      if (x > askReach) askReach = x;
-      askHeight += heightFor(book.askQtys[i], qtyRef);
-    }
-    if (book.bidCount > 0) bidHeight /= book.bidCount;
-    if (book.askCount > 0) askHeight /= book.askCount;
-
-    m.instanceMatrix.needsUpdate = true;
-    if (m.instanceColor !== null) m.instanceColor.needsUpdate = true;
-
-    /* --- capa física, como mucho 4 veces por segundo ------------------ */
-    if (!doPhysics) return;
-    physicsClock.current = 0;
-
-    updateWall(bidWall.current, -1, bidReach, bidHeight);
-    updateWall(askWall.current, 1, askReach, askHeight);
+    if (slab !== null) slab.instanceMatrix.needsUpdate = true;
   });
 
   return (
     <>
+      {/* Barras: la liquidez cruda, sin colisión. Son el telón, no el piso. */}
       <instancedMesh
-        ref={mesh}
+        ref={bars}
         args={[undefined, undefined, INSTANCE_COUNT]}
         count={INSTANCE_COUNT}
         castShadow={false}
         receiveShadow={false}
       >
-        <boxGeometry args={[PLATFORM_WIDTH, 1, PLATFORM_DEPTH]} />
+        <boxGeometry args={[BAR_WIDTH, 1, BAR_DEPTH]} />
         {lowQuality
           ? <meshBasicMaterial toneMapped={false} />
           : <meshToonMaterial toneMapped={false} />}
       </instancedMesh>
 
-      <RigidBody type="fixed" colliders={false}>
-        {/* Plataforma del spread: el centro del ring, siempre en X = 0. */}
-        <CuboidCollider
-          args={[SPREAD_HALF_WIDTH, 0.18, PLATFORM_DEPTH / 2]}
-          position={[0, STAGE_FLOOR_Y - 0.18, 0]}
-        />
-        {/* Los muros NO replican los 40 niveles: 2 cuboides que aproximan la
-            silueta agregada, redimensionados con setHalfExtents sobre la ref. */}
-        <CuboidCollider ref={bidWall} args={[MIN_HALF_EXTENT, MIN_HALF_EXTENT, PLATFORM_DEPTH / 2]} />
-        <CuboidCollider ref={askWall} args={[MIN_HALF_EXTENT, MIN_HALF_EXTENT, PLATFORM_DEPTH / 2]} />
-      </RigidBody>
+      {/* Losas: lo único que se pisa. Un draw call para las nueve. */}
+      <instancedMesh
+        ref={slabs}
+        args={[undefined, undefined, PLATFORM_COUNT]}
+        count={PLATFORM_COUNT}
+        castShadow={false}
+        receiveShadow={false}
+      >
+        <boxGeometry args={[1, 1, 1]} />
+        {lowQuality
+          ? <meshBasicMaterial toneMapped={false} />
+          : <meshToonMaterial toneMapped={false} />}
+      </instancedMesh>
+
+      {Array.from({ length: PLATFORM_COUNT }, (_, i) => (
+        <RigidBody
+          key={i}
+          ref={(el) => { bodies.current[i] = el; }}
+          type={i === 0 ? 'fixed' : 'kinematicPosition'}
+          colliders={false}
+          position={[platformCenterX(i), PLATFORM_MIN_Y - PLATFORM_HALF_HEIGHT, 0]}
+        >
+          <CuboidCollider
+            args={[platformHalfWidth(i), PLATFORM_HALF_HEIGHT, PLATFORM_DEPTH / 2]}
+            friction={0.9}
+            restitution={0}
+          />
+        </RigidBody>
+      ))}
     </>
   );
 }
@@ -202,6 +272,42 @@ export function OrderBookWalls({ book, stats, lowQuality = false }: OrderBookWal
 /** Escala logarítmica anclada a la mediana móvil, no al máximo del instante. */
 function heightFor(qty: number, qtyRef: number): number {
   return Math.max(MIN_HEIGHT, Math.log1p(qty / qtyRef) * HEIGHT_GAIN);
+}
+
+/**
+ * Redibuja las 40 barras y, de paso, deja la altura objetivo de cada plataforma.
+ * Se recorre el libro una sola vez para las dos cosas.
+ */
+function redrawBook(
+  m: THREE.InstancedMesh,
+  book: ProcessedBook,
+  stats: FeedStats,
+  span: { current: number },
+  dt: number,
+  targetY: Float64Array,
+): void {
+  const mid = book.mid;
+  const qtyRef = stats.bookQtyMedian > 0 ? stats.bookQtyMedian : 1;
+
+  let farthest = 0;
+  if (book.bidCount > 0) farthest = Math.max(farthest, mid - book.bidPrices[book.bidCount - 1]);
+  if (book.askCount > 0) farthest = Math.max(farthest, book.askPrices[book.askCount - 1] - mid);
+  if (farthest > 0) span.current = THREE.MathUtils.damp(span.current, farthest, 3, dt);
+
+  const usable = STAGE_HALF_WIDTH - SIDE_INNER;
+  const xScale = usable / Math.max(span.current, 1e-9);
+
+  // La altura de cada plataforma es la barra MÁS ALTA que la toca, no el
+  // promedio: con el promedio la mitad de las barras atraviesan la losa.
+  for (let i = 1; i < PLATFORM_COUNT; i++) targetY[i] = PLATFORM_MIN_Y;
+
+  for (let level = 0; level < BOOK_LEVELS; level++) {
+    writeSide(m, level, level, book.bidPrices, book.bidQtys, book.bidCount, mid, -1, xScale, qtyRef, targetY);
+    writeSide(m, BOOK_LEVELS + level, level, book.askPrices, book.askQtys, book.askCount, mid, 1, xScale, qtyRef, targetY);
+  }
+
+  m.instanceMatrix.needsUpdate = true;
+  if (m.instanceColor !== null) m.instanceColor.needsUpdate = true;
 }
 
 function writeSide(
@@ -215,6 +321,7 @@ function writeSide(
   dir: -1 | 1,
   xScale: number,
   qtyRef: number,
+  targetY: Float64Array,
 ): void {
   if (level >= count) {
     dummy.position.set(0, -999, 0);
@@ -226,12 +333,21 @@ function writeSide(
 
   const qty = qtys[level];
   const height = heightFor(qty, qtyRef);
-  const distance = Math.abs(prices[level] - mid) * xScale + SPREAD_HALF_WIDTH;
+  const x = dir * (Math.abs(prices[level] - mid) * xScale + SIDE_INNER);
 
-  dummy.position.set(dir * distance, STAGE_FLOOR_Y + height / 2, 0);
+  dummy.position.set(x, STAGE_FLOOR_Y + height / 2, 0);
   dummy.scale.set(1, height, 1);
   dummy.updateMatrix();
   m.setMatrixAt(instance, dummy.matrix);
+
+  // ¿Sobre qué plataforma cae esta barra? Los rangos son fijos, así que es una
+  // división, no una búsqueda.
+  const side = dir < 0 ? 0 : PLATFORMS_PER_SIDE;
+  const slot = Math.floor((Math.abs(x) - SIDE_INNER) / SIDE_SLOT);
+  if (slot >= 0 && slot < PLATFORMS_PER_SIDE) {
+    const platform = 1 + side + slot;
+    if (height > targetY[platform]) targetY[platform] = height;
+  }
 
   // Ruta HDR: MeshToonMaterial expone `emissive` por draw call, no por
   // instancia, así que el brillo selectivo se consigue escribiendo colores
@@ -245,31 +361,4 @@ function writeSide(
   } else {
     m.setColorAt(instance, base);
   }
-}
-
-/**
- * Redimensiona un muro con setHalfExtents sobre la ref del collider.
- * Nunca desmontando y remontando componentes de React: eso destruiría y
- * recrearía el cuerpo rígido cuatro veces por segundo.
- */
-function updateWall(
-  collider: RapierCollider | null,
-  dir: -1 | 1,
-  reach: number,
-  height: number,
-): void {
-  if (collider === null) return;
-
-  const inner = SPREAD_HALF_WIDTH;
-  const outer = Math.max(reach, inner + MIN_HALF_EXTENT * 2);
-
-  halfExtents.x = Math.max(MIN_HALF_EXTENT, (outer - inner) / 2);
-  halfExtents.y = Math.max(MIN_HALF_EXTENT, height / 2);
-  halfExtents.z = PLATFORM_DEPTH / 2;
-  collider.setHalfExtents(halfExtents);
-
-  translation.x = dir * (inner + halfExtents.x);
-  translation.y = STAGE_FLOOR_Y + halfExtents.y;
-  translation.z = 0;
-  collider.setTranslationWrtParent(translation);
 }

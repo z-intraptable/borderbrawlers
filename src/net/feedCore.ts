@@ -36,6 +36,11 @@ export const MEDIAN_WARMUP = 20;
 /** whale = size > mediana * WHALE_MULT. Nunca un umbral fijo. */
 export const WHALE_MULT = 8;
 
+/** Decaimiento por trade del flujo agresor. Vida media ~700 trades. */
+export const FLOW_DECAY = 0.999;
+/** Suavizado de la liquidez del libro, por snapshot. */
+export const BOOK_VOLUME_ALPHA = 0.12;
+
 export const BACKOFF_BASE_MS = 1_000;
 export const BACKOFF_CAP_MS = 30_000;
 /** Binance: 300 intentos de conexión por IP cada 5 minutos. */
@@ -317,6 +322,22 @@ export interface FeedStats {
   tradeMedian: number;
   /** Mediana móvil de cantidades del libro. Ancla de la escala logarítmica. */
   bookQtyMedian: number;
+  /**
+   * Flujo agresor por lado, con decaimiento exponencial. Es "quién está
+   * empujando ahora", no el total histórico: un acumulador sin decaimiento se
+   * congela después de unos minutos y deja de decir nada. Con
+   * `FLOW_DECAY` la vida media queda en ~700 trades, unos 20 s de mercado
+   * normal.
+   */
+  buyVolume: number;
+  sellVolume: number;
+  /**
+   * Liquidez en el libro por lado, suavizada. `bidVolume` es el músculo del
+   * equipo verde y `askVolume` el del rojo: cuando uno crece, ese equipo entra
+   * en gigantismo.
+   */
+  bidVolume: number;
+  askVolume: number;
   snapshots: number;
   trades: number;
   whales: number;
@@ -393,6 +414,7 @@ export class BinanceFeedClient {
     this.qtyScratch = new Float64Array(levels * 2);
     this.stats = {
       mid: 0, spread: 0, tradeMedian: 0, bookQtyMedian: 0,
+      buyVolume: 0, sellVolume: 0, bidVolume: 0, askVolume: 0,
       snapshots: 0, trades: 0, whales: 0, droppedTrades: 0,
       reconnects: 0, lastMessageAt: 0,
     };
@@ -590,6 +612,12 @@ export class BinanceFeedClient {
     this.trades.push(trade.a, side, parseFloat(trade.p), size, whale, trade.T);
     if (this.trades.droppedCount !== before) this.stats.droppedTrades = this.trades.droppedCount;
 
+    // Flujo agresor: decae siempre, suma sólo del lado que pegó.
+    this.stats.buyVolume *= FLOW_DECAY;
+    this.stats.sellVolume *= FLOW_DECAY;
+    if (side === 'buy') this.stats.buyVolume += size;
+    else this.stats.sellVolume += size;
+
     this.tradeMedian.push(size);
     this.stats.trades++;
     if (whale) this.stats.whales++;
@@ -600,8 +628,20 @@ export class BinanceFeedClient {
     parseDepthInto(snapshot, this.book);
 
     let n = 0;
-    for (let i = 0; i < this.book.bidCount; i++) this.qtyScratch[n++] = this.book.bidQtys[i];
-    for (let i = 0; i < this.book.askCount; i++) this.qtyScratch[n++] = this.book.askQtys[i];
+    let bidVolume = 0;
+    let askVolume = 0;
+    for (let i = 0; i < this.book.bidCount; i++) {
+      bidVolume += this.book.bidQtys[i];
+      this.qtyScratch[n++] = this.book.bidQtys[i];
+    }
+    for (let i = 0; i < this.book.askCount; i++) {
+      askVolume += this.book.askQtys[i];
+      this.qtyScratch[n++] = this.book.askQtys[i];
+    }
+    // Suavizado: el libro cambia entero diez veces por segundo y sin esto el
+    // gigantismo se dispararía y cancelaría con cada snapshot.
+    this.stats.bidVolume += (bidVolume - this.stats.bidVolume) * BOOK_VOLUME_ALPHA;
+    this.stats.askVolume += (askVolume - this.stats.askVolume) * BOOK_VOLUME_ALPHA;
     if (n > 0) {
       // Insertion sort in-place sobre el scratch: n = 40, sin allocations.
       for (let i = 1; i < n; i++) {

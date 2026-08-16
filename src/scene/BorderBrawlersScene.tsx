@@ -4,25 +4,36 @@ import { Physics } from '@react-three/rapier';
 import { Bloom, EffectComposer } from '@react-three/postprocessing';
 import type { ProcessedBook } from '../types/binance';
 import type { FeedStats, TradeRingBuffer } from '../net/feedCore';
-import { OrderBookWalls } from './OrderBookWalls';
-import { BrawlerPool } from './BrawlerPool';
+import { OrderBookWalls, PLATFORM_COUNT } from './OrderBookWalls';
+import { FighterPool } from './FighterPool';
 import { DynamicCamera } from './DynamicCamera';
+import { StageBackdrop } from './StageBackdrop';
+import { ImpactFx, createImpactPool } from './ImpactFx';
 import { createStageFocus } from './stageFocus';
 import { PerfHud } from '../dev/PerfHud';
+import type { MatchState } from '../game/fighters';
+import { createSkyline } from '../game/fighters';
 
 /**
  * Módulo 6 — composición de la escena.
+ *
+ * Tres objetos mutables se crean acá y se pasan hacia abajo. Ninguno se
+ * reemplaza nunca, así que no generan re-renders ni basura: son el canal por
+ * donde el escenario le cuenta a la IA dónde está el piso (`skyline`), el pool
+ * le cuenta a la cámara dónde mirar (`focus`), y los golpes le cuentan a los
+ * efectos qué dibujar (`fx`).
  */
 
 const VOID_DARK = '#0B0F19';
 
-/** Niveles de mipmap del Bloom. Cada uno cuesta 2 draw calls. Ver abajo. */
+/** Niveles de mipmap del Bloom. Cada uno cuesta 2 draw calls. */
 const BLOOM_LEVELS = 4;
 
 export interface BorderBrawlersSceneProps {
   book: ProcessedBook;
   stats: FeedStats;
   trades: TradeRingBuffer;
+  match: MatchState;
   /** Pausa la física con la pestaña oculta. Cambia poco: es estado de React. */
   isHidden: boolean;
   lowQuality: boolean;
@@ -30,12 +41,14 @@ export interface BorderBrawlersSceneProps {
 }
 
 export function BorderBrawlersScene(props: BorderBrawlersSceneProps): React.JSX.Element {
-  const { book, stats, trades, isHidden, lowQuality, showPerf } = props;
+  const { book, stats, trades, match, isHidden, lowQuality, showPerf } = props;
   const gl = useThree((state) => state.gl);
   const scene = useThree((state) => state.scene);
   const camera = useThree((state) => state.camera);
 
   const focus = useMemo(createStageFocus, []);
+  const skyline = useMemo(() => createSkyline(PLATFORM_COUNT), []);
+  const fx = useMemo(createImpactPool, []);
 
   useEffect(() => {
     // Compilar antes del primer frame evita el hitch de la primera aparición
@@ -50,10 +63,11 @@ export function BorderBrawlersScene(props: BorderBrawlersSceneProps): React.JSX.
 
       {/* MeshToonMaterial necesita luz direccional para que se vean las bandas
           de cel-shading; la ambiental sólo levanta el negro absoluto. */}
-      <ambientLight intensity={0.55} />
-      <directionalLight position={[4, 9, 7]} intensity={2.1} />
-      <directionalLight position={[-6, 3, 4]} intensity={0.7} color="#4a6cff" />
+      <ambientLight intensity={0.6} />
+      <directionalLight position={[4, 9, 7]} intensity={2.2} />
+      <directionalLight position={[-6, 3, 4]} intensity={0.8} color="#4a6cff" />
 
+      <StageBackdrop stats={stats} />
       <DynamicCamera focus={focus} />
 
       <Physics
@@ -64,9 +78,19 @@ export function BorderBrawlersScene(props: BorderBrawlersSceneProps): React.JSX.
         gravity={[0, -9.81, 0]}
         paused={isHidden}
       >
-        <OrderBookWalls book={book} stats={stats} lowQuality={lowQuality} />
-        <BrawlerPool trades={trades} stats={stats} focus={focus} lowQuality={lowQuality} />
+        <OrderBookWalls book={book} stats={stats} skyline={skyline} lowQuality={lowQuality} />
+        <FighterPool
+          trades={trades}
+          stats={stats}
+          focus={focus}
+          skyline={skyline}
+          fx={fx}
+          match={match}
+          lowQuality={lowQuality}
+        />
       </Physics>
+
+      <ImpactFx pool={fx} />
 
       {/* Ruta HDR: los materiales van con toneMapped={false} y los colores por
           instancia se escriben fuera de 0–1. El umbral por encima de 1,0 hace
@@ -76,22 +100,20 @@ export function BorderBrawlersScene(props: BorderBrawlersSceneProps): React.JSX.
           `levels` es el que decide si se cumple el criterio de la Parte E. El
           mipmap blur hace un paso por nivel bajando y otro subiendo, así que el
           default de 8 cuesta ~17 draw calls de post: medido, 19 en total con la
-          escena, contra un techo de 12. Con 4 niveles son 11, y el halo sigue
-          alcanzando porque lo que brilla son barras finas, no superficies
-          grandes. */}
+          escena, contra un techo de 16. Con 4 niveles son 9 de post. */}
       {!lowQuality && (
         <EffectComposer multisampling={0}>
           <Bloom
-            intensity={1.2}
+            intensity={1.25}
             luminanceThreshold={1.0}
-            luminanceSmoothing={0.03}
+            luminanceSmoothing={0.04}
             mipmapBlur
             levels={BLOOM_LEVELS}
           />
         </EffectComposer>
       )}
 
-      {showPerf && <PerfHud />}
+      {showPerf && <PerfHud maxDrawCalls={16} />}
     </>
   );
 }

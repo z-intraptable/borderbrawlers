@@ -22,11 +22,12 @@ verlos andar (ver abajo).
 | 1 | `src/types/binance.ts` | verificado |
 | 2 | `src/net/feedCore.ts` + `src/net/useBinanceFeed.ts` | verificado, 40 asserts |
 | 3 | `src/scene/OrderBookWalls.tsx` | corre |
-| 4 | `src/scene/BrawlerPool.tsx` | corre |
+| 4 | `src/scene/FighterPool.tsx` + `src/game/fighters.ts` | corre |
 | 5 | `src/scene/DynamicCamera.tsx` + `src/scene/stageFocus.ts` | corre |
 | 6 | `src/scene/BorderBrawlersScene.tsx` | corre |
 | 7 | `src/BorderBrawlers.tsx` | corre |
 | 8 | `src/mock/mockFeed.ts` | verificado, 20 asserts |
+| — | `src/scene/StageBackdrop.tsx` + `ImpactFx.tsx` + `fighterGeometry.ts` | corren |
 
 Auxiliares: `src/quality.ts` (`detectLowQuality`), `src/dev/PerfHud.tsx`
 (medidor propio). `src/dev/FeedProbe.tsx` se borró: el módulo 7 anda y el banco
@@ -132,10 +133,32 @@ Rapier) están preasignados a nivel de módulo. Verificado: 400k trades con
 crecimiento de heap retenido cero.
 
 **Visual y física desacopladas.** Un `InstancedMesh` es un único `Object3D` y no
-admite un collider por instancia. El libro son 40 instancias en 1 draw call
-(10 Hz) y sólo 3 colliders: 2 muros agregados redimensionados con
-`setHalfExtents` a 4 Hz, más la plataforma del spread. Nunca desmontar y
+admite un collider por instancia. El libro son 40 instancias visuales en 1 draw
+call (10 Hz) y, aparte, 9 plataformas con 9 colliders. Nunca desmontar y
 remontar componentes para cambiar una forma.
+
+> El invariante decía "sólo 3 colliders" y cambió cuando la escena pasó a ser
+> una pelea: hace falta dónde pararse. La razón original —recrear 40 colliders
+> diez veces por segundo bloquea el hilo principal— sigue valiendo, y por eso
+> las 9 losas **no se recrean ni se redimensionan**: tienen medias extensiones
+> constantes y sólo se mueven en Y. Sale más barato que el `setHalfExtents` a
+> 4 Hz que había antes.
+
+**Las plataformas son `kinematicPosition`, nunca `fixed`.** Un cuerpo fijo que se
+teletransporta con `setTranslation` no barre contra los dinámicos: los personajes
+se hunden o quedan trabados cuando la plataforma crece abajo de ellos. Con
+cuerpos cinemáticos movidos por `setNextKinematicTranslation`, Rapier resuelve el
+contacto y el personaje viaja arriba de la losa que sube.
+
+**La IA consulta el skyline, no el mundo de física.** Las alturas ya están
+calculadas para dibujar, así que "¿hay piso en x?" es un índice y una
+comparación. Un raycast por personaje por frame sería trabajo y basura para
+responder algo que ya sabemos.
+
+**`Outlines` de drei: `screenspace` hace lo contrario de lo que sugiere.** En
+`true` desplaza la cáscara en unidades de MUNDO — con grosor 4 tapa media
+pantalla con una mancha negra. El grosor en píxeles, constante aunque la cámara
+haga zoom, es el modo por defecto.
 
 **Ningún collider más fino que 0,2 unidades** — los finos causan tunneling.
 
@@ -180,8 +203,9 @@ Verificados leyendo el código fuente de la versión fijada, no la documentació
 
 ## Criterio de aceptación (Parte E) — verificable
 
-- `renderer.info.render.calls` **≤ 12** con 50 personajes activos y el libro
-  completo. `PerfHud` lo muestra en vivo y se pone rojo al pasarse.
+- `renderer.info.render.calls` **≤ 16** con la pelea entera y el libro completo.
+  El techo subió de 12 a 16 al entrar el escenario jugable: contornos, losas,
+  efectos de impacto y fondo. Medido: **15 en calidad alta** y 5 en baja. `PerfHud` lo muestra en vivo y se pone rojo al pasarse.
   Medido con `?source=mock&scenario=stress`: **11 en calidad alta** (escena más
   todos los pasos del Bloom) y **2 en calidad baja**.
 
@@ -193,7 +217,9 @@ Verificados leyendo el código fuente de la versión fijada, no la documentació
   con 8 el total daba 19.
 - Cero asignaciones de `Vector3`, `Quaternion`, `Matrix4`, `Color` u `Object3D`
   dentro de `useFrame` o del handler del WebSocket.
-- Cero setters de estado de React en el camino de datos de mercado.
+- Cero setters de estado de React en el camino de datos de mercado. Por eso no
+  hay freeze frame global: `paused` de `<Physics>` es estado de React, y el
+  hitstun por personaje da el mismo golpe sin romper el invariante.
 - La regla del agresor implementada como `trade.m ? 'sell' : 'buy'`, literal.
 - Pestaña oculta 60 s y luego visible: sin ráfaga de spawns, sin salto de física.
   Verificado en headless emulando lo que hace el browser de verdad —
@@ -208,7 +234,7 @@ Verificados leyendo el código fuente de la versión fijada, no la documentació
 ## Tests
 
 ```bash
-npm test           # smokeMockFeed + smokeFeedCore, ~60 asserts, sin red
+npm test           # mockFeed + feedCore + fighters, ~130 asserts, sin red
 npm run test:mem   # igual, con --expose-gc, mide heap retenido
 
 cd server && npm test   # formato de grabación + servidor de replay, sin red
@@ -226,8 +252,32 @@ cambio en `feedCore.ts` tiene que mantener esas suites en verde.
 
 ---
 
+## El juego
+
+Verde = compradores agresores, rojo = vendedores, 3 contra 3, sin comandos de
+usuario: todo lo maneja el libro.
+
+- **El libro es el escenario.** 9 losas que suben y bajan con la liquidez.
+- **Los trades hacen aparecer peleadores.** El tamaño define el peso, una ballena
+  entra como peso pesado, y el flujo agresor le da ímpetu a su equipo.
+- **Gigantismo.** Cuando la liquidez de un lado pasa el 56% del libro, ese equipo
+  agranda a UNO de los suyos en tres pasos; al tercero descarga un super que
+  despide a todo rival en el radio, y vuelve a su tamaño. De a uno, porque con
+  los tres creciendo a la vez no se entiende qué pasó.
+- **El daño es la regla de Smash**: cuanto más acumulado, más lejos sale el
+  empujón. Sin eso la pelea es plana.
+- **El fondo es el volumen por lado**: hoguera verde y roja, y el cielo teñido
+  hacia el que domina.
+
+Las decisiones (a quién pegarle, cuándo saltar, cuánto empuja un golpe) están en
+`src/game/fighters.ts`, sin three ni rapier ni React, y con asserts. `FighterPool`
+sólo las traduce a llamadas de física.
+
 ## Pendientes
 
+0. **Repartir la pelea.** Los seis peleadores se emparejan en el centro y se
+   quedan ahí en vez de usar las plataformas laterales. Es ajuste de la búsqueda
+   de objetivo, no arquitectura.
 1. **Correr contra Binance de verdad.** El camino en vivo nunca se ejercitó: el
    sandbox donde se auditó no tunelea WebSockets y el cliente se quedó en
    `reconnecting`, que es lo correcto pero no prueba nada del feed real. Es lo

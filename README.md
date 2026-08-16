@@ -1,8 +1,12 @@
 # BorderBrawlers
 
-Visualizador 3D del order book de Binance como escenario de pelea estilo Super
-Smash Bros. Los niveles del libro son plataformas; cada trade ejecutado lanza un
-personaje hacia el centro con impulso proporcional a su tamaño.
+Pelea estilo Super Smash Bros / Brawlhalla sobre el order book de Binance.
+
+3 contra 3, verde compradores contra rojo vendedores, **sin comandos de usuario**:
+todo lo maneja el libro de órdenes y el flujo de compra y venta. Los peleadores
+saltan entre plataformas que suben y bajan con la liquidez, se empujan y se sacan
+del ring. Cuando un lado domina el libro, agranda a uno de los suyos en tres
+pasos y descarga un super.
 
 React Three Fiber v9 + Rapier, WebGL, presupuesto de frame de 16,6 ms.
 
@@ -15,11 +19,12 @@ React Three Fiber v9 + Rapier, WebGL, presupuesto de frame de 16,6 ms.
 | 1 | `src/types/binance.ts` | listo, verificado |
 | 2 | `src/net/feedCore.ts` + `src/net/useBinanceFeed.ts` | listo, verificado |
 | 3 | `src/scene/OrderBookWalls.tsx` | listo |
-| 4 | `src/scene/BrawlerPool.tsx` | listo |
+| 4 | `src/scene/FighterPool.tsx` + `src/game/fighters.ts` | listo, verificado |
 | 5 | `src/scene/DynamicCamera.tsx` + `stageFocus.ts` | listo |
 | 6 | `src/scene/BorderBrawlersScene.tsx` | listo |
 | 7 | `src/BorderBrawlers.tsx` | listo |
 | 8 | `src/mock/mockFeed.ts` | listo, verificado |
+| — | `StageBackdrop` · `ImpactFx` · `fighterGeometry` | listo |
 | — | `server/` — grabador y replay del VPS | listo, verificado |
 
 Ver `CLAUDE.md` para el contexto completo: decisiones cerradas, invariantes del
@@ -58,7 +63,7 @@ números— en unas 50 líneas, sin dependencias y sin conflictos de peers.
 npm i
 npm run dev        # http://localhost:5173
 npm run typecheck  # tsc --noEmit, strict
-npm test           # smoke tests de los módulos 1, 2 y 8
+npm test           # smoke tests de los módulos 1, 2, 8 y de la pelea
 ```
 
 Las versiones están fijadas **sin caret** a propósito. `@react-three/postprocessing@3`
