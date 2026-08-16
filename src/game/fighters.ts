@@ -344,7 +344,15 @@ export const GROWTH_THRESHOLD = 0.56;
 /** Segundos entre pasos. Es el tiempo que tarda en verse venir. */
 export const GROWTH_COOLDOWN = 1.6;
 
-const GROWTH_SCALES = [1, 1.45, 1.95, 2.6] as const;
+/**
+ * Escalas de la especificación del usuario: 1,15 / 1,30 / 1,50.
+ *
+ * Las que había —hasta 2,6×— estaban pensadas para cápsulas sin cara, donde el
+ * único recurso para que se notara era el tamaño bruto. Con un personaje
+ * dibujado, 2,6× es un monstruo que tapa el escenario y deja de leerse como el
+ * mismo peleador. A 1,5× se nota perfecto y sigue siendo él.
+ */
+const GROWTH_SCALES = [1, 1.15, 1.3, 1.5] as const;
 
 export function growthScale(stage: number): number {
   const clamped = stage < 0 ? 0 : stage > GROWTH_MAX_STAGE ? GROWTH_MAX_STAGE : stage;
