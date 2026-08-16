@@ -251,9 +251,16 @@ export function shouldBrakeAtLedge(groundAhead: boolean, dx: number, dir: number
 /* Golpes                                                              */
 /* ------------------------------------------------------------------ */
 
-export const BASE_KNOCKBACK = 2.2;
-export const DAMAGE_SCALE = 0.028;
-export const MAX_KNOCKBACK = 14;
+/**
+ * Ojo con las unidades: esto ahora es VELOCIDAD en unidades por segundo, no un
+ * impulso sobre una masa como cuando lo resolvía Rapier. Con los números viejos
+ * un golpe al 200% daba 14 u/s por 1,4 de multiplicador horizontal, o sea 19
+ * u/s sobre un escenario de 18 de ancho: cada roce cruzaba la pantalla entera y
+ * los peleadores se pasaban la pelea en el aire.
+ */
+export const BASE_KNOCKBACK = 2.4;
+export const DAMAGE_SCALE = 0.022;
+export const MAX_KNOCKBACK = 9.5;
 /** Daño que suma un empujón, escalado por el peso del que pega. */
 export const HIT_DAMAGE = 6;
 export const HIT_COOLDOWN = 0.35;
