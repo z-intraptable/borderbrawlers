@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { useThree } from '@react-three/fiber';
 import { Physics } from '@react-three/rapier';
-import { Bloom, EffectComposer } from '@react-three/postprocessing';
+import { Bloom, EffectComposer, Vignette } from '@react-three/postprocessing';
 import type { ProcessedBook } from '../types/binance';
 import type { FeedStats, TradeRingBuffer } from '../net/feedCore';
 import { OrderBookWalls, PLATFORM_COUNT } from './OrderBookWalls';
@@ -63,9 +63,13 @@ export function BorderBrawlersScene(props: BorderBrawlersSceneProps): React.JSX.
 
       {/* MeshToonMaterial necesita luz direccional para que se vean las bandas
           de cel-shading; la ambiental sólo levanta el negro absoluto. */}
-      <ambientLight intensity={0.6} />
-      <directionalLight position={[4, 9, 7]} intensity={2.2} />
-      <directionalLight position={[-6, 3, 4]} intensity={0.8} color="#4a6cff" />
+      <ambientLight intensity={0.55} />
+      <directionalLight position={[4, 9, 7]} intensity={2.3} />
+      <directionalLight position={[-6, 3, 4]} intensity={0.7} color="#4a6cff" />
+      {/* Luz de contra, desde atrás: le pone un filo claro al borde de los
+          personajes y los despega del fondo. Es el truco más barato que hay
+          para que una silueta se lea, y con cel-shading el filo sale duro. */}
+      <directionalLight position={[0, 4, -9]} intensity={1.5} color="#ffd9a0" />
 
       <StageBackdrop stats={stats} />
       <DynamicCamera focus={focus} />
@@ -110,6 +114,10 @@ export function BorderBrawlersScene(props: BorderBrawlersSceneProps): React.JSX.
             mipmapBlur
             levels={BLOOM_LEVELS}
           />
+          {/* `postprocessing` fusiona los efectos compatibles en un solo paso,
+              así que la viñeta no cuesta un draw call más. Cierra el encuadre y
+              empuja la mirada al centro, que es donde pasa la pelea. */}
+          <Vignette offset={0.28} darkness={0.62} />
         </EffectComposer>
       )}
 

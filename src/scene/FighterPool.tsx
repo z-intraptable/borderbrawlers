@@ -15,6 +15,7 @@ import {
   FIGHTER_RADIUS,
   createFighterGeometry,
 } from './fighterGeometry';
+import { createToonGradient } from './materials';
 import type { MatchState, Skyline } from '../game/fighters';
 import {
   HIT_COOLDOWN,
@@ -29,7 +30,8 @@ import {
   isKO,
   knockback,
   momentumBoost,
-  nearestEnemy,
+  pickTarget,
+  separation,
   shouldBrakeAtLedge,
   teamMomentum,
   wantsJump,
@@ -150,7 +152,13 @@ export function FighterPool(props: FighterPoolProps): React.JSX.Element {
   const clock = useRef(0);
 
   const geometry = useMemo(createFighterGeometry, []);
-  useEffect(() => () => geometry.dispose(), [geometry]);
+  // Tres escalones, más duros que los del escenario: el personaje tiene que
+  // recortarse del fondo, no integrarse.
+  const gradient = useMemo(() => createToonGradient(3), []);
+  useEffect(() => () => {
+    geometry.dispose();
+    gradient.dispose();
+  }, [geometry, gradient]);
 
   /** Quién está creciendo por equipo, y desde cuándo. -1 = nadie. */
   const growing = useRef<Int8Array>(Int8Array.from([-1, -1]));
@@ -176,6 +184,8 @@ export function FighterPool(props: FighterPoolProps): React.JSX.Element {
     y: new Float64Array(capacity),
     vx: new Float64Array(capacity),
     vy: new Float64Array(capacity),
+    /** Cuántos compañeros eligieron a cada rival este frame. */
+    claims: new Uint8Array(capacity),
   }), [capacity]);
 
   // La mitad de abajo es verde, la de arriba roja. Fijo: un slot no cambia de
@@ -226,6 +236,10 @@ export function FighterPool(props: FighterPoolProps): React.JSX.Element {
     const redBoost = momentumBoost(teamMomentum(stats.buyVolume, stats.sellVolume, TEAM_RED));
 
     /* --- decidir y mover -------------------------------------------- */
+    // Las elecciones del frame anterior se olvidan: el reparto se rehace cada
+    // frame contra las posiciones nuevas.
+    s.claims.fill(0);
+
     beginFrame(focus);
     for (let i = 0; i < capacity; i++) {
       if (s.state[i] !== SLOT_ACTIVE) continue;
@@ -240,7 +254,8 @@ export function FighterPool(props: FighterPoolProps): React.JSX.Element {
       // En hitstun no se controla: vuela. Es lo que hace que el golpe se lea.
       if (now - s.hitstun[i] < HITSTUN) continue;
 
-      const target = nearestEnemy(capacity, s.state, s.team, s.x, s.y, i);
+      const target = pickTarget(capacity, s.state, s.team, s.x, s.y, s.claims, i);
+      if (target >= 0) s.claims[target]++;
       const dx = target >= 0 ? s.x[target] - s.x[i] : -s.x[i];
       const dy = target >= 0 ? s.y[target] - s.y[i] : 0;
       const dir = dx >= 0 ? 1 : -1;
@@ -248,7 +263,10 @@ export function FighterPool(props: FighterPoolProps): React.JSX.Element {
       const groundAhead = hasGroundAhead(skyline, s.x[i], dir, LOOKAHEAD);
       const brake = shouldBrakeAtLedge(groundAhead, dx, dir);
       const boost = s.team[i] === TEAM_GREEN ? greenBoost : redBoost;
-      const desiredVx = brake ? 0 : dir * RUN_SPEED * boost;
+      // Separación de compañeros: se suma como intención, no como impulso. Con
+      // los tres pegados el equipo se mueve como un bloque y no se ve la pelea.
+      const spread = separation(capacity, s.state, s.team, s.x, s.y, i);
+      const desiredVx = brake ? 0 : (dir + spread * 0.55) * RUN_SPEED * boost;
 
       vec.x = grounded ? desiredVx : s.vx[i] + (desiredVx - s.vx[i]) * AIR_CONTROL;
       vec.y = s.vy[i];
@@ -419,7 +437,7 @@ export function FighterPool(props: FighterPoolProps): React.JSX.Element {
       >
         {lowQuality
           ? <meshBasicMaterial toneMapped={false} />
-          : <meshToonMaterial toneMapped={false} />}
+          : <meshToonMaterial gradientMap={gradient} toneMapped={false} />}
         {/* El contorno negro grueso: es lo que separa "primitiva" de
             "personaje", y la firma visual de Brawlhalla. `Outlines` de drei
             detecta que el padre es un InstancedMesh y comparte su
@@ -447,6 +465,7 @@ type Fighters = {
   stocks: Uint8Array; jumps: Uint8Array; lastJump: Float32Array; lastHit: Float32Array;
   hitstun: Float32Array; whale: Uint8Array; stage: Uint8Array; base: Float32Array;
   x: Float64Array; y: Float64Array; vx: Float64Array; vy: Float64Array;
+  claims: Uint8Array;
 };
 
 /** La escala por instancia vive en `rigidBodyStates`, no en el InstancedMesh. */
@@ -504,8 +523,11 @@ function activate(
   s.hitstun[slot] = -10;
   s.whale[slot] = whale ? 1 : 0;
 
-  vec.x = (team === TEAM_GREEN ? -1 : 1) * SPAWN_X;
-  vec.y = SPAWN_Y;
+  // Repartidos por slot: los tres del mismo equipo apareciendo en el mismo
+  // punto caen uno encima del otro y arrancan la pelea amontonados.
+  const lane = slot % 3;
+  vec.x = (team === TEAM_GREEN ? -1 : 1) * (SPAWN_X - lane * 1.8);
+  vec.y = SPAWN_Y + lane * 0.9;
   vec.z = 0;
   body.setTranslation(vec, true);
 

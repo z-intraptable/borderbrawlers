@@ -7,6 +7,7 @@ import type { ProcessedBook } from '../types/binance';
 import { BOOK_LEVELS } from '../types/binance';
 import type { FeedStats } from '../net/feedCore';
 import type { Skyline } from '../game/fighters';
+import { createBarTexture, createPlatformTexture, createToonGradient } from './materials';
 
 /**
  * Módulo 3 — el escenario, que ahora es también el piso de la pelea.
@@ -137,6 +138,15 @@ export function OrderBookWalls({ book, stats, skyline, lowQuality = false }: Ord
   const targetY = useMemo(() => new Float64Array(PLATFORM_COUNT).fill(PLATFORM_MIN_Y), []);
   const currentY = useMemo(() => new Float64Array(PLATFORM_COUNT).fill(PLATFORM_MIN_Y), []);
 
+  const gradient = useMemo(() => createToonGradient(4), []);
+  const platformMap = useMemo(createPlatformTexture, []);
+  const barMap = useMemo(createBarTexture, []);
+  useEffect(() => () => {
+    gradient.dispose();
+    platformMap.dispose();
+    barMap?.dispose();
+  }, [gradient, platformMap, barMap]);
+
   // Los rangos en X son fijos, así que el skyline se dibuja una sola vez.
   useEffect(() => {
     for (let i = 0; i < PLATFORM_COUNT; i++) {
@@ -233,7 +243,7 @@ export function OrderBookWalls({ book, stats, skyline, lowQuality = false }: Ord
         <boxGeometry args={[BAR_WIDTH, 1, BAR_DEPTH]} />
         {lowQuality
           ? <meshBasicMaterial toneMapped={false} />
-          : <meshToonMaterial toneMapped={false} />}
+          : <meshToonMaterial gradientMap={gradient} toneMapped={false} />}
       </instancedMesh>
 
       {/* Losas: lo único que se pisa. Un draw call para las nueve. */}
@@ -246,8 +256,8 @@ export function OrderBookWalls({ book, stats, skyline, lowQuality = false }: Ord
       >
         <boxGeometry args={[1, 1, 1]} />
         {lowQuality
-          ? <meshBasicMaterial toneMapped={false} />
-          : <meshToonMaterial toneMapped={false} />}
+          ? <meshBasicMaterial map={platformMap} toneMapped={false} />
+          : <meshToonMaterial map={platformMap} gradientMap={gradient} toneMapped={false} />}
       </instancedMesh>
 
       {Array.from({ length: PLATFORM_COUNT }, (_, i) => (

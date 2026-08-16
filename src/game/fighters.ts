@@ -140,6 +140,74 @@ export function nearestEnemy(
   return best;
 }
 
+/**
+ * Como `nearestEnemy`, pero penalizando a los rivales que ya tienen encima a un
+ * compañero.
+ *
+ * Sin esto los tres del equipo eligen siempre al mismo —el más cercano al
+ * centro— y la pelea entera se apelmaza en un punto mientras las plataformas
+ * laterales quedan vacías. Con la penalización se reparten solos, sin necesidad
+ * de un asignador global ni de roles.
+ */
+export function pickTarget(
+  capacity: number,
+  slotState: Uint8Array,
+  teams: Uint8Array,
+  xs: Float64Array,
+  ys: Float64Array,
+  claims: Uint8Array,
+  self: number,
+): number {
+  const myTeam = teams[self];
+  const x = xs[self];
+  const y = ys[self];
+  let best = -1;
+  let bestScore = Infinity;
+  for (let i = 0; i < capacity; i++) {
+    if (i === self || slotState[i] !== SLOT_ACTIVE || teams[i] === myTeam) continue;
+    const dx = xs[i] - x;
+    const dy = (ys[i] - y) * VERTICAL_COST;
+    const score = (dx * dx + dy * dy) * (1 + claims[i] * CLAIM_PENALTY);
+    if (score < bestScore) {
+      bestScore = score;
+      best = i;
+    }
+  }
+  return best;
+}
+
+/** Cuánto encarece cada compañero que ya eligió a ese rival. */
+const CLAIM_PENALTY = 2.5;
+
+/**
+ * Separación entre compañeros: -1, 0 o 1 según haya que correrse.
+ *
+ * Es steering, no física: empujar con impulsos a los del propio equipo se ve
+ * como un choque y arruina el knockback del rival. Acá sólo se le suma una
+ * intención de correrse al costado.
+ */
+export const TEAMMATE_SPACING = 1.15;
+
+export function separation(
+  capacity: number,
+  slotState: Uint8Array,
+  teams: Uint8Array,
+  xs: Float64Array,
+  ys: Float64Array,
+  self: number,
+): number {
+  const myTeam = teams[self];
+  let push = 0;
+  for (let i = 0; i < capacity; i++) {
+    if (i === self || slotState[i] !== SLOT_ACTIVE || teams[i] !== myTeam) continue;
+    const dx = xs[self] - xs[i];
+    if (Math.abs(dx) > TEAMMATE_SPACING) continue;
+    if (Math.abs(ys[self] - ys[i]) > TEAMMATE_SPACING * 2) continue;
+    push += dx >= 0 ? 1 : -1;
+  }
+  return push === 0 ? 0 : push > 0 ? 1 : -1;
+}
+
 export interface JumpContext {
   grounded: boolean;
   /** Altura del objetivo menos la propia. Positivo = está arriba. */
