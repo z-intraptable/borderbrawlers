@@ -14,12 +14,25 @@ React Three Fiber v9 + Rapier, WebGL, presupuesto de frame de 16,6 ms.
 |---|--------|--------|
 | 1 | `src/types/binance.ts` | listo, verificado |
 | 2 | `src/net/feedCore.ts` + `src/net/useBinanceFeed.ts` | listo, verificado |
-| 3 | `src/scene/OrderBookWalls.tsx` | pendiente |
-| 4 | `src/scene/BrawlerPool.tsx` | pendiente |
-| 5 | `src/scene/DynamicCamera.tsx` | pendiente |
-| 6 | `src/scene/BorderBrawlersScene.tsx` | pendiente |
-| 7 | `src/BorderBrawlers.tsx` | pendiente |
+| 3 | `src/scene/OrderBookWalls.tsx` | listo |
+| 4 | `src/scene/BrawlerPool.tsx` | listo |
+| 5 | `src/scene/DynamicCamera.tsx` + `stageFocus.ts` | listo |
+| 6 | `src/scene/BorderBrawlersScene.tsx` | listo |
+| 7 | `src/BorderBrawlers.tsx` | listo |
 | 8 | `src/mock/mockFeed.ts` | listo, verificado |
+
+Ver `CLAUDE.md` para el contexto completo: decisiones cerradas, invariantes del
+código, y los pendientes.
+
+```bash
+npm run dev
+# http://localhost:5173/?source=mock&scenario=normal
+```
+
+Parámetros por query string: `?source=` (`mock` | `binance-direct` |
+`vps-replay` | `vps-relay`), `?scenario=` (`calm` | `normal` | `volatile` |
+`stress`), `?symbol=`, `?vps=`, `?low`, y `?probe` para el banco de pruebas del
+feed sin 3D.
 
 `src/dev/FeedProbe.tsx` es un banco de pruebas temporal: drena la cola con rAF y
 muestra el libro en texto, para validar el camino de datos antes de que exista

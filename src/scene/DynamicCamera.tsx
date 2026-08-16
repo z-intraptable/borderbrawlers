@@ -22,8 +22,16 @@ const IDLE_HALF_WIDTH = STAGE_HALF_WIDTH + 1.5;
 const IDLE_HALF_HEIGHT = 5.5;
 const IDLE_CENTER_Y = STAGE_FLOOR_Y + 2.4;
 
-const ZOOM_MIN = 0.35;
-const ZOOM_MAX = 3.5;
+/**
+ * El zoom NO se clampea directo: en R3F una cámara ortográfica tiene el
+ * frustum en unidades de píxel (`camera.right === size.width / 2`), así que un
+ * zoom "razonable" ronda 50–100 y depende de la resolución. Lo que se clampea
+ * es cuánto mundo se ve, que es independiente de la pantalla.
+ */
+const MIN_VIEW_HALF_WIDTH = 4;
+const MAX_VIEW_HALF_WIDTH = STAGE_HALF_WIDTH + 3;
+const MIN_VIEW_HALF_HEIGHT = 2.6;
+const MAX_VIEW_HALF_HEIGHT = 9;
 
 /** Lambda de `damp`: más alto, más rápido. Separados a propósito. */
 const ZOOM_LAMBDA = 2.6;
@@ -75,11 +83,11 @@ export function DynamicCamera({ focus, enabled = true }: DynamicCameraProps): nu
     targetX = THREE.MathUtils.clamp(targetX, -PAN_LIMIT_X, PAN_LIMIT_X);
     targetY = THREE.MathUtils.clamp(targetY, PAN_LIMIT_Y_MIN, PAN_LIMIT_Y_MAX);
 
-    const targetZoom = THREE.MathUtils.clamp(
-      Math.min(frustumHalfW / needHalfW, frustumHalfH / needHalfH),
-      ZOOM_MIN,
-      ZOOM_MAX,
-    );
+    needHalfW = THREE.MathUtils.clamp(needHalfW, MIN_VIEW_HALF_WIDTH, MAX_VIEW_HALF_WIDTH);
+    needHalfH = THREE.MathUtils.clamp(needHalfH, MIN_VIEW_HALF_HEIGHT, MAX_VIEW_HALF_HEIGHT);
+
+    // El menor de los dos: hay que satisfacer ancho Y alto.
+    const targetZoom = Math.min(frustumHalfW / needHalfW, frustumHalfH / needHalfH);
 
     camera.position.x = THREE.MathUtils.damp(camera.position.x, targetX, PAN_LAMBDA, dt);
     camera.position.y = THREE.MathUtils.damp(camera.position.y, targetY, PAN_LAMBDA, dt);
