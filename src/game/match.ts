@@ -93,6 +93,13 @@ const MELEE_STUN = 0.12;
 /** Separación del cuerpo a cuerpo. Alcanza para no solaparse, no para lanzar. */
 const MELEE_NUDGE = 1.6;
 const CONTACT = 0.85;
+/**
+ * Distancia de guardia. Apenas menor que `CONTACT` para que el cuerpo a cuerpo
+ * siga saltando: si fuera mayor se quedarían mirándose sin llegar a pegarse.
+ */
+const ENGAGE_RANGE = 0.78;
+/** Cuánto manda la separación cuando ya no hay que cerrar distancia. */
+const SPACING_GAIN = 0.55;
 /** Polvo mínimo de un aterrizaje, y a qué velocidad de caída se satura. */
 const LANDING_SOFT = 0.35;
 const LANDING_FULL = 18;
@@ -371,7 +378,17 @@ export function stepMatch(
       const brake = shouldBrakeAtLedge(groundAhead, dx, dir);
       const spread = separation(CAPACITY, m.slot, m.team, m.x, m.y, i);
       const boost = m.team[i] === TEAM_GREEN ? greenBoost : redBoost;
-      const desired = brake ? 0 : (dir + spread * 0.5) * RUN_SPEED * boost;
+
+      // Distancia de combate: adentro del alcance del golpe se deja de cerrar y
+      // se pelea ahí. Sin esto cada uno camina HACIA ADENTRO del rival, el
+      // cuerpo a cuerpo los separa 1,6 u/s y ellos vuelven a entrar a 3,6 — el
+      // resultado era los seis apilados en el mismo punto del escenario. Con
+      // una distancia de guardia, el que ya llegó cede el paso al compañero y
+      // la pelea se reparte a lo ancho.
+      const closing = Math.abs(dx) > ENGAGE_RANGE;
+      const desired = brake ? 0
+        : closing ? (dir + spread * 0.5) * RUN_SPEED * boost
+          : spread * RUN_SPEED * SPACING_GAIN;
 
       m.vx[i] = grounded ? desired : m.vx[i] + (desired - m.vx[i]) * AIR_CONTROL;
       if (Math.abs(m.vx[i]) > 0.4) m.facing[i] = m.vx[i] >= 0 ? 1 : -1;

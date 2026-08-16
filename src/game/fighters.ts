@@ -180,13 +180,20 @@ export function pickTarget(
 const CLAIM_PENALTY = 2.5;
 
 /**
- * Separación entre compañeros: -1, 0 o 1 según haya que correrse.
+ * Separación entre compañeros: cuánto conviene correrse al costado, de -1 a 1.
  *
  * Es steering, no física: empujar con impulsos a los del propio equipo se ve
  * como un choque y arruina el knockback del rival. Acá sólo se le suma una
  * intención de correrse al costado.
+ *
+ * **Es continua, no ±1.** La versión anterior devolvía tres valores, y sumada a
+ * una persecución que vale ±1 nunca podía ganarle: lo más que hacía era reducir
+ * a la mitad la velocidad de acercamiento. El resultado era que los seis
+ * peleadores terminaban apilados en el mismo punto de la plataforma central. Con
+ * la urgencia proporcional a lo encimados que están, el que tiene a alguien
+ * pegado se corre de verdad y el que está a distancia cómoda no se mueve.
  */
-export const TEAMMATE_SPACING = 1.15;
+export const TEAMMATE_SPACING = 1.6;
 
 export function separation(
   capacity: number,
@@ -201,11 +208,16 @@ export function separation(
   for (let i = 0; i < capacity; i++) {
     if (i === self || slotState[i] !== SLOT_ACTIVE || teams[i] !== myTeam) continue;
     const dx = xs[self] - xs[i];
-    if (Math.abs(dx) > TEAMMATE_SPACING) continue;
+    const gap = Math.abs(dx);
+    if (gap > TEAMMATE_SPACING) continue;
     if (Math.abs(ys[self] - ys[i]) > TEAMMATE_SPACING * 2) continue;
-    push += dx >= 0 ? 1 : -1;
+    // Superpuestos exactos: el signo de dx no dice nada y los dos empujarían
+    // para el mismo lado, así que no se separarían nunca. El índice de slot
+    // desempata, que es arbitrario pero consistente.
+    const dir = gap < 1e-6 ? (self > i ? 1 : -1) : (dx >= 0 ? 1 : -1);
+    push += dir * (1 - gap / TEAMMATE_SPACING);
   }
-  return push === 0 ? 0 : push > 0 ? 1 : -1;
+  return push > 1 ? 1 : push < -1 ? -1 : push;
 }
 
 export interface JumpContext {

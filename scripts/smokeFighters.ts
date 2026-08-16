@@ -18,8 +18,10 @@ import {
   momentumBoost,
   nearestEnemy,
   platformIndexAt,
+  separation,
   shouldBrakeAtLedge,
   teamMomentum,
+  TEAMMATE_SPACING,
   weightFor,
   wantsJump,
   GROWTH_COOLDOWN,
@@ -193,6 +195,47 @@ console.log('\n== gigantismo ==');
 
   check('el super pega más fuerte de cerca', superForce(0) > superForce(SUPER_RADIUS));
   check('y en el borde del radio todavía pega', superForce(SUPER_RADIUS) > 0);
+}
+
+console.log('\n== separación entre compañeros ==');
+{
+  // Seis slots: 0-2 verdes, 3-5 rojos. Sólo cuenta el propio equipo.
+  const slots = new Uint8Array([SLOT_ACTIVE, SLOT_ACTIVE, SLOT_ACTIVE, SLOT_ACTIVE, SLOT_FREE, SLOT_FREE]);
+  const teams = new Uint8Array([TEAM_GREEN, TEAM_GREEN, TEAM_GREEN, TEAM_RED, TEAM_RED, TEAM_RED]);
+  const mk = (...values: number[]): Float64Array => Float64Array.from(values);
+
+  const far = separation(6, slots, teams, mk(0, 9, -9, 0.1, 0, 0), mk(0, 0, 0, 0, 0, 0), 0);
+  check('con los compañeros lejos no se corre', far === 0, `${far}`);
+
+  const right = separation(6, slots, teams, mk(0, -0.4, -9, 0, 0, 0), mk(0, 0, 0, 0, 0, 0), 0);
+  check('con un compañero a la izquierda se corre a la derecha', right > 0, `${right}`);
+
+  const left = separation(6, slots, teams, mk(0, 0.4, -9, 0, 0, 0), mk(0, 0, 0, 0, 0, 0), 0);
+  check('y al revés', left < 0, `${left}`);
+
+  // Lo que la versión de ±1 no podía expresar y es todo el punto del cambio.
+  const close = separation(6, slots, teams, mk(0, -0.2, -9, 0, 0, 0), mk(0, 0, 0, 0, 0, 0), 0);
+  const loose = separation(6, slots, teams, mk(0, -1.4, -9, 0, 0, 0), mk(0, 0, 0, 0, 0, 0), 0);
+  check('encimado empuja más que a distancia cómoda', close > loose, `${close} > ${loose}`);
+  check('justo en el límite no empuja nada',
+    separation(6, slots, teams, mk(0, -TEAMMATE_SPACING, -9, 0, 0, 0), mk(0, 0, 0, 0, 0, 0), 0) === 0);
+
+  // Sin desempate los dos empujarían para el mismo lado y no se separarían.
+  const xs = mk(0, 0, -9, 0, 0, 0);
+  const ys = mk(0, 0, 0, 0, 0, 0);
+  const a = separation(6, slots, teams, xs, ys, 0);
+  const b = separation(6, slots, teams, xs, ys, 1);
+  check('superpuestos exactos se separan en sentidos opuestos', a * b < 0, `${a} vs ${b}`);
+
+  const rival = separation(6, slots, teams, mk(0, 9, -9, 0.1, 0, 0), mk(0, 0, 0, 0, 0, 0), 0);
+  check('un rival encima no cuenta como compañero', rival === 0, `${rival}`);
+
+  const above = separation(6, slots, teams, mk(0, 0.2, -9, 0, 0, 0), mk(0, 99, 0, 0, 0, 0), 0);
+  check('un compañero muy por arriba tampoco', above === 0, `${above}`);
+
+  // Dos compañeros encimados del mismo lado suman 1,8 sin acotar.
+  const piled = separation(6, slots, teams, mk(0, -0.1, -0.2, 0, 0, 0), mk(0, 0, 0, 0, 0, 0), 0);
+  check('varios encimados del mismo lado no pasan de 1', piled === 1, `${piled}`);
 }
 
 console.log(failures === 0 ? '\nTODO OK\n' : `\n${failures} FALLOS\n`);
