@@ -93,6 +93,9 @@ const MELEE_STUN = 0.12;
 /** Separación del cuerpo a cuerpo. Alcanza para no solaparse, no para lanzar. */
 const MELEE_NUDGE = 1.6;
 const CONTACT = 0.85;
+/** Polvo mínimo de un aterrizaje, y a qué velocidad de caída se satura. */
+const LANDING_SOFT = 0.35;
+const LANDING_FULL = 18;
 const SPAWN_Y = 8;
 const SPAWN_X = 5.5;
 const MAX_SPAWNS_PER_STEP = 4;
@@ -386,6 +389,11 @@ export function stepMatch(
       }
     }
 
+    // La velocidad de caída ANTES de resolver el contacto: después del paso ya
+    // es cero y no queda forma de saber si el aterrizaje fue un saltito o una
+    // caída desde arriba de todo. Es lo que gradúa el polvo.
+    const fallSpeed = m.vy[i] < 0 ? -m.vy[i] : 0;
+
     physicsStep(
       m.skyline, m.x[i], m.y[i], m.vx[i], m.vy[i],
       FIGHTER_HALF_WIDTH * m.scale[i], FIGHTER_HALF_HEIGHT * m.scale[i],
@@ -397,7 +405,9 @@ export function stepMatch(
     m.vy[i] = move.vy;
     m.grounded[i] = move.grounded ? 1 : 0;
     if (move.grounded) m.jumps[i] = MAX_JUMPS;
-    if (move.landed) emit(m.events, EVENT_LAND, m.x[i], m.y[i], 1, m.team[i]);
+    if (move.landed) {
+      emit(m.events, EVENT_LAND, m.x[i], m.y[i], LANDING_SOFT + fallSpeed / LANDING_FULL, m.team[i]);
+    }
   }
 
   /* --- habilidades comunes -------------------------------------------- */

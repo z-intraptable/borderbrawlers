@@ -20,3 +20,6 @@ recordings/
 *.ndjson.gz
 
 tsconfig.tsbuildinfo
+
+# Capturas del script de verificación headless
+shots/
