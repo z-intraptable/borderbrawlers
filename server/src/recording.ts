@@ -220,3 +220,78 @@ export async function loadWindow(
   frames.sort((a, b) => a.t - b.t);
   return { frames, truncated, skipped };
 }
+
+/* ------------------------------------------------------------------ */
+/* Retención                                                           */
+/* ------------------------------------------------------------------ */
+
+export interface RetentionPolicy {
+  /** Instante de referencia, en ms epoch. */
+  nowMs: number;
+  /** Antigüedad máxima en ms. 0 = sin límite de edad. */
+  keepMs: number;
+  /** Tamaño máximo total en bytes. 0 = sin límite de tamaño. */
+  maxBytes: number;
+  /** Archivos que NO se pueden borrar: las horas que se están escribiendo. */
+  protect: ReadonlySet<string>;
+}
+
+export interface PrunePlan {
+  /** A borrar, de más viejo a más nuevo. */
+  remove: RecordingFile[];
+  /** Bytes que quedan después de borrar. */
+  keptBytes: number;
+  /**
+   * `true` si se agotó lo que se podía borrar y el total sigue por encima del
+   * tope. Pasa cuando la hora en curso sola ya no entra: no es una condición
+   * que se pueda resolver borrando, hay que avisar.
+   */
+  overBudget: boolean;
+}
+
+/**
+ * Qué borrar para respetar la política, sin tocar disco.
+ *
+ * Dos topes, y corta el que llegue primero: la edad limpia lo que ya no sirve
+ * para perfilar, y el tamaño es la red de contención para que una racha de
+ * volatilidad no llene el VPS igual. Siempre se borra lo más viejo primero, y
+ * nunca la hora que se está escribiendo.
+ *
+ * El presupuesto es COMPARTIDO entre símbolos: el disco es uno solo, así que
+ * grabar dos pares no puede duplicar el espacio ocupado en silencio.
+ */
+export function planPrune(files: readonly RecordingFile[], policy: RetentionPolicy): PrunePlan {
+  // Orden determinista aun con dos símbolos en la misma hora.
+  const sorted = [...files].sort((a, b) => a.hourMs - b.hourMs || a.file.localeCompare(b.file));
+  const remove: RecordingFile[] = [];
+  let total = sorted.reduce((sum, f) => sum + f.bytes, 0);
+
+  const removable = (f: RecordingFile): boolean => !policy.protect.has(f.file);
+
+  if (policy.keepMs > 0) {
+    const cutoff = policy.nowMs - policy.keepMs;
+    for (const f of sorted) {
+      // Se compara contra el FIN de la hora: un archivo de las 14:00 con 7 días
+      // de retención sigue conteniendo datos válidos hasta las 15:00.
+      if (f.hourMs + HOUR_MS >= cutoff || !removable(f)) continue;
+      remove.push(f);
+      total -= f.bytes;
+    }
+  }
+
+  if (policy.maxBytes > 0 && total > policy.maxBytes) {
+    for (const f of sorted) {
+      if (total <= policy.maxBytes) break;
+      if (remove.includes(f) || !removable(f)) continue;
+      remove.push(f);
+      total -= f.bytes;
+    }
+  }
+
+  remove.sort((a, b) => a.hourMs - b.hourMs || a.file.localeCompare(b.file));
+  return {
+    remove,
+    keptBytes: total,
+    overBudget: policy.maxBytes > 0 && total > policy.maxBytes,
+  };
+}

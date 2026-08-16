@@ -15,7 +15,9 @@ import {
   fileNameFor,
   hourStartMs,
   listRecordings,
+  planPrune,
 } from './recording';
+import type { RecordingFile } from './recording';
 import { flag, numberFlag } from './args';
 
 /**
@@ -30,11 +32,27 @@ import { flag, numberFlag } from './args';
  * a las 3 de la mañana con un hueco de seis horas en la grabación.
  */
 
+/**
+ * Retención por defecto: 10 GB, o 30 días, lo que llegue primero.
+ *
+ * El límite real es el tamaño y está puesto a propósito: 10 GB a 0,36 GB/día
+ * comprimidos son ~28 días, y ~23 si el mercado se pone volátil (0,44 GB/día).
+ * O sea que la cinta se pisa sola cada tres o cuatro semanas y el disco del VPS
+ * nunca pasa de 10 GB, sin que haya que intervenir.
+ *
+ * Los 30 días son el tope de edad nominal. Casi nunca va a morder —el tamaño
+ * llega primero— pero deja el techo explícito para cuando el mercado esté tan
+ * quieto que 10 GB alcancen para más de un mes.
+ */
+const DEFAULT_KEEP_DAYS = 30;
+const DEFAULT_MAX_GB = 10;
+
 interface Options {
   dir: string;
   symbols: string[];
   host: string;
   keepDays: number;
+  maxBytes: number;
 }
 
 function parseOptions(argv: string[]): Options {
@@ -42,7 +60,8 @@ function parseOptions(argv: string[]): Options {
     dir: flag(argv, 'dir', 'recordings'),
     symbols: flag(argv, 'symbols', 'btcusdt').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
     host: flag(argv, 'host', BINANCE_DATA_HOST),
-    keepDays: numberFlag(argv, 'keep-days', 0),
+    keepDays: numberFlag(argv, 'keep-days', DEFAULT_KEEP_DAYS),
+    maxBytes: Math.round(numberFlag(argv, 'max-gb', DEFAULT_MAX_GB) * 1e9),
   };
 }
 
@@ -63,6 +82,11 @@ class SymbolWriter {
   bytes = 0;
 
   constructor(private readonly dir: string, private readonly symbol: string) {}
+
+  /** El archivo que se está escribiendo ahora. Nunca se puede podar. */
+  get activeFile(): string | null {
+    return this.hour < 0 ? null : fileNameFor(this.symbol, this.hour, false);
+  }
 
   write(t: number, payload: string): void {
     const hour = hourStartMs(t);
@@ -86,8 +110,15 @@ class SymbolWriter {
     this.pending = this.pending.then(async () => {
       await new Promise<void>((resolve) => previous.end(resolve));
       await compress(this.dir, previousName);
+      // Podar acá y no sólo en el timer: el cambio de hora es el único momento
+      // en que el disco pega un salto, y es también cuando el archivo recién
+      // comprimido ya tiene su tamaño final.
+      await this.onHourClosed?.();
     });
   }
+
+  /** Lo setea `main` una vez armado el conjunto de writers. */
+  onHourClosed: (() => Promise<void>) | null = null;
 
   async close(): Promise<void> {
     const stream = this.stream;
@@ -113,16 +144,35 @@ async function compress(dir: string, name: string): Promise<void> {
   }
 }
 
-/** Borra grabaciones más viejas que `keepDays`. 0 = no borrar nunca. */
-async function prune(dir: string, symbols: string[], keepDays: number): Promise<void> {
-  if (keepDays <= 0) return;
-  const cutoff = Date.now() - keepDays * 24 * HOUR_MS;
-  for (const symbol of symbols) {
-    for (const rec of await listRecordings(dir, symbol)) {
-      if (rec.hourMs + HOUR_MS >= cutoff) continue;
-      await rm(join(dir, rec.file), { force: true });
-      console.log(`[record] podado ${rec.file}`);
-    }
+/**
+ * Aplica la política de retención. El presupuesto es compartido entre símbolos
+ * porque el disco es uno solo.
+ */
+async function enforceRetention(opts: Options, protect: ReadonlySet<string>): Promise<void> {
+  if (opts.keepDays <= 0 && opts.maxBytes <= 0) return;
+
+  const files: RecordingFile[] = [];
+  for (const symbol of opts.symbols) files.push(...(await listRecordings(opts.dir, symbol)));
+
+  const plan = planPrune(files, {
+    nowMs: Date.now(),
+    keepMs: opts.keepDays * 24 * HOUR_MS,
+    maxBytes: opts.maxBytes,
+    protect,
+  });
+
+  for (const file of plan.remove) {
+    await rm(join(opts.dir, file.file), { force: true });
+    console.log(`[record] podado ${file.file} (${(file.bytes / 1e6).toFixed(0)} MB)`);
+  }
+  if (plan.remove.length > 0) {
+    console.log(`[record] en disco ${(plan.keptBytes / 1e9).toFixed(2)} GB de ${(opts.maxBytes / 1e9).toFixed(0)} GB`);
+  }
+  if (plan.overBudget) {
+    console.warn(
+      `[record] ATENCIÓN: ${(plan.keptBytes / 1e9).toFixed(2)} GB en disco y no queda nada podable. ` +
+      'La hora en curso sola ya no entra en el tope: subí --max-gb o bajá --keep-days.',
+    );
   }
 }
 
@@ -135,10 +185,27 @@ async function main(): Promise<void> {
     if (name.endsWith('.part')) await rm(join(opts.dir, name), { force: true });
   }
 
-  console.log(`[record] dir=${opts.dir} símbolos=${opts.symbols.join(',')} host=${opts.host}`);
+  console.log(
+    `[record] dir=${opts.dir} símbolos=${opts.symbols.join(',')} host=${opts.host} ` +
+    `retención=${opts.keepDays}d/${(opts.maxBytes / 1e9).toFixed(0)}GB`,
+  );
 
   const writers = new Map<string, SymbolWriter>();
   const clients: BinanceFeedClient[] = [];
+
+  const activeFiles = (): Set<string> => {
+    const set = new Set<string>();
+    for (const writer of writers.values()) {
+      const active = writer.activeFile;
+      if (active !== null) set.add(active);
+    }
+    return set;
+  };
+  const retain = (): Promise<void> => enforceRetention(opts, activeFiles());
+
+  // Al arrancar, antes de escribir un byte: si el proceso estuvo caído una
+  // semana, lo que hay en disco ya está fuera de política.
+  await retain();
 
   for (const symbol of opts.symbols) {
     const writer = new SymbolWriter(opts.dir, symbol);
@@ -149,6 +216,7 @@ async function main(): Promise<void> {
       onRaw: (raw) => writer.write(Date.now(), raw),
       onStatus: (status: ConnectionStatus) => console.log(`[record] ${symbol} ${status}`),
     });
+    writer.onHourClosed = retain;
     clients.push(client);
     client.start();
   }
@@ -158,7 +226,7 @@ async function main(): Promise<void> {
       const mb = writer.bytes / 1_048_576;
       console.log(`[record] ${symbol} ${writer.frames} frames ${mb.toFixed(1)} MB`);
     }
-    void prune(opts.dir, opts.symbols, opts.keepDays);
+    void retain();
   }, 10 * 60_000);
 
   let closing = false;

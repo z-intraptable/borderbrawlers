@@ -247,11 +247,13 @@ cambio en `feedCore.ts` tiene que mantener esas suites en verde.
    un disco real — por lo mismo que el punto 1.
 
    El presupuesto de disco del README viejo estaba mal y ya se corrigió: medido
-   con `npm run sizing`, un día son 0,36 GB comprimidos y **un año son ~131 GB**,
-   contra los "180 MB/día, más de un año en 80 GB" que se habían supuesto. La
-   compresión real de este formato es 5x, no 8x. Un año NO entra en el disco de
-   80 GB; `--keep-days 14` deja ~5 GB permanentes, que es lo que hace falta para
-   perfilar.
+   con `npm run sizing`, un día son 0,36 GB comprimidos y un año ~131 GB, contra
+   los "180 MB/día, más de un año en 80 GB" que se habían supuesto. La compresión
+   real de este formato es 5x, no 8x.
+
+   Por eso la retención por defecto es **10 GB o 30 días, lo que llegue primero**,
+   y el que manda es el tamaño: son ~28 días de mercado, ~23 si hay volatilidad.
+   La cinta se pisa sola y el disco nunca pasa de 10 GB.
 5. Si alguna vez se quiere `vps-relay` en vivo, hace falta `wss://` — una página
    HTTPS no puede abrir `ws://` a una IP pelada. Requiere dominio propio con
    Caddy, o un túnel de Cloudflare.

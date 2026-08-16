@@ -28,7 +28,7 @@ http://localhost:5173/?source=vps-replay&vps=ws://mi-vps:8080
 cd server
 npm install
 
-npm run record -- --dir /var/lib/borderbrawlers --symbols btcusdt --keep-days 14
+npm run record -- --dir /var/lib/borderbrawlers --symbols btcusdt
 npm run replay -- --dir /var/lib/borderbrawlers --port 8080
 
 npm test        # formato + servidor de punta a punta, sin red
@@ -43,7 +43,8 @@ npm run typecheck
 | `--dir` | `recordings` | dónde escribir |
 | `--symbols` | `btcusdt` | lista separada por comas |
 | `--host` | `wss://data-stream.binance.vision:443` | |
-| `--keep-days` | `0` | borra lo más viejo. 0 = no borrar nunca |
+| `--keep-days` | `30` | antigüedad máxima. 0 = sin límite de edad |
+| `--max-gb` | `10` | tamaño máximo total. 0 = sin límite de tamaño |
 
 Un archivo por hora UTC y por símbolo, comprimido al cerrarse:
 
@@ -101,10 +102,36 @@ El piso lo pone el libro, no los trades: `depth20@100ms` son ~1,1 KB diez veces
 por segundo, o sea ~0,95 GB/día que se pagan igual aunque no se opere. Los
 trades son lo que mueve el número entre 87 y 161 GB.
 
-En la práctica no hace falta un año. Para perfilar alcanzan unos pocos minutos
-interesantes, y `--keep-days 14` deja ~5 GB en disco de forma permanente. Si en
-algún momento hace falta archivo largo, la salida es zstd en vez de gzip o
-guardar sólo el stream de trades.
+### La cinta se pisa sola
+
+Por eso la retención por defecto es **10 GB, o 30 días, lo que llegue primero**,
+y el que manda en la práctica es el tamaño: 10 GB a 0,36 GB/día son ~28 días, y
+~23 si el mercado se pone volátil. O sea que hay siempre entre tres y cuatro
+semanas de mercado disponibles y el disco del VPS nunca pasa de 10 GB, sin que
+haya que intervenir nunca.
+
+Los dos límites se aplican juntos y corta el primero que llegue:
+
+- **Por edad** se compara contra el FIN de la hora, no contra su inicio: un
+  archivo de las 14:00 con 30 días de retención sigue teniendo datos válidos
+  hasta las 15:00.
+- **Por tamaño** se borra de más viejo a más nuevo hasta entrar en el tope.
+- **El presupuesto es del disco, no de cada símbolo.** Grabar dos pares no puede
+  duplicar el espacio ocupado en silencio.
+- **La hora que se está escribiendo nunca se borra.** Si aun así el total no
+  entra en el tope, el grabador avisa en el log en vez de quedarse callado: es
+  una condición que no se resuelve borrando.
+
+La poda corre al arrancar (por si el proceso estuvo caído), en cada cambio de
+hora —que es el único momento en que el disco pega un salto, y cuando el archivo
+recién comprimido ya tiene su tamaño final— y cada 10 minutos por las dudas.
+
+La decisión de qué borrar es una función pura, `planPrune`, y está cubierta por
+`npm test`: borrar datos es de las pocas cosas del proyecto que no se pueden
+deshacer.
+
+Si en algún momento hace falta archivo largo, la salida es zstd en vez de gzip,
+o guardar sólo el stream de trades y tirar el libro.
 
 ---
 
@@ -161,7 +188,7 @@ After=network-online.target
 Type=simple
 User=borderbrawlers
 WorkingDirectory=/opt/borderbrawlers/server
-ExecStart=/usr/bin/npx tsx src/record.ts --dir /var/lib/borderbrawlers --symbols btcusdt --keep-days 14
+ExecStart=/usr/bin/npx tsx src/record.ts --dir /var/lib/borderbrawlers --symbols btcusdt
 Restart=always
 RestartSec=5
 

@@ -113,8 +113,12 @@ Cuánto ocupa, medido con `npm run sizing` sobre el formato real:
 | volatile | 2,67 GB | 0,44 GB | 161 GB |
 
 Un año **no** entra en el disco de 80 GB del VPS: la compresión real de este
-formato es 5x, no las 8x que suponía la estimación anterior. Tampoco hace falta
-— `--keep-days 14` deja ~5 GB permanentes y alcanza de sobra para perfilar.
+formato es 5x, no las 8x que suponía la estimación anterior.
+
+Tampoco hace falta. La retención por defecto es **10 GB o 30 días, lo que llegue
+primero**, y el que manda es el tamaño: ~28 días de mercado, ~23 si hay
+volatilidad. La cinta se pisa sola, el disco nunca pasa de 10 GB, y nunca hay
+que intervenir.
 
 Y queda como salida ante bloqueo geográfico, con `vps-relay`, sin cambiar nada
 más que el flag.

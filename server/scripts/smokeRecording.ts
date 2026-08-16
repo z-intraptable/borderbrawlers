@@ -14,6 +14,7 @@ import {
   listRecordings,
   loadWindow,
   parseFileName,
+  planPrune,
 } from '../src/recording';
 
 let failures = 0;
@@ -86,6 +87,70 @@ console.log('\n== horas que cubre una ventana ==');
     hoursCovering(T0 + HOUR_MS - 1000, T0 + HOUR_MS + 1000).length === 2);
   check('tres horas dan tres', hoursCovering(T0, T0 + 2 * HOUR_MS).length === 3);
   check('un rango invertido da vacío', hoursCovering(T0 + 1000, T0).length === 0);
+}
+
+console.log('\n== retención: qué se borra y qué no ==');
+{
+  const MB = 1_000_000;
+  const now = Date.parse('2026-08-16T14:30:00.000Z');
+  const hour = (offset: number, bytes: number, symbol = 'btcusdt', gzip = true) => ({
+    symbol, hourMs: now - offset * HOUR_MS, gzip, bytes,
+    file: fileNameFor(symbol, now - offset * HOUR_MS, gzip),
+  });
+  const activo = fileNameFor('btcusdt', now, false);
+  const sinTope = { nowMs: now, keepMs: 0, maxBytes: 0, protect: new Set<string>() };
+
+  {
+    const plan = planPrune([hour(1, MB), hour(50, MB), hour(200, MB)], sinTope);
+    check('sin topes no borra nada', plan.remove.length === 0);
+  }
+  {
+    // 30 días de retención: la hora de hace 40 días se va, la de ayer no.
+    const files = [hour(24 * 40, MB), hour(24, MB), hour(1, MB)];
+    const plan = planPrune(files, { ...sinTope, keepMs: 30 * 24 * HOUR_MS });
+    check('por edad borra sólo lo que pasó el límite', plan.remove.length === 1, String(plan.remove.length));
+    check('y borra el más viejo', plan.remove[0].hourMs === files[0].hourMs);
+  }
+  {
+    // Una hora que TERMINA justo dentro del límite se conserva: todavía tiene
+    // datos válidos, aunque haya empezado antes del corte.
+    const justo = planPrune([hour(24 * 30, MB)], { ...sinTope, keepMs: 30 * 24 * HOUR_MS });
+    check('la hora del borde se conserva, se compara contra su fin', justo.remove.length === 0);
+  }
+  {
+    // El caso que importa acá: el tope de tamaño manda y la cinta se pisa sola.
+    const files = [hour(4, 4000 * MB), hour(3, 4000 * MB), hour(2, 4000 * MB), hour(1, 4000 * MB)];
+    const plan = planPrune(files, { ...sinTope, maxBytes: 10_000 * MB });
+    check('por tamaño borra los más viejos hasta entrar', plan.remove.length === 2, String(plan.remove.length));
+    check('y deja el total bajo el tope', plan.keptBytes === 8000 * MB, `${plan.keptBytes / MB} MB`);
+    check('sin quedar en falta', !plan.overBudget);
+    check('empezando por el más viejo', plan.remove[0].hourMs < plan.remove[1].hourMs);
+  }
+  {
+    const files = [hour(1, 500 * MB), { ...hour(0, 900 * MB), file: activo, gzip: false }];
+    const plan = planPrune(files, { ...sinTope, maxBytes: 100 * MB, protect: new Set([activo]) });
+    check('nunca borra la hora que se está escribiendo',
+      plan.remove.every((f) => f.file !== activo) && plan.remove.length === 1);
+    check('y avisa que quedó por encima del tope igual', plan.overBudget);
+  }
+  {
+    // El presupuesto es del disco, no de cada símbolo.
+    const files = [hour(3, 4000 * MB, 'btcusdt'), hour(3, 4000 * MB, 'ethusdt'), hour(1, 4000 * MB, 'btcusdt')];
+    const plan = planPrune(files, { ...sinTope, maxBytes: 10_000 * MB });
+    check('el presupuesto se comparte entre símbolos', plan.remove.length === 1 && plan.keptBytes === 8000 * MB);
+  }
+  {
+    const files = [hour(24 * 40, MB), hour(3, 6000 * MB), hour(1, 6000 * MB)];
+    const plan = planPrune(files, { ...sinTope, keepMs: 30 * 24 * HOUR_MS, maxBytes: 10_000 * MB });
+    check('edad y tamaño se aplican juntos, corta el que llegue primero',
+      plan.remove.length === 2 && plan.keptBytes === 6000 * MB, `${plan.remove.length} borrados`);
+  }
+  {
+    const a = planPrune([hour(3, MB, 'ethusdt'), hour(3, MB, 'btcusdt')], { ...sinTope, maxBytes: MB });
+    const b = planPrune([hour(3, MB, 'btcusdt'), hour(3, MB, 'ethusdt')], { ...sinTope, maxBytes: MB });
+    check('el orden de entrada no cambia el plan',
+      a.remove.map((f) => f.file).join() === b.remove.map((f) => f.file).join());
+  }
 }
 
 /* ------------------------- lectura en disco ------------------------- */
