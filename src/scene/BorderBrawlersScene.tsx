@@ -16,6 +16,9 @@ import { PerfHud } from '../dev/PerfHud';
 
 const VOID_DARK = '#0B0F19';
 
+/** Niveles de mipmap del Bloom. Cada uno cuesta 2 draw calls. Ver abajo. */
+const BLOOM_LEVELS = 4;
+
 export interface BorderBrawlersSceneProps {
   book: ProcessedBook;
   stats: FeedStats;
@@ -68,14 +71,22 @@ export function BorderBrawlersScene(props: BorderBrawlersSceneProps): React.JSX.
       {/* Ruta HDR: los materiales van con toneMapped={false} y los colores por
           instancia se escriben fuera de 0–1. El umbral por encima de 1,0 hace
           que sólo esos brillen, sin SelectiveBloom ni capas.
-          multisampling por defecto es 8: carísimo y redundante con bloom. */}
+          multisampling por defecto es 8: carísimo y redundante con bloom.
+
+          `levels` es el que decide si se cumple el criterio de la Parte E. El
+          mipmap blur hace un paso por nivel bajando y otro subiendo, así que el
+          default de 8 cuesta ~17 draw calls de post: medido, 19 en total con la
+          escena, contra un techo de 12. Con 4 niveles son 11, y el halo sigue
+          alcanzando porque lo que brilla son barras finas, no superficies
+          grandes. */}
       {!lowQuality && (
-        <EffectComposer multisampling={0} enabled={!lowQuality}>
+        <EffectComposer multisampling={0}>
           <Bloom
             intensity={1.2}
             luminanceThreshold={1.0}
             luminanceSmoothing={0.03}
             mipmapBlur
+            levels={BLOOM_LEVELS}
           />
         </EffectComposer>
       )}

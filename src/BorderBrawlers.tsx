@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import type { FeedSource } from './types/binance';
 import type { MockScenario } from './mock/mockFeed';
+import type { FeedStats } from './net/feedCore';
 import { useBinanceFeed } from './net/useBinanceFeed';
 import { BorderBrawlersScene } from './scene/BorderBrawlersScene';
 import { detectLowQuality } from './quality';
@@ -19,6 +20,14 @@ const BEAR = '#FF0055';
 const GOLD = '#FFD700';
 const VOID_DARK = '#0B0F19';
 const DIM = '#6b7585';
+
+/**
+ * Cada cuánto el HUD lee `stats`. `stats` es un objeto mutable escrito fuera de
+ * React: nadie re-renderiza al llegar un trade, así que sin este muestreo el
+ * HUD queda congelado en los valores del montaje. 4 Hz es suficiente para un
+ * texto que se lee con los ojos y no toca el camino de datos de mercado.
+ */
+const HUD_REFRESH_MS = 250;
 
 export interface BorderBrawlersProps {
   symbol?: string;
@@ -82,9 +91,7 @@ export function BorderBrawlers(props: BorderBrawlersProps): React.JSX.Element {
           symbol={symbol}
           source={feed.source}
           status={feed.status}
-          mid={feed.stats.mid}
-          trades={feed.stats.trades}
-          whales={feed.stats.whales}
+          stats={feed.stats}
           lowQuality={lowQuality}
           onToggleQuality={() => setLowQuality((v) => !v)}
         />
@@ -97,15 +104,17 @@ interface HudProps {
   symbol: string;
   source: string;
   status: string;
-  mid: number;
-  trades: number;
-  whales: number;
+  /** Mutable, escrito fuera de React. Se muestrea; nunca se suscribe. */
+  stats: FeedStats;
   lowQuality: boolean;
   onToggleQuality: () => void;
 }
 
 function Hud(p: HudProps): React.JSX.Element {
   const statusColor = p.status === 'live' ? BULL : p.status === 'error' ? BEAR : GOLD;
+  const mid = useSampled(p.stats, (s) => s.mid);
+  const trades = useSampled(p.stats, (s) => s.trades);
+  const whales = useSampled(p.stats, (s) => s.whales);
   return (
     <div
       style={{
@@ -130,12 +139,12 @@ function Hud(p: HudProps): React.JSX.Element {
       </strong>
       <span style={{ color: DIM }}>{p.symbol.toUpperCase()}</span>
       <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-        {p.mid > 0 ? p.mid.toFixed(2) : '—'}
+        {mid > 0 ? mid.toFixed(2) : '—'}
       </span>
       <span style={{ color: statusColor }}>● {p.status}</span>
       <span style={{ color: DIM }}>{p.source}</span>
-      <span style={{ color: DIM }}>{p.trades} trades</span>
-      <span style={{ color: GOLD }}>{p.whales} 🐋</span>
+      <span style={{ color: DIM }}>{trades} trades</span>
+      <span style={{ color: GOLD }}>{whales} 🐋</span>
       <button
         onClick={p.onToggleQuality}
         style={{
@@ -152,4 +161,25 @@ function Hud(p: HudProps): React.JSX.Element {
       </button>
     </div>
   );
+}
+
+/**
+ * Muestrea un número de un objeto mutable a `HUD_REFRESH_MS` y sólo dispara un
+ * re-render cuando ese número efectivamente cambió. Es lo contrario de
+ * suscribirse: el productor no sabe que existe React.
+ */
+function useSampled(stats: FeedStats, read: (s: FeedStats) => number): number {
+  const [value, setValue] = useState(() => read(stats));
+  const readRef = useRef(read);
+  readRef.current = read;
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      const next = readRef.current(stats);
+      setValue((prev) => (prev === next ? prev : next));
+    }, HUD_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [stats]);
+
+  return value;
 }

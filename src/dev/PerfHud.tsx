@@ -10,6 +10,18 @@ import { useFrame, useThree } from '@react-three/fiber';
  *
  * Escribe en el DOM por `ref`, no por estado: montar el medidor no puede
  * costar re-renders del árbol que está midiendo.
+ *
+ * Dos cosas sin las cuales el número medido no es el número del criterio:
+ *
+ * 1. `gl.info.autoReset` se apaga. Con `autoReset` en true, three resetea los
+ *    contadores en CADA `render()`, y `EffectComposer` hace uno por paso: lo
+ *    que quedaba para leer era el último quad fullscreen del Bloom, o sea
+ *    "1 draw call, 1 triángulo". Apagándolo, los contadores acumulan la escena
+ *    y todos los pasos de post, y se resetean acá una vez por frame.
+ * 2. El delta se lee crudo, sin el clamp de 0,1 s que usan los demás
+ *    `useFrame`. Ese clamp existe para que la física no explote tras un
+ *    hipo; aplicado al medidor convertía cualquier frame de 300 ms en un
+ *    prolijo y falso 100.
  */
 
 export interface PerfHudProps {
@@ -64,16 +76,27 @@ export function PerfHud({ maxDrawCalls = 12, refreshMs = 250 }: PerfHudProps): n
     };
   }, []);
 
+  useEffect(() => {
+    const previous = gl.info.autoReset;
+    gl.info.autoReset = false;
+    return () => {
+      gl.info.autoReset = previous;
+    };
+  }, [gl]);
+
   useFrame((_, delta) => {
-    const dt = Math.min(delta, 0.1);
-    const ms = dt * 1000;
+    const ms = delta * 1000;
     frames.current++;
     elapsed.current += ms;
     if (ms > worstFrame.current) worstFrame.current = ms;
 
+    // `useFrame` corre ANTES del render de este frame, así que lo que hay en
+    // `info` es el frame anterior completo: escena más todos los pasos de post.
     const info = gl.info;
     const calls = info.render.calls;
+    const triangles = info.render.triangles;
     if (calls > worstCalls.current) worstCalls.current = calls;
+    info.reset();
 
     if (elapsed.current < refreshMs || host.current === null) return;
 
@@ -90,7 +113,7 @@ export function PerfHud({ maxDrawCalls = 12, refreshMs = 250 }: PerfHudProps): n
     set('peor ms', worstFrame.current.toFixed(2), worstFrame.current <= 16.6 ? OK : BAD);
     set('draw calls', `${calls} / ${maxDrawCalls}`, calls <= maxDrawCalls ? OK : BAD);
     set('peor calls', String(worstCalls.current), worstCalls.current <= maxDrawCalls ? OK : BAD);
-    set('triángulos', info.render.triangles.toLocaleString('es-AR'));
+    set('triángulos', triangles.toLocaleString('es-AR'));
     set('programas', String(info.programs?.length ?? 0));
     set('texturas', String(info.memory.textures));
     set('geometrías', String(info.memory.geometries));

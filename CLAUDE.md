@@ -12,34 +12,45 @@ repo). Este archivo resume lo que hace falta para seguir trabajando acá.
 
 ## Estado
 
-Los 8 módulos están escritos. `tsc --noEmit` limpio en strict hasta el módulo 5;
-los módulos 6 y 7 se escribieron al final de la sesión y **todavía no se
-compilaron ni se ejecutaron nunca**. Ese es el primer paso.
+Los 8 módulos están escritos y **la escena corre entera**. `tsc --noEmit` limpio
+en strict, `npm test` en verde, `npm run build` sin errores. Los módulos 6 y 7
+se ejecutaron por primera vez y se corrigieron los defectos que aparecieron al
+verlos andar (ver abajo).
 
 | # | Archivo | Estado |
 |---|---------|--------|
 | 1 | `src/types/binance.ts` | verificado |
 | 2 | `src/net/feedCore.ts` + `src/net/useBinanceFeed.ts` | verificado, 40 asserts |
-| 3 | `src/scene/OrderBookWalls.tsx` | compila; sin correr |
-| 4 | `src/scene/BrawlerPool.tsx` | compila; sin correr |
-| 5 | `src/scene/DynamicCamera.tsx` + `src/scene/stageFocus.ts` | compila; sin correr |
-| 6 | `src/scene/BorderBrawlersScene.tsx` | **sin compilar** |
-| 7 | `src/BorderBrawlers.tsx` | **sin compilar** |
+| 3 | `src/scene/OrderBookWalls.tsx` | corre |
+| 4 | `src/scene/BrawlerPool.tsx` | corre |
+| 5 | `src/scene/DynamicCamera.tsx` + `src/scene/stageFocus.ts` | corre |
+| 6 | `src/scene/BorderBrawlersScene.tsx` | corre |
+| 7 | `src/BorderBrawlers.tsx` | corre |
 | 8 | `src/mock/mockFeed.ts` | verificado, 20 asserts |
 
 Auxiliares: `src/quality.ts` (`detectLowQuality`), `src/dev/PerfHud.tsx`
-(medidor propio), `src/dev/FeedProbe.tsx` (banco de pruebas del feed, **se borra
-cuando el módulo 7 esté andando**).
+(medidor propio). `src/dev/FeedProbe.tsx` se borró: el módulo 7 anda y el banco
+de pruebas del feed ya no aportaba nada que la escena no muestre.
 
-### Primer paso al retomar
+### Cómo arrancar
 
 ```bash
+npm install
 npm run typecheck
 npm run dev        # http://localhost:5173/?source=mock&scenario=normal
 ```
 
 Empezar con `?source=mock` para no depender del mercado. Después
-`?source=binance-direct`. `?probe` abre el banco de pruebas del feed sin 3D.
+`?source=binance-direct`.
+
+Query params: `source`, `scenario`, `symbol`, `vps`, y `quality=high|low`
+(o `?low`). Los valores se validan contra la lista permitida: antes se
+casteaban a ciegas y un `?source=binancedirect` terminaba abriendo un
+WebSocket a la URL literal `undefined`.
+
+`quality=high` existe para poder medir la ruta con Bloom en una máquina que
+`detectLowQuality()` clasifica como lenta; sin eso el criterio de draw calls
+no se puede verificar en un headless de 2 núcleos.
 
 ---
 
@@ -95,6 +106,12 @@ sistemáticamente al revés.
 const side: 'buy' | 'sell' = trade.m ? 'sell' : 'buy';
 ```
 
+El color del personaje **es** esa regla hecha visible: `buy` verde, `sell` rojo,
+ballena en dorado fuera del rango 0–1 para que la levante el Bloom. Se pinta con
+un `setColorAt` por spawn y un solo `needsUpdate` al final del frame. Hasta la
+auditoría los personajes salían todos dorados y el lado no se veía en ningún
+lado de la escena.
+
 **Ballenas por mediana móvil**, ventana de 200 trades, `size > mediana * 8`, sin
 clasificar hasta tener 20 muestras. Nunca un umbral fijo.
 
@@ -115,6 +132,14 @@ admite un collider por instancia. El libro son 40 instancias en 1 draw call
 remontar componentes para cambiar una forma.
 
 **Ningún collider más fino que 0,2 unidades** — los finos causan tunneling.
+
+**Los acumuladores de sub-frecuencia no se resetean en los early return.** El
+libro se redibuja sólo cuando cambia `lastUpdateId`, y la física va a 4 Hz con
+un acumulador propio. Resetear ese acumulador en el return de "no hay snapshot
+nuevo" descarta el tick pendiente en 5 de cada 6 frames — 60 Hz de render contra
+10 Hz de snapshots — y los muros terminan redimensionándose 0,7 veces por
+segundo en vez de 4. El síntoma no es un error: es física que va atrasada
+respecto de lo que se ve.
 
 **`interpolate`, no `interpolation`.** El README de rapier lo escribe mal en un
 ejemplo; React no valida props desconocidos, así que el error es silencioso.
@@ -151,11 +176,24 @@ Verificados leyendo el código fuente de la versión fijada, no la documentació
 
 - `renderer.info.render.calls` **≤ 12** con 50 personajes activos y el libro
   completo. `PerfHud` lo muestra en vivo y se pone rojo al pasarse.
+  Medido con `?source=mock&scenario=stress`: **11 en calidad alta** (escena más
+  todos los pasos del Bloom) y **2 en calidad baja**.
+
+  Dos cosas hacían que ese número fuera mentira y están arregladas:
+  `PerfHud` apaga `gl.info.autoReset` (three resetea los contadores en cada
+  `render()`, y `EffectComposer` hace uno por paso, así que lo que se leía era
+  el último quad del Bloom: "1 draw call"), y el Bloom va con `levels={4}` en
+  vez del default de 8, porque el mipmap blur cuesta 2 draw calls por nivel y
+  con 8 el total daba 19.
 - Cero asignaciones de `Vector3`, `Quaternion`, `Matrix4`, `Color` u `Object3D`
   dentro de `useFrame` o del handler del WebSocket.
 - Cero setters de estado de React en el camino de datos de mercado.
 - La regla del agresor implementada como `trade.m ? 'sell' : 'buy'`, literal.
 - Pestaña oculta 60 s y luego visible: sin ráfaga de spawns, sin salto de física.
+  Verificado en headless emulando lo que hace el browser de verdad —
+  `visibilityState` a `hidden` **y** rAF suspendido, que es la mitad que se
+  olvida. 60 s ocultos acumulan ~2400 trades y al volver el peor frame no se
+  movió (16,8 ms) ni hubo ráfaga.
 - Reconexión con backoff exponencial y jitter, sin superar 300 intentos / 5 min.
 - `tsc --noEmit` limpio en strict, sin `any` ni `@ts-ignore`.
 
@@ -176,20 +214,25 @@ cambio en `feedCore.ts` tiene que mantener esas suites en verde.
 
 ## Pendientes
 
-1. **Compilar y correr los módulos 6 y 7.** Nunca se ejecutaron.
+1. **Correr contra Binance de verdad.** El camino en vivo nunca se ejercitó: el
+   sandbox donde se auditó no tunelea WebSockets y el cliente se quedó en
+   `reconnecting`, que es lo correcto pero no prueba nada del feed real. Es lo
+   único del proyecto que sigue sin verse funcionando.
 2. Ajustar a ojo las constantes de escenario: `HEIGHT_GAIN`, `IMPULSE_GAIN`,
    `HDR_THRESHOLD`, los lambdas de `damp` de la cámara. Están puestas por
-   razonamiento, no por haberlas visto.
-3. Medir `renderer.info.render.calls` con `?source=mock&scenario=stress` y
-   confirmar el ≤ 12.
-4. Verificar el comportamiento con la pestaña oculta 60 s (criterio de la
-   Parte E que todavía no se probó en vivo).
-5. Borrar `src/dev/FeedProbe.tsx` cuando el módulo 7 esté andando.
-6. **Grabador y servidor de replay del VPS.** Guardar los frames crudos tal cual
+   razonamiento, no por haberlas visto. En las capturas el encuadre deja bastante
+   aire muerto abajo y los personajes pasan por encima de los muros altos: los
+   colliders son 2 cuboides con la altura PROMEDIO del lado, así que un pico de
+   liquidez se ve pero no se choca. Es decisión de diseño, no bug; si molesta, el
+   ajuste es de constantes, no de arquitectura.
+3. Medir el presupuesto de 16,6 ms en una GPU real. Los números de fps de la
+   auditoría salieron de SwiftShader por software (6–10 fps) y no dicen nada:
+   lo que sí es válido de ahí son los draw calls y el conteo de triángulos.
+4. **Grabador y servidor de replay del VPS.** Guardar los frames crudos tal cual
    llegan (~1,4 GB/día, ~180 MB/día comprimido: más de un año en 80 GB) y
    reemitirlos en el mismo formato de cable. El cliente ya tiene el flag
    `vps-replay` y `resolveFeedUrl()` ya arma la URL: falta sólo el servidor.
-7. Si alguna vez se quiere `vps-relay` en vivo, hace falta `wss://` — una página
+5. Si alguna vez se quiere `vps-relay` en vivo, hace falta `wss://` — una página
    HTTPS no puede abrir `ws://` a una IP pelada. Requiere dominio propio con
    Caddy, o un túnel de Cloudflare.
 

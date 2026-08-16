@@ -71,6 +71,19 @@ const SLOT_RETIRING = 2;
 const vec = { x: 0, y: 0, z: 0 };
 const zero = { x: 0, y: 0, z: 0 };
 
+/**
+ * El color del personaje ES la regla del agresor hecha visible: el taker manda.
+ * `side` ya viene resuelto por `feedCore` como `trade.m ? 'sell' : 'buy'`, así
+ * que acá sólo se traduce a color. Las ballenas van en dorado y fuera del rango
+ * 0–1: el Bloom levanta por luminancia lo que pasa de 1,0, así que salen
+ * brillando sin capas ni SelectiveBloom.
+ */
+const BULL = new THREE.Color('#00FF66');
+const BEAR = new THREE.Color('#FF0055');
+const GOLD = new THREE.Color('#FFD700');
+const WHALE_HDR_GAIN = 2.4;
+const scratchColor = new THREE.Color();
+
 /** Cuánto decae el sacudón de cámara por frame. */
 const IMPACT_DECAY = 0.9;
 
@@ -110,7 +123,7 @@ export function BrawlerPool({ trades, stats, focus, lowQuality = false }: Brawle
     m.frustumCulled = false;
     // instanceColor arranca en null; inicializar las 50 antes del primer render
     // evita la recompilación de shader al primer setColorAt en medio de escena.
-    for (let i = 0; i < capacity; i++) m.setColorAt(i, WHITE);
+    for (let i = 0; i < capacity; i++) m.setColorAt(i, GOLD);
     if (m.instanceColor !== null) m.instanceColor.needsUpdate = true;
   }, [capacity]);
 
@@ -155,7 +168,10 @@ export function BrawlerPool({ trades, stats, focus, lowQuality = false }: Brawle
       if (trade === null) break;
       const slot = claimSlot(now);
       const body = list[slot];
-      if (body === null) continue;
+      // `break`, no `continue`: con el slot sin cuerpo todavía, seguir iterando
+      // vaciaba la cola entera contra nada. Los trades se quedan encolados y
+      // se gastan en el próximo frame, que es cuando ya hay cuerpo.
+      if (body === null) break;
       activate(body, slot, trade.side === 'buy', trade.size, trade.whale, now);
       if (trade.whale) focus.impact = 1;
       spawned++;
@@ -163,6 +179,11 @@ export function BrawlerPool({ trades, stats, focus, lowQuality = false }: Brawle
     // Si la cola sigue llena tras el tope del frame, se descarta lo viejo: ya
     // no representa el mercado actual y reproducirlo sería una ráfaga falsa.
     if (trades.count > capacity * 2) trades.clear();
+
+    if (spawned > 0) {
+      const m = mesh.current;
+      if (m !== null && m.instanceColor !== null) m.instanceColor.needsUpdate = true;
+    }
   });
 
   /** Reciclado: libre primero, después el que ya se está retirando, y recién
@@ -222,8 +243,30 @@ export function BrawlerPool({ trades, stats, focus, lowQuality = false }: Brawle
     vec.z = 0;
     body.applyImpulse(vec, true);
 
+    paint(slot, fromLeft, whale);
+
     slotState[slot] = SLOT_ACTIVE;
     activatedAt[slot] = now;
+  }
+
+  /**
+   * Un `setColorAt` por spawn, y un solo `needsUpdate` por frame al final del
+   * bucle: subir el buffer de colores una vez por instancia costaría 6 uploads
+   * por frame en el peor caso.
+   */
+  function paint(slot: number, fromLeft: boolean, whale: boolean): void {
+    const m = mesh.current;
+    if (m === null) return;
+    if (whale) {
+      scratchColor.setRGB(
+        GOLD.r * WHALE_HDR_GAIN,
+        GOLD.g * WHALE_HDR_GAIN,
+        GOLD.b * WHALE_HDR_GAIN,
+      );
+      m.setColorAt(slot, scratchColor);
+    } else {
+      m.setColorAt(slot, fromLeft ? BULL : BEAR);
+    }
   }
 
   function retire(body: RapierRigidBody, slot: number): void {
@@ -267,8 +310,6 @@ export function BrawlerPool({ trades, stats, focus, lowQuality = false }: Brawle
     </InstancedRigidBodies>
   );
 }
-
-const WHITE = new THREE.Color('#FFD700');
 
 /** Ruido determinista y barato para variar la altura de aparición. */
 function pseudoRandom(slot: number, now: number): number {

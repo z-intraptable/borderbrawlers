@@ -108,10 +108,11 @@ export function OrderBookWalls({ book, stats, lowQuality = false }: OrderBookWal
     physicsClock.current += dt;
     const doPhysics = physicsClock.current >= PHYSICS_INTERVAL;
 
-    if (book.lastUpdateId === lastDrawnId.current) {
-      if (doPhysics) physicsClock.current = 0;
-      return;
-    }
+    // Sin snapshot nuevo no hay nada que redibujar. El acumulador de física NO
+    // se resetea acá: hacerlo descartaba el tick pendiente en 5 de cada 6
+    // frames (60 Hz de render contra 10 Hz de snapshots) y los muros terminaban
+    // redimensionándose ~0,7 veces por segundo en vez de 4.
+    if (book.lastUpdateId === lastDrawnId.current) return;
     lastDrawnId.current = book.lastUpdateId;
 
     const mid = book.mid;
