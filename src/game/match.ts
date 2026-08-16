@@ -114,6 +114,7 @@ export const EVENT_SUPER = 2;
 export const EVENT_LAND = 3;
 export const EVENT_GROW = 4;
 export const EVENT_SKILL = 5;
+export const EVENT_MELEE = 6;
 
 /**
  * Cola de eventos del paso. La capa de render la drena y la vacía: es cómo la
@@ -186,6 +187,8 @@ export interface Match {
   nextSkill: Float32Array;
   /** Cuál usó la última vez: se alternan. */
   lastSkill: Uint8Array;
+  /** Golpe o patada: también se alternan, contacto a contacto. */
+  lastBlow: Uint8Array;
   /** Semilla del PRNG. La simulación no usa Math.random. */
   seed: number;
 
@@ -225,6 +228,7 @@ export function createMatch(): Match {
     claims: new Uint8Array(CAPACITY),
     nextSkill: new Float32Array(CAPACITY),
     lastSkill: new Uint8Array(CAPACITY),
+    lastBlow: new Uint8Array(CAPACITY),
     seed: 0x5eed_1234,
     growing: Int8Array.from([-1, -1]),
     lastStep: new Float32Array(2),
@@ -437,6 +441,13 @@ export function stepMatch(
       m.hitstun[i] = now; m.hitstun[j] = now;
       m.damage[i] += hitDamage(m.weight[j]);
       m.damage[j] += hitDamage(m.weight[i]);
+
+      // Cada uno tira su golpe, alternando puño y patada. El que recibe queda
+      // en hurt, que lo resuelve la capa de render con el hitstun que ya existe.
+      m.lastBlow[i] = m.lastBlow[i] === 0 ? 1 : 0;
+      m.lastBlow[j] = m.lastBlow[j] === 0 ? 1 : 0;
+      emit(m.events, EVENT_MELEE, m.x[i], m.y[i], m.lastBlow[i], m.team[i]);
+      emit(m.events, EVENT_MELEE, m.x[j], m.y[j], m.lastBlow[j], m.team[j]);
 
       const heavy = m.whale[i] === 1 || m.whale[j] === 1;
       emit(m.events, EVENT_HIT, m.x[i] + dx / 2, m.y[i] + dy / 2, heavy ? 1.6 : 1, m.team[i]);

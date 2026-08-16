@@ -11,8 +11,10 @@ import { TEAM_GREEN, TEAM_RED } from './fighters';
  *
  * Reglas de disparo, según la especificación:
  *
- *   - las **habilidades comunes** (`skill1` y `skill2`) se usan todo el tiempo,
- *     en cada golpe, alternándose;
+ *   - el **cuerpo a cuerpo** (`punch` y `kick`) sale en cada contacto con un
+ *     rival, alternándose;
+ *   - las **habilidades especiales** (`skill1` y `skill2`) se disparan solas
+ *     cada 8 a 12 segundos, alternándose;
  *   - el **super** se dispara al completar los tres pasos de gigantismo.
  *
  * Nada de esto lo dispara el usuario: no hay comandos. Los golpes salen del
@@ -29,7 +31,14 @@ export interface Character {
   run: string;
   jump: string;
   hurt: string;
-  /** Las dos comunes, que se alternan golpe a golpe. */
+  /**
+   * El cuerpo a cuerpo: sale en cada contacto con un rival, alternando. Es lo
+   * que más se ve de todo el rig — un peleador pega decenas de veces por cada
+   * habilidad que usa.
+   */
+  punch: string;
+  kick: string;
+  /** Las dos especiales, que se alternan cada 8-12 s. */
   skill1: string;
   skill2: string;
   /** El de los tres pasos de gigantismo. */
@@ -48,6 +57,7 @@ export const ROSTER: readonly Character[] = [
     team: TEAM_GREEN,
     label: 'JIM',
     idle: 'idle', run: 'run', jump: 'jump', hurt: 'hurt',
+    punch: 'attack_punch', kick: 'attack_kick',
     skill1: 'attack_zapper',
     // La ficha traía a Jim incompleto: le faltaban skill2 y super. Estos son
     // marcadores con la convención del resto; hay que confirmarlos antes de
@@ -60,6 +70,7 @@ export const ROSTER: readonly Character[] = [
     team: TEAM_GREEN,
     label: 'PLAT',
     idle: 'idle', run: 'run', jump: 'jump', hurt: 'hurt',
+    punch: 'attack_punch', kick: 'attack_kick',
     skill1: 'attack_snoot_wave',
     skill2: 'dash_invulnerable',
     super: 'super_tornado_platinio',
@@ -69,6 +80,7 @@ export const ROSTER: readonly Character[] = [
     team: TEAM_GREEN,
     label: 'BLKY',
     idle: 'idle', run: 'run', jump: 'jump', hurt: 'hurt',
+    punch: 'attack_punch', kick: 'attack_kick',
     skill1: 'drop_trap',
     skill2: 'parry_stance',
     super: 'super_yunque_100t',
@@ -78,6 +90,7 @@ export const ROSTER: readonly Character[] = [
     team: TEAM_RED,
     label: 'BULL',
     idle: 'idle', run: 'run', jump: 'jump', hurt: 'hurt',
+    punch: 'attack_punch', kick: 'attack_kick',
     skill1: 'charge_armor',
     skill2: 'ground_stomp',
     super: 'super_estampida_extincion',
@@ -87,6 +100,7 @@ export const ROSTER: readonly Character[] = [
     team: TEAM_RED,
     label: 'MJ',
     idle: 'idle', run: 'run', jump: 'jump', hurt: 'hurt',
+    punch: 'attack_punch', kick: 'attack_kick',
     skill1: 'ball_pass',
     skill2: 'dunk_zone_anchor',
     super: 'super_meteor_dunk',
@@ -96,6 +110,7 @@ export const ROSTER: readonly Character[] = [
     team: TEAM_RED,
     label: 'DP',
     idle: 'idle', run: 'run', jump: 'jump', hurt: 'hurt',
+    punch: 'attack_punch', kick: 'attack_kick',
     skill1: 'taunt_4th_wall',
     skill2: 'attack_katana_slash',
     super: 'super_ui_smash',
@@ -111,9 +126,14 @@ export function characterFor(team: number, index: number): Character {
   return list[index % list.length];
 }
 
-/** Nombre de la animación de la habilidad común número `skill` (0 o 1). */
+/** Nombre de la animación de la habilidad especial número `skill` (0 o 1). */
 export function skillAnimation(character: Character, skill: number): string {
   return skill === 0 ? character.skill1 : character.skill2;
+}
+
+/** Nombre de la animación de cuerpo a cuerpo número `blow` (0 o 1). */
+export function meleeAnimation(character: Character, blow: number): string {
+  return blow === 0 ? character.punch : character.kick;
 }
 
 /**
@@ -124,6 +144,7 @@ export function skillAnimation(character: Character, skill: number): string {
 export function requiredAnimations(character: Character): string[] {
   return [
     character.idle, character.run, character.jump, character.hurt,
+    character.punch, character.kick,
     character.skill1, character.skill2, character.super,
   ];
 }
