@@ -7,9 +7,11 @@ import {
   EVENT_HIT,
   EVENT_KO,
   EVENT_LAND,
+  EVENT_MELEE,
   EVENT_SKILL,
   EVENT_SUPER,
   FIGHTER_HALF_HEIGHT,
+  HITSTUN,
   PLATFORM_COUNT,
   STAGE_HALF_WIDTH,
   platformCenterX,
@@ -19,8 +21,18 @@ import {
 } from '../game/match';
 import { SLOT_ACTIVE, TEAM_GREEN } from '../game/fighters';
 import type { BinanceFeedClient } from '../net/feedCore';
-import { createDoll } from '../art/doll';
-import type { Doll } from '../art/doll';
+import { createFighterView } from '../art/fighter';
+import type { FighterView } from '../art/fighter';
+import {
+  ACTION_TIME,
+  ACT_KICK,
+  ACT_NONE,
+  ACT_PUNCH,
+  ACT_SKILL,
+  ACT_SUPER,
+} from '../art/fighter';
+import { lookFor } from '../art/looks';
+import { characterFor } from '../game/roster';
 import { burst, createFx, drawFx, dust, ring, trail, updateFx } from './fx';
 import { createBackdrop } from './backdrop';
 
@@ -128,13 +140,29 @@ export async function startGame(
   const plainFx = new Graphics();
   world.addChild(plainFx);
 
-  const dolls: Doll[] = [];
+  /**
+   * Un cuerpo articulado por slot. El personaje que le toca a cada slot es fijo
+   * —un slot no cambia de bando— así que la silueta se resuelve una sola vez.
+   */
+  const views: FighterView[] = [];
   for (let i = 0; i < match.slot.length; i++) {
-    const doll = createDoll(match.team[i] === TEAM_GREEN ? GREEN : RED);
-    doll.visible = false;
-    world.addChild(doll);
-    dolls.push(doll);
+    const character = characterFor(match.team[i], match.character[i]);
+    const view = createFighterView(
+      lookFor(character.armature),
+      match.team[i] === TEAM_GREEN ? GREEN : RED,
+    );
+    view.visible = false;
+    world.addChild(view);
+    views.push(view);
   }
+
+  /**
+   * Qué acción está reproduciendo cada peleador y hace cuánto. Vive en la capa
+   * de render y no en la simulación: es estado de presentación, y meterlo en
+   * `Match` obligaría a la simulación a saber cuánto dura una animación.
+   */
+  const action = new Uint8Array(match.slot.length);
+  const actionAge = new Float32Array(match.slot.length);
 
   /**
    * La capa que brilla. Es hija de `world` para heredar la cámara, y lleva el
@@ -216,7 +244,7 @@ export async function startGame(
     drawStage(platforms, match);
     updateCamera(camera, match, dt);
     applyCamera(world, app, camera, match.shake);
-    drawFighters(dolls, match);
+    drawFighters(views, match, action, actionAge, dt, elapsed);
     drawFx(fx, plainFx, glowFx);
 
     /* --- fondo ------------------------------------------------------- */
@@ -267,11 +295,18 @@ export async function startGame(
           // congelar en cada roce dejaría la pelea a media velocidad.
           if (magnitude >= 1.2) stop = Math.max(stop, HITSTOP_SKILL);
           break;
+        case EVENT_MELEE:
+          // La magnitud es cuál de los dos golpes toca: se alternan.
+          startAction(action, actionAge, m.events.slot[e],
+            magnitude === 0 ? ACT_PUNCH : ACT_KICK);
+          break;
         case EVENT_SKILL:
+          startAction(action, actionAge, m.events.slot[e], ACT_SKILL);
           ring(target, x, y, 2.3, 0.42, teamColor);
           burst(target, x, y, 8, 5, 0.1, 0.4, teamColor);
           break;
         case EVENT_SUPER:
+          startAction(action, actionAge, m.events.slot[e], ACT_SUPER);
           ring(target, x, y, magnitude, 0.6, GOLD);
           ring(target, x, y, magnitude * 0.6, 0.45, 0xffffff);
           burst(target, x, y, 14, 11, 0.2, 0.7, GOLD);
@@ -348,25 +383,55 @@ function drawStage(g: Graphics, match: Match): void {
   }
 }
 
-function drawFighters(dolls: Doll[], match: Match): void {
-  for (let i = 0; i < dolls.length; i++) {
-    const doll = dolls[i];
+function drawFighters(
+  views: FighterView[], match: Match,
+  action: Uint8Array, actionAge: Float32Array,
+  dt: number, elapsed: number,
+): void {
+  for (let i = 0; i < views.length; i++) {
+    const view = views[i];
     if (match.slot[i] !== SLOT_ACTIVE) {
-      doll.visible = false;
+      view.visible = false;
+      // Un slot que vuelve a entrar no puede heredar la patada del anterior.
+      action[i] = ACT_NONE;
       continue;
     }
-    doll.visible = true;
-    doll.x = match.x[i];
-    doll.y = -match.y[i];
+    view.visible = true;
+    view.x = match.x[i];
+    view.y = -match.y[i];
+
+    // La acción corre con el reloj de pantalla, no con el de la simulación: es
+    // una animación, y tiene que seguir avanzando durante el hitstop o el golpe
+    // se vería congelado a mitad de camino.
+    if (action[i] !== ACT_NONE) {
+      actionAge[i] += dt;
+      if (actionAge[i] >= ACTION_TIME[action[i]]) action[i] = ACT_NONE;
+    }
+    const duration = ACTION_TIME[action[i]];
+    const progress = duration > 0 ? actionAge[i] / duration : 0;
+    const hurt = match.clock - match.hitstun[i] < HITSTUN;
+
+    view.pose(
+      match.vx[i], match.vy[i], match.grounded[i] === 1, hurt,
+      action[i], progress, elapsed,
+    );
 
     // Squash & stretch: se estira al subir y se aplasta al caer. Es lo que
     // separa un muñeco que se traslada de uno que se mueve.
-    const vy = match.vy[i];
-    const stretch = Math.max(-0.18, Math.min(0.18, vy * 0.014));
+    const stretch = Math.max(-0.18, Math.min(0.18, match.vy[i] * 0.014));
     const scale = match.scale[i];
-    doll.scale.x = scale * match.facing[i] * (1 - stretch);
-    doll.scale.y = scale * (1 + stretch);
+    view.scale.x = scale * match.facing[i] * (1 - stretch);
+    view.scale.y = scale * (1 + stretch);
   }
+}
+
+/** Arranca una acción, pisando la que hubiera. */
+function startAction(
+  action: Uint8Array, actionAge: Float32Array, slot: number, kind: number,
+): void {
+  if (slot < 0 || slot >= action.length) return;
+  action[slot] = kind;
+  actionAge[slot] = 0;
 }
 
 function updateCamera(camera: Camera, match: Match, dt: number): void {

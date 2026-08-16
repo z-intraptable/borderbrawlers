@@ -84,7 +84,7 @@ const MAX_JUMPS = 2;
 const AIR_CONTROL = 0.12;
 const LOOKAHEAD = 0.7;
 /** Cuánto queda sin control tras recibir un lanzamiento. */
-const HITSTUN = 0.34;
+export const HITSTUN = 0.34;
 /**
  * El cuerpo a cuerpo aturde mucho menos: si aturdiera como una especial, dos
  * peleadores en contacto se paralizarían mutuamente y no pasaría nada más.
@@ -144,6 +144,14 @@ export interface EventQueue {
   y: Float32Array;
   magnitude: Float32Array;
   team: Uint8Array;
+  /**
+   * A qué peleador le pasó, o -1 si el evento no es de nadie en particular.
+   *
+   * Sin esto la capa de render sabe que alguien tiró una patada y dónde, pero no
+   * a quién animar. Es el dato que convierte la cola en el disparador de las
+   * animaciones y no sólo de las chispas.
+   */
+  slot: Int8Array;
 }
 
 const EVENT_CAP = 64;
@@ -156,10 +164,14 @@ function createEventQueue(): EventQueue {
     y: new Float32Array(EVENT_CAP),
     magnitude: new Float32Array(EVENT_CAP),
     team: new Uint8Array(EVENT_CAP),
+    slot: new Int8Array(EVENT_CAP),
   };
 }
 
-function emit(q: EventQueue, kind: number, x: number, y: number, magnitude: number, team: number): void {
+function emit(
+  q: EventQueue, kind: number, x: number, y: number,
+  magnitude: number, team: number, slot: number,
+): void {
   if (q.count >= EVENT_CAP) return;
   const i = q.count++;
   q.kind[i] = kind;
@@ -167,6 +179,7 @@ function emit(q: EventQueue, kind: number, x: number, y: number, magnitude: numb
   q.y[i] = y;
   q.magnitude[i] = magnitude;
   q.team[i] = team;
+  q.slot[i] = slot;
 }
 
 /* --- estado ---------------------------------------------------------- */
@@ -423,7 +436,8 @@ export function stepMatch(
     m.grounded[i] = move.grounded ? 1 : 0;
     if (move.grounded) m.jumps[i] = MAX_JUMPS;
     if (move.landed) {
-      emit(m.events, EVENT_LAND, m.x[i], m.y[i], LANDING_SOFT + fallSpeed / LANDING_FULL, m.team[i]);
+      emit(m.events, EVENT_LAND, m.x[i], m.y[i],
+        LANDING_SOFT + fallSpeed / LANDING_FULL, m.team[i], i);
     }
   }
 
@@ -434,7 +448,7 @@ export function stepMatch(
     if (now - m.hitstun[i] < HITSTUN) continue;
     scheduleSkill(m, i, now);
     m.lastSkill[i] = m.lastSkill[i] === 0 ? 1 : 0;
-    emit(m.events, EVENT_SKILL, m.x[i], m.y[i], m.lastSkill[i], m.team[i]);
+    emit(m.events, EVENT_SKILL, m.x[i], m.y[i], m.lastSkill[i], m.team[i], i);
     m.shake = Math.max(m.shake, 0.35);
 
     for (let j = 0; j < CAPACITY; j++) {
@@ -456,7 +470,7 @@ export function stepMatch(
       m.damage[j] += SKILL_DAMAGE;
       m.hitstun[j] = now;
       m.lastHit[j] = now;
-      emit(m.events, EVENT_HIT, m.x[j], m.y[j], 1.2, m.team[j]);
+      emit(m.events, EVENT_HIT, m.x[j], m.y[j], 1.2, m.team[j], j);
     }
   }
 
@@ -489,11 +503,11 @@ export function stepMatch(
       // en hurt, que lo resuelve la capa de render con el hitstun que ya existe.
       m.lastBlow[i] = m.lastBlow[i] === 0 ? 1 : 0;
       m.lastBlow[j] = m.lastBlow[j] === 0 ? 1 : 0;
-      emit(m.events, EVENT_MELEE, m.x[i], m.y[i], m.lastBlow[i], m.team[i]);
-      emit(m.events, EVENT_MELEE, m.x[j], m.y[j], m.lastBlow[j], m.team[j]);
+      emit(m.events, EVENT_MELEE, m.x[i], m.y[i], m.lastBlow[i], m.team[i], i);
+      emit(m.events, EVENT_MELEE, m.x[j], m.y[j], m.lastBlow[j], m.team[j], j);
 
       const heavy = m.whale[i] === 1 || m.whale[j] === 1;
-      emit(m.events, EVENT_HIT, m.x[i] + dx / 2, m.y[i] + dy / 2, heavy ? 1.6 : 1, m.team[i]);
+      emit(m.events, EVENT_HIT, m.x[i] + dx / 2, m.y[i] + dy / 2, heavy ? 1.6 : 1, m.team[i], -1);
       m.shake = Math.max(m.shake, heavy ? 1 : 0.45);
     }
   }
@@ -504,7 +518,7 @@ export function stepMatch(
     if (!isKO(BLAST, m.x[i], m.y[i])) continue;
     emit(m.events, EVENT_KO,
       Math.max(-10, Math.min(10, m.x[i])),
-      Math.max(-5, Math.min(12, m.y[i])), 1, m.team[i]);
+      Math.max(-5, Math.min(12, m.y[i])), 1, m.team[i], i);
     m.state.kos[m.team[i] === TEAM_GREEN ? TEAM_RED : TEAM_GREEN]++;
     if (m.stocks[i] > 0) m.stocks[i]--;
     m.slot[i] = SLOT_FREE;
@@ -531,7 +545,7 @@ export function stepMatch(
       m.growing[team] = -1;
     } else {
       m.stage[chosen]++;
-      emit(m.events, EVENT_GROW, m.x[chosen], m.y[chosen], m.stage[chosen], team);
+      emit(m.events, EVENT_GROW, m.x[chosen], m.y[chosen], m.stage[chosen], team, chosen);
     }
     m.scale[chosen] = growthScale(m.stage[chosen]);
   }
@@ -604,7 +618,7 @@ function activate(
  * sólo un personaje más grande.
  */
 function unleash(m: Match, self: number, now: number): void {
-  emit(m.events, EVENT_SUPER, m.x[self], m.y[self], SUPER_RADIUS, m.team[self]);
+  emit(m.events, EVENT_SUPER, m.x[self], m.y[self], SUPER_RADIUS, m.team[self], self);
   m.shake = 1;
   for (let i = 0; i < CAPACITY; i++) {
     if (i === self || m.slot[i] !== SLOT_ACTIVE || m.team[i] === m.team[self]) continue;
@@ -621,7 +635,7 @@ function unleash(m: Match, self: number, now: number): void {
     m.damage[i] += SUPER_DAMAGE;
     m.hitstun[i] = now;
     m.lastHit[i] = now;
-    emit(m.events, EVENT_HIT, m.x[i], m.y[i], 1.4, m.team[i]);
+    emit(m.events, EVENT_HIT, m.x[i], m.y[i], 1.4, m.team[i], i);
   }
 }
 
