@@ -20,6 +20,7 @@ React Three Fiber v9 + Rapier, WebGL, presupuesto de frame de 16,6 ms.
 | 6 | `src/scene/BorderBrawlersScene.tsx` | listo |
 | 7 | `src/BorderBrawlers.tsx` | listo |
 | 8 | `src/mock/mockFeed.ts` | listo, verificado |
+| — | `server/` — grabador y replay del VPS | listo, verificado |
 
 Ver `CLAUDE.md` para el contexto completo: decisiones cerradas, invariantes del
 código, y los pendientes.
@@ -31,12 +32,7 @@ npm run dev
 
 Parámetros por query string: `?source=` (`mock` | `binance-direct` |
 `vps-replay` | `vps-relay`), `?scenario=` (`calm` | `normal` | `volatile` |
-`stress`), `?symbol=`, `?vps=`, `?low`, y `?probe` para el banco de pruebas del
-feed sin 3D.
-
-`src/dev/FeedProbe.tsx` es un banco de pruebas temporal: drena la cola con rAF y
-muestra el libro en texto, para validar el camino de datos antes de que exista
-la escena. Se borra cuando esté el módulo 7.
+`stress`), `?symbol=`, `?vps=`, `?low` y `?quality=high|low`.
 
 `src/dev/PerfHud.tsx` muestra en vivo el criterio de aceptación de la Parte E
 (`renderer.info.render.calls <= 12`, frame ms, peor frame del período).
@@ -101,8 +97,24 @@ vps-relay       passthrough en vivo. Sólo si Binance bloquea el directo
 ### Para qué sí sirve el VPS
 
 **Grabar y reproducir.** Para perfilar hace falta correr *el mismo minuto
-infernal del mercado* una y otra vez mientras mirás el profiler. El stream son
-~1,4 GB/día crudos, ~180 MB/día comprimido: más de un año en 80 GB.
+infernal del mercado* una y otra vez mientras mirás el profiler. Contra el
+mercado en vivo no hay dos corridas comparables, así que "esto mejoró o empeoró"
+no se puede contestar.
+
+Está implementado en **`server/`** — grabador y servidor de replay, con tests de
+punta a punta que no tocan la red. Ver `server/README.md`.
+
+Cuánto ocupa, medido con `npm run sizing` sobre el formato real:
+
+| escenario | por día | comprimido | por año |
+|---|---|---|---|
+| calm | 0,95 GB | 0,24 GB | 87 GB |
+| normal | 1,86 GB | 0,36 GB | 131 GB |
+| volatile | 2,67 GB | 0,44 GB | 161 GB |
+
+Un año **no** entra en el disco de 80 GB del VPS: la compresión real de este
+formato es 5x, no las 8x que suponía la estimación anterior. Tampoco hace falta
+— `--keep-days 14` deja ~5 GB permanentes y alcanza de sobra para perfilar.
 
 Y queda como salida ante bloqueo geográfico, con `vps-relay`, sin cambiar nada
 más que el flag.
@@ -148,6 +160,17 @@ buffering, sin manejo de gaps.
 
 El reloj y el constructor de WebSocket se inyectan, así que las 24 h se simulan
 en microsegundos.
+
+`cd server && npm test` corre otras dos, también sin red:
+
+- **`smokeRecording`** — ida y vuelta del formato, la garantía de que el crudo
+  no se normaliza, líneas corruptas que no voltean al lector, nombres de
+  archivo, selección de horas, y dos cargas de la misma ventana que dan
+  exactamente lo mismo.
+- **`smokeReplayServer`** — levanta el servidor en otro proceso y le conecta el
+  `BinanceFeedClient` real. Verifica que la grabación llega byte por byte, que
+  el libro se llena y los trades se cuentan sin tocar una línea del cliente, y
+  que dos corridas de la misma ventana son idénticas.
 
 ```bash
 npm run test:mem   # igual que npm test pero con --expose-gc

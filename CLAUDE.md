@@ -65,8 +65,14 @@ no se puede verificar en un headless de 2 núcleos.
 - **El VPS de Vultr (2 vCPU / 4 GB / USD 20 mes) queda para grabación y replay
   determinista**, no para el vivo. Es lo único que no se puede hacer sin
   servidor: repetir el mismo minuto infernal del mercado mientras se perfila.
-  Falta implementarlo (ver Pendientes). Con TLS resuelto, `vps-relay` también
-  sirve como salida ante bloqueo geográfico, sin tocar nada más que el flag.
+  **Implementado en `server/`** — ver `server/README.md`. Con TLS resuelto,
+  `vps-relay` también sirve como salida ante bloqueo geográfico, sin tocar nada
+  más que el flag.
+- **Nada de esto va a Supabase ni a una base de datos.** Son archivos planos que
+  se escriben append-only y se leen secuencialmente por rango de tiempo: un
+  filesystem hace exactamente eso y una base no agrega nada. Además el grabador
+  es un proceso que sostiene un WebSocket 24/7, que es justo lo que las
+  plataformas serverless no hacen. Lo estático (el cliente) sí va a Vercel.
 - **`@depth20@100ms` es snapshot idempotente, no delta.** Sin bootstrap REST,
   sin buffering, sin manejo de gaps.
 - **`r3f-perf` está prohibido.** `7.2.3`, la última publicada, depende de
@@ -202,9 +208,17 @@ Verificados leyendo el código fuente de la versión fijada, no la documentació
 ## Tests
 
 ```bash
-npm test        # smokeMockFeed + smokeFeedCore, ~60 asserts, sin red
+npm test           # smokeMockFeed + smokeFeedCore, ~60 asserts, sin red
 npm run test:mem   # igual, con --expose-gc, mide heap retenido
+
+cd server && npm test   # formato de grabación + servidor de replay, sin red
 ```
+
+La suite del servidor levanta el servidor de replay de verdad en otro proceso y
+le conecta **el `BinanceFeedClient` real**, el mismo del browser, con un
+`socketFactory` de Node. Si el libro se llena y los trades salen bien sin tocar
+una línea del cliente, el replay es indistinguible del vivo — que es la única
+propiedad que le pedimos.
 
 El reloj y el constructor de WebSocket se inyectan en `BinanceFeedClient`, así
 que las 24 h de la reconexión proactiva se simulan en microsegundos. Cualquier
@@ -228,10 +242,16 @@ cambio en `feedCore.ts` tiene que mantener esas suites en verde.
 3. Medir el presupuesto de 16,6 ms en una GPU real. Los números de fps de la
    auditoría salieron de SwiftShader por software (6–10 fps) y no dicen nada:
    lo que sí es válido de ahí son los draw calls y el conteo de triángulos.
-4. **Grabador y servidor de replay del VPS.** Guardar los frames crudos tal cual
-   llegan (~1,4 GB/día, ~180 MB/día comprimido: más de un año en 80 GB) y
-   reemitirlos en el mismo formato de cable. El cliente ya tiene el flag
-   `vps-replay` y `resolveFeedUrl()` ya arma la URL: falta sólo el servidor.
+4. **Desplegar el grabador en el VPS.** El código está y anda (`server/`, con
+   tests de punta a punta), pero nunca corrió contra Binance de verdad ni contra
+   un disco real — por lo mismo que el punto 1.
+
+   El presupuesto de disco del README viejo estaba mal y ya se corrigió: medido
+   con `npm run sizing`, un día son 0,36 GB comprimidos y **un año son ~131 GB**,
+   contra los "180 MB/día, más de un año en 80 GB" que se habían supuesto. La
+   compresión real de este formato es 5x, no 8x. Un año NO entra en el disco de
+   80 GB; `--keep-days 14` deja ~5 GB permanentes, que es lo que hace falta para
+   perfilar.
 5. Si alguna vez se quiere `vps-relay` en vivo, hace falta `wss://` — una página
    HTTPS no puede abrir `ws://` a una IP pelada. Requiere dominio propio con
    Caddy, o un túnel de Cloudflare.

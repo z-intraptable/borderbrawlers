@@ -332,6 +332,22 @@ export interface FeedClientOptions {
   clock?: Clock;
   socketFactory?: SocketFactory;
   onStatus?: (status: ConnectionStatus) => void;
+  /**
+   * Recibe cada frame TAL CUAL llegó del socket, antes de parsearlo. Existe
+   * para el grabador del VPS: guardar el texto original es lo único que hace
+   * que el replay sea idéntico al vivo, y así el grabador hereda el backoff,
+   * el límite de 300 intentos y la reconexión de 24 h ya testeados en vez de
+   * tener una segunda implementación que se desincroniza.
+   *
+   * En el browser nadie lo pasa y el camino de datos no cambia.
+   */
+  onRaw?: (raw: string) => void;
+  /**
+   * En false el cliente no parsea ni acumula nada: sólo mantiene la conexión y
+   * entrega `onRaw`. El grabador no necesita el libro ni las medianas, y en el
+   * VPS ese trabajo es puro desperdicio. Default true.
+   */
+  ingest?: boolean;
 }
 
 export class BinanceFeedClient {
@@ -343,6 +359,8 @@ export class BinanceFeedClient {
   private readonly clock: Clock;
   private readonly createSocket: SocketFactory;
   private readonly onStatus: (status: ConnectionStatus) => void;
+  private readonly onRaw: ((raw: string) => void) | null;
+  private readonly ingest: boolean;
 
   private readonly tradeMedian = new RollingMedian(TRADE_MEDIAN_WINDOW);
   private readonly bookMedian = new RollingMedian(BOOK_MEDIAN_WINDOW);
@@ -368,6 +386,8 @@ export class BinanceFeedClient {
     this.clock = options.clock ?? systemClock;
     this.createSocket = options.socketFactory ?? browserSocketFactory;
     this.onStatus = options.onStatus ?? (() => {});
+    this.onRaw = options.onRaw ?? null;
+    this.ingest = options.ingest ?? true;
     this.book = createEmptyBook(levels);
     this.trades = new TradeRingBuffer(options.queueCapacity ?? TRADE_QUEUE_CAP);
     this.qtyScratch = new Float64Array(levels * 2);
@@ -543,6 +563,14 @@ export class BinanceFeedClient {
   }
 
   private handleMessage(raw: string): void {
+    // El crudo primero y sin condiciones: si el parseo rechaza un frame, el
+    // grabador igual lo tiene que haber guardado. Un frame que no entendemos es
+    // exactamente el que después vas a querer poder reproducir.
+    if (this.onRaw !== null) this.onRaw(raw);
+    if (!this.ingest) {
+      this.stats.lastMessageAt = this.clock.now();
+      return;
+    }
     const message = toFeedMessage(raw);
     if (message === null) return;
     this.handleFeedMessage(message);
