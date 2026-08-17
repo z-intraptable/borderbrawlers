@@ -163,4 +163,5 @@ app.ticker.add(() => {
   caption.x = width / 2;
   caption.y = height * 0.08;
   caption.text = step.label;
+
 });
