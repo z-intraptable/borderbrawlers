@@ -1,0 +1,123 @@
+{
+  "_": "WuShang. Kit generado en fila con el prompt de recetas/PROMPT-KIT-PARTES.md y escrito por scripts/receta.py midiendo la hoja: las seis cajas son componentes del alfa, no estimaciones. Las piezas ya vienen rectas y verticales.",
+  "_esqueleto": "Los hombros y las caderas NO salen de dónde cayó cada pieza en la hoja —están en fila, esa posición no dice nada— sino de proporciones sobre el torso medido. Verificar con scripts/armar.py antes de dar por bueno.",
+  "_unit": "29.609: el alto de figura medido (2576 px, cabeza + torso + las dos de pierna) dividido por las 87.0 unidades de rig que mide Asuri, para que todos entren a la pelea del mismo tamaño.",
+  "source": "arte-crudo/wushang-kit-alfa.png",
+  "armature": "WuShang",
+  "unit": 29.609,
+  "scale": 1,
+  "origin": [
+    971,
+    934
+  ],
+  "shoulders": [
+    [
+      761,
+      1094
+    ],
+    [
+      1181,
+      1094
+    ]
+  ],
+  "hips": [
+    [
+      872,
+      1516
+    ],
+    [
+      1070,
+      1516
+    ]
+  ],
+  "parts": {
+    "head": {
+      "box": [
+        218,
+        420,
+        434,
+        652
+      ],
+      "joint": [
+        435,
+        1072
+      ]
+    },
+    "torso": {
+      "box": [
+        785,
+        404,
+        372,
+        728
+      ],
+      "joint": [
+        971,
+        404
+      ]
+    },
+    "armUpper": {
+      "box": [
+        1285,
+        471,
+        160,
+        601
+      ],
+      "from": [
+        1365,
+        471
+      ],
+      "to": [
+        1365,
+        1072
+      ]
+    },
+    "armLower": {
+      "box": [
+        1577,
+        471,
+        172,
+        666
+      ],
+      "from": [
+        1663,
+        471
+      ],
+      "to": [
+        1663,
+        1137
+      ]
+    },
+    "legUpper": {
+      "box": [
+        1878,
+        471,
+        257,
+        464
+      ],
+      "from": [
+        2006,
+        471
+      ],
+      "to": [
+        2006,
+        935
+      ]
+    },
+    "legLower": {
+      "box": [
+        2279,
+        471,
+        258,
+        732
+      ],
+      "from": [
+        2408,
+        471
+      ],
+      "to": [
+        2408,
+        1203
+      ]
+    }
+  }
+}

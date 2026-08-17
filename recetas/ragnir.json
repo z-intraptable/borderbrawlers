@@ -1,0 +1,123 @@
+{
+  "_": "Ragnir. Kit generado en fila con el prompt de recetas/PROMPT-KIT-PARTES.md y escrito por scripts/receta.py midiendo la hoja: las seis cajas son componentes del alfa, no estimaciones. Las piezas ya vienen rectas y verticales.",
+  "_esqueleto": "Los hombros y las caderas NO salen de dónde cayó cada pieza en la hoja —están en fila, esa posición no dice nada— sino de proporciones sobre el torso medido. Verificar con scripts/armar.py antes de dar por bueno.",
+  "_unit": "29.299: el alto de figura medido (2549 px, cabeza + torso + las dos de pierna) dividido por las 87.0 unidades de rig que mide Asuri, para que todos entren a la pelea del mismo tamaño.",
+  "source": "arte-crudo/ragnir-kit-alfa.png",
+  "armature": "Ragnir",
+  "unit": 29.299,
+  "scale": 1,
+  "origin": [
+    916,
+    760
+  ],
+  "shoulders": [
+    [
+      644,
+      937
+    ],
+    [
+      1188,
+      937
+    ]
+  ],
+  "hips": [
+    [
+      789,
+      1405
+    ],
+    [
+      1043,
+      1405
+    ]
+  ],
+  "parts": {
+    "head": {
+      "box": [
+        86,
+        477,
+        543,
+        436
+      ],
+      "joint": [
+        358,
+        913
+      ]
+    },
+    "torso": {
+      "box": [
+        675,
+        307,
+        481,
+        806
+      ],
+      "joint": [
+        916,
+        307
+      ]
+    },
+    "armUpper": {
+      "box": [
+        1285,
+        389,
+        235,
+        799
+      ],
+      "from": [
+        1402,
+        389
+      ],
+      "to": [
+        1402,
+        1188
+      ]
+    },
+    "armLower": {
+      "box": [
+        1622,
+        380,
+        231,
+        812
+      ],
+      "from": [
+        1738,
+        380
+      ],
+      "to": [
+        1738,
+        1192
+      ]
+    },
+    "legUpper": {
+      "box": [
+        1953,
+        476,
+        249,
+        488
+      ],
+      "from": [
+        2078,
+        476
+      ],
+      "to": [
+        2078,
+        964
+      ]
+    },
+    "legLower": {
+      "box": [
+        2316,
+        400,
+        283,
+        819
+      ],
+      "from": [
+        2458,
+        400
+      ],
+      "to": [
+        2458,
+        1219
+      ]
+    }
+  }
+}

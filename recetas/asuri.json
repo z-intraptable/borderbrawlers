@@ -1,119 +1,122 @@
 {
-  "source": "arte-crudo/asuri.png",
+  "_": "Asuri. Kit generado en fila con el prompt de recetas/PROMPT-KIT-PARTES.md y escrito por scripts/receta.py midiendo la hoja: las seis cajas son componentes del alfa, no estimaciones. Las piezas ya vienen rectas y verticales.",
+  "_esqueleto": "Los hombros y las caderas NO salen de dónde cayó cada pieza en la hoja —están en fila, esa posición no dice nada— sino de proporciones sobre el torso medido. Verificar con scripts/armar.py antes de dar por bueno.",
+  "_unit": "28.816: el alto de figura medido (2507 px, cabeza + torso + las dos de pierna) dividido por las 87.0 unidades de rig que mide Asuri, para que todos entren a la pelea del mismo tamaño.",
+  "source": "arte-crudo/asuri-kit-alfa.png",
   "armature": "Asuri",
-  "unit": 11.5,
+  "unit": 28.816,
   "scale": 1,
   "origin": [
-    620,
-    470
+    780,
+    592
   ],
   "shoulders": [
     [
-      470,
-      460
+      578,
+      725
     ],
     [
-      800,
-      460
+      982,
+      725
     ]
   ],
   "hips": [
     [
-      610,
-      720
+      685,
+      1075
     ],
     [
-      760,
-      720
+      875,
+      1075
     ]
   ],
   "parts": {
     "head": {
       "box": [
-        330,
-        10,
-        470,
-        470
+        124,
+        92,
+        381,
+        615
       ],
       "joint": [
-        620,
-        440
+        314,
+        707
       ]
     },
     "torso": {
       "box": [
-        490,
-        455,
-        280,
-        265
+        602,
+        504,
+        357,
+        604
       ],
       "joint": [
-        620,
-        470
+        780,
+        504
       ]
     },
     "armUpper": {
       "box": [
-        780,
-        400,
-        180,
-        110
+        1173,
+        412,
+        144,
+        396
       ],
       "from": [
-        790,
-        455
+        1245,
+        412
       ],
       "to": [
-        940,
-        450
+        1245,
+        808
       ]
     },
     "armLower": {
       "box": [
-        920,
-        380,
-        350,
-        250
+        1555,
+        408,
+        215,
+        827
       ],
       "from": [
-        940,
-        450
+        1662,
+        408
       ],
       "to": [
-        1150,
-        505
+        1662,
+        1235
       ]
     },
     "legUpper": {
       "box": [
-        710,
-        700,
-        230,
-        180
+        1966,
+        478,
+        179,
+        453
       ],
       "from": [
-        755,
-        725
+        2056,
+        478
       ],
       "to": [
-        895,
-        840
+        2056,
+        931
       ]
     },
     "legLower": {
       "box": [
-        830,
-        800,
-        320,
-        205
+        2338,
+        491,
+        280,
+        835
       ],
       "from": [
-        895,
-        840
+        2478,
+        491
       ],
       "to": [
-        995,
-        940
+        2478,
+        1326
       ]
     }
   }

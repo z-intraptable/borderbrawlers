@@ -1,29 +1,29 @@
 {
-  "armature": "Asuri",
-  "unit": 28.816,
+  "armature": "Kor",
+  "unit": 50.195,
   "rig": {
-    "armUpper": 13.742,
-    "armLower": 28.699,
-    "legUpper": 15.72,
-    "legLower": 28.977,
-    "shoulderX": 7.01,
-    "shoulderY": 4.615,
-    "hipX": 3.297,
-    "hipY": 16.762,
-    "headY": 3.991
+    "armUpper": 15.798,
+    "armLower": 26.915,
+    "legUpper": 13.806,
+    "legLower": 27.493,
+    "shoulderX": 12.611,
+    "shoulderY": 5.339,
+    "hipX": 5.917,
+    "hipY": 19.384,
+    "headY": 4.602
   },
   "parts": {
     "head": {
       "file": "head.png",
       "pivot": [
-        0.4987,
+        0.5,
         1.0
       ]
     },
     "torso": {
       "file": "torso.png",
       "pivot": [
-        0.4986,
+        0.5,
         0.0
       ]
     },
@@ -37,21 +37,21 @@
     "armLower": {
       "file": "armlower.png",
       "pivot": [
-        0.4977,
+        0.5,
         0.0
       ]
     },
     "legUpper": {
       "file": "legupper.png",
       "pivot": [
-        0.5028,
+        0.4988,
         0.0
       ]
     },
     "legLower": {
       "file": "leglower.png",
       "pivot": [
-        0.5,
+        0.4991,
         0.0
       ]
     }

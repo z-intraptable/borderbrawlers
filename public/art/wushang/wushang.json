@@ -1,29 +1,29 @@
 {
-  "armature": "Asuri",
-  "unit": 28.816,
+  "armature": "WuShang",
+  "unit": 29.609,
   "rig": {
-    "armUpper": 13.742,
-    "armLower": 28.699,
-    "legUpper": 15.72,
-    "legLower": 28.977,
-    "shoulderX": 7.01,
-    "shoulderY": 4.615,
-    "hipX": 3.297,
-    "hipY": 16.762,
-    "headY": 3.991
+    "armUpper": 20.298,
+    "armLower": 22.493,
+    "legUpper": 15.671,
+    "legLower": 24.722,
+    "shoulderX": 7.092,
+    "shoulderY": 5.404,
+    "hipX": 3.344,
+    "hipY": 19.656,
+    "headY": 4.661
   },
   "parts": {
     "head": {
       "file": "head.png",
       "pivot": [
-        0.4987,
+        0.5,
         1.0
       ]
     },
     "torso": {
       "file": "torso.png",
       "pivot": [
-        0.4986,
+        0.5,
         0.0
       ]
     },
@@ -37,14 +37,14 @@
     "armLower": {
       "file": "armlower.png",
       "pivot": [
-        0.4977,
+        0.5,
         0.0
       ]
     },
     "legUpper": {
       "file": "legupper.png",
       "pivot": [
-        0.5028,
+        0.4981,
         0.0
       ]
     },

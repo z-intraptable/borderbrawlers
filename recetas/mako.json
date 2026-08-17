@@ -1,0 +1,123 @@
+{
+  "_": "Mako. Kit generado en fila con el prompt de recetas/PROMPT-KIT-PARTES.md y escrito por scripts/receta.py midiendo la hoja: las seis cajas son componentes del alfa, no estimaciones. Las piezas ya vienen rectas y verticales.",
+  "_esqueleto": "Los hombros y las caderas NO salen de dónde cayó cada pieza en la hoja —están en fila, esa posición no dice nada— sino de proporciones sobre el torso medido. Verificar con scripts/armar.py antes de dar por bueno.",
+  "_unit": "28.23: el alto de figura medido (2456 px, cabeza + torso + las dos de pierna) dividido por las 87.0 unidades de rig que mide Asuri, para que todos entren a la pelea del mismo tamaño.",
+  "source": "arte-crudo/mako-kit-alfa.png",
+  "armature": "Mako",
+  "unit": 28.23,
+  "scale": 1,
+  "origin": [
+    1022,
+    854
+  ],
+  "shoulders": [
+    [
+      761,
+      1009
+    ],
+    [
+      1283,
+      1009
+    ]
+  ],
+  "hips": [
+    [
+      900,
+      1417
+    ],
+    [
+      1144,
+      1417
+    ]
+  ],
+  "parts": {
+    "head": {
+      "box": [
+        90,
+        503,
+        636,
+        485
+      ],
+      "joint": [
+        408,
+        988
+      ]
+    },
+    "torso": {
+      "box": [
+        791,
+        415,
+        462,
+        704
+      ],
+      "joint": [
+        1022,
+        415
+      ]
+    },
+    "armUpper": {
+      "box": [
+        1367,
+        423,
+        206,
+        584
+      ],
+      "from": [
+        1470,
+        423
+      ],
+      "to": [
+        1470,
+        1007
+      ]
+    },
+    "armLower": {
+      "box": [
+        1697,
+        405,
+        217,
+        708
+      ],
+      "from": [
+        1806,
+        405
+      ],
+      "to": [
+        1806,
+        1113
+      ]
+    },
+    "legUpper": {
+      "box": [
+        2042,
+        406,
+        235,
+        542
+      ],
+      "from": [
+        2160,
+        406
+      ],
+      "to": [
+        2160,
+        948
+      ]
+    },
+    "legLower": {
+      "box": [
+        2407,
+        405,
+        255,
+        725
+      ],
+      "from": [
+        2534,
+        405
+      ],
+      "to": [
+        2534,
+        1130
+      ]
+    }
+  }
+}

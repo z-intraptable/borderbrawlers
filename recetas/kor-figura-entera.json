@@ -1,0 +1,56 @@
+{
+  "_": "Kor, el gólem. El caso más limpio del lote: los miembros vienen despegados del torso en el dibujo, así que las cajas NO se estimaron a ojo — salen de los componentes conectados del alfa, medidos con `python3 scripts/piezas.py arte-crudo/kor.png`. Lo único elegido a mano son las dos junturas que el dibujo no marca: el codo y la rodilla. Kor es un bloque de piedra sin banda ni rodillera, así que los miembros se parten al medio, que es donde una articulación se lee como natural.",
+
+  "_componentes": "Los cinco que midió piezas.py: cuerpo [265,1,450,957], brazo izq [1,586,259,387], brazo der [728,586,231,387], pierna der [568,911,211,353], pierna izq [207,923,249,353]. Se usa un brazo y una pierna solos: el juego dibuja los de atrás con la misma imagen en tono más oscuro.",
+
+  "_unit": "14.7 sale de igualar el alto de figura de Asuri, que es la receta que ya funciona: su dibujo mide ~1000 px y con unit 11.5 da ~87 unidades de rig. Kor mide 1275 px, así que 1275/87 = 14.7. Si esto se deja en 11.5 como Asuri, Kor entra en la pelea una cabeza y media más alto que todos.",
+
+  "_origin": "El (0,0) del cuerpo, arriba del torso. x=489 es el centro del componente del cuerpo.",
+
+  "_shoulders": "x=239 y x=739, o sea shoulderX 17. NO el centro del componente del brazo (130/843, shoulderX 22.2): ése fue el segundo intento y también salió mal, por una razón que costó ver. **El dibujo es una hoja EXPLOTADA**: las piezas están separadas a propósito para poder cortarlas, con huecos medidos de 39 a 149 px entre brazo y torso. Colgar el brazo del centro de su propia pieza copia ese hueco al juego, y el peleador entra a la pelea desarmado. Medido con `scripts/armar.py`: el hueco quedaba en 9,3 unidades a la altura del hombro y se cerraba a 0,1 en el codo, que es justo la forma de 'brazo que flota arriba y toca abajo'. El 14.3 del primer intento —los costados del torso— fallaba por lo contrario. 17 es el punto donde el brazo apoya contra el costado con un solapado leve, que es como se ve en el dibujo armado.",
+
+  "_hips": "x=371 y x=607, y=873: hipX 8 y hipY 25. El centro de cada pierna suelta (331/673, hipX 11.6) tiene el mismo problema que los hombros — es la posición EXPLOTADA, y ahí las piernas caen por fuera del ancho real del torso, que se angosta hacia abajo. Verificado con `scripts/armar.py`.",
+
+  "_cabeza": "El cuerpo es un monolito: cabeza y torso son el mismo componente de alfa. El corte va en y=505, donde termina el bloque de la cara con el ojo naranja y empiezan las placas del pecho.",
+
+  "_junturas": "Codo en y=780 y rodilla en y=1100, los dos al medio del miembro.",
+
+  "source": "arte-crudo/kor.png",
+  "armature": "Kor",
+  "unit": 14.7,
+  "scale": 1,
+  "origin": [489, 505],
+  "shoulders": [[239, 608], [739, 608]],
+  "hips": [[371, 873], [607, 873]],
+
+  "parts": {
+    "head": {
+      "box": [265, 1, 450, 505],
+      "joint": [489, 480]
+    },
+    "torso": {
+      "box": [265, 500, 450, 458],
+      "joint": [489, 505]
+    },
+    "armUpper": {
+      "box": [1, 586, 259, 195],
+      "from": [130, 595],
+      "to": [125, 780]
+    },
+    "armLower": {
+      "box": [1, 775, 259, 198],
+      "from": [125, 780],
+      "to": [133, 965]
+    },
+    "legUpper": {
+      "box": [207, 923, 249, 180],
+      "from": [331, 930],
+      "to": [331, 1100]
+    },
+    "legLower": {
+      "box": [207, 1095, 249, 181],
+      "from": [331, 1100],
+      "to": [331, 1270]
+    }
+  }
+}

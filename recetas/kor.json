@@ -1,0 +1,123 @@
+{
+  "_": "Kor. Kit generado en fila con el prompt de recetas/PROMPT-KIT-PARTES.md y escrito por scripts/receta.py midiendo la hoja: las seis cajas son componentes del alfa, no estimaciones. Las piezas ya vienen rectas y verticales.",
+  "_esqueleto": "Los hombros y las caderas NO salen de dónde cayó cada pieza en la hoja —están en fila, esa posición no dice nada— sino de proporciones sobre el torso medido. Verificar con scripts/armar.py antes de dar por bueno.",
+  "_unit": "50.195: el alto de figura medido (4367 px, cabeza + torso + las dos de pierna) dividido por las 87.0 unidades de rig que mide Asuri, para que todos entren a la pelea del mismo tamaño.",
+  "source": "arte-crudo/kor-kit-alfa.png",
+  "armature": "Kor",
+  "unit": 50.195,
+  "scale": 1,
+  "origin": [
+    2073,
+    1784
+  ],
+  "shoulders": [
+    [
+      1440,
+      2052
+    ],
+    [
+      2706,
+      2052
+    ]
+  ],
+  "hips": [
+    [
+      1776,
+      2757
+    ],
+    [
+      2370,
+      2757
+    ]
+  ],
+  "parts": {
+    "head": {
+      "box": [
+        355,
+        937,
+        1010,
+        1078
+      ],
+      "joint": [
+        860,
+        2015
+      ]
+    },
+    "torso": {
+      "box": [
+        1513,
+        863,
+        1120,
+        1216
+      ],
+      "joint": [
+        2073,
+        863
+      ]
+    },
+    "armUpper": {
+      "box": [
+        2794,
+        982,
+        350,
+        793
+      ],
+      "from": [
+        2969,
+        982
+      ],
+      "to": [
+        2969,
+        1775
+      ]
+    },
+    "armLower": {
+      "box": [
+        3325,
+        972,
+        412,
+        1351
+      ],
+      "from": [
+        3531,
+        972
+      ],
+      "to": [
+        3531,
+        2323
+      ]
+    },
+    "legUpper": {
+      "box": [
+        3975,
+        970,
+        407,
+        693
+      ],
+      "from": [
+        4178,
+        970
+      ],
+      "to": [
+        4178,
+        1663
+      ]
+    },
+    "legLower": {
+      "box": [
+        4566,
+        970,
+        573,
+        1380
+      ],
+      "from": [
+        4852,
+        970
+      ],
+      "to": [
+        4852,
+        2350
+      ]
+    }
+  }
+}

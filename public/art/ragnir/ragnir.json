@@ -1,57 +1,57 @@
 {
-  "armature": "Asuri",
-  "unit": 28.816,
+  "armature": "Ragnir",
+  "unit": 29.299,
   "rig": {
-    "armUpper": 13.742,
-    "armLower": 28.699,
-    "legUpper": 15.72,
-    "legLower": 28.977,
-    "shoulderX": 7.01,
-    "shoulderY": 4.615,
-    "hipX": 3.297,
-    "hipY": 16.762,
-    "headY": 3.991
+    "armUpper": 27.271,
+    "armLower": 27.714,
+    "legUpper": 16.656,
+    "legLower": 27.953,
+    "shoulderX": 9.284,
+    "shoulderY": 6.041,
+    "hipX": 4.335,
+    "hipY": 22.014,
+    "headY": 5.222
   },
   "parts": {
     "head": {
       "file": "head.png",
       "pivot": [
-        0.4987,
+        0.5009,
         1.0
       ]
     },
     "torso": {
       "file": "torso.png",
       "pivot": [
-        0.4986,
+        0.501,
         0.0
       ]
     },
     "armUpper": {
       "file": "armupper.png",
       "pivot": [
-        0.5,
+        0.4979,
         0.0
       ]
     },
     "armLower": {
       "file": "armlower.png",
       "pivot": [
-        0.4977,
+        0.5022,
         0.0
       ]
     },
     "legUpper": {
       "file": "legupper.png",
       "pivot": [
-        0.5028,
+        0.502,
         0.0
       ]
     },
     "legLower": {
       "file": "leglower.png",
       "pivot": [
-        0.5,
+        0.5018,
         0.0
       ]
     }

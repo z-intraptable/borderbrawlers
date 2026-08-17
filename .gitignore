@@ -27,6 +27,14 @@ shots/
 # La figura entera del generador; las piezas cortadas sí van al repo
 arte-crudo/*.png
 
+# Las hojas de kit como salen de Higgsfield —4K, 14 MB cada una— y su versión
+# con alfa. Son 110 MB contra los 8,8 MB de piezas que el juego carga, y no las
+# lee nadie: `cortar.py` ya escribió lo que importa en public/art/. Se
+# regeneran con el prompt de recetas/PROMPT-KIT-PARTES.md, que sí va al repo.
+# Es la misma razón por la que los ZIPs de escenarios no están versionados.
+arte-crudo/kits/
+arte-crudo/*-kit-alfa.png
+
 # Las capas crudas del escenario, como salen del ZIP. Sólo el fondo va al
 # repo, en public/escenarios/<slug>/fondo.jpg, que es lo único que el juego
 # carga (ver src/render/stage.ts). Guardar las plataformas y los props que
