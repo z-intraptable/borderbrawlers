@@ -32,6 +32,8 @@ import {
   ACT_SUPER,
 } from '../art/fighter';
 import { lookFor } from '../art/looks';
+import { loadArt, unloadArt } from '../art/loadArt';
+import type { FighterArt } from '../art/loadArt';
 import { characterFor } from '../game/roster';
 import { burst, createFx, drawFx, dust, ring, trail, updateFx } from './fx';
 import { createBackdrop } from './backdrop';
@@ -140,6 +142,16 @@ export async function startGame(
   const plainFx = new Graphics();
   world.addChild(plainFx);
 
+  // Se pide el arte de cada personaje una sola vez, en paralelo. El que no lo
+  // tenga dibujado todavía devuelve null y sale vectorial, en la misma pelea.
+  const armatures = [...new Set(
+    Array.from(match.slot, (_, i) => characterFor(match.team[i], match.character[i]).armature),
+  )];
+  const loaded = await Promise.all(armatures.map((name) => loadArt(name)));
+  const artByArmature = new Map<string, FighterArt | null>(
+    armatures.map((name, i) => [name, loaded[i]]),
+  );
+
   /**
    * Un cuerpo articulado por slot. El personaje que le toca a cada slot es fijo
    * —un slot no cambia de bando— así que la silueta se resuelve una sola vez.
@@ -150,6 +162,7 @@ export async function startGame(
     const view = createFighterView(
       lookFor(character.armature),
       match.team[i] === TEAM_GREEN ? GREEN : RED,
+      artByArmature.get(character.armature) ?? null,
     );
     view.visible = false;
     world.addChild(view);
@@ -342,6 +355,11 @@ export async function startGame(
     destroy(): void {
       app.ticker.remove(tick);
       backdrop.destroy();
+      // El caché de `Assets` sobrevive al `Application`: sin esto, cada recarga
+      // en caliente de Vite deja otra copia de las hojas en memoria de GPU.
+      for (const art of artByArmature.values()) {
+        if (art !== null) void unloadArt(art);
+      }
       // `destroy(true, …)` tira también el canvas y las texturas creadas por
       // los Graphics. Cuando entren los sprites del arte hay que sumar
       // `Assets.unload` de cada hoja: el caché de Assets sobrevive al

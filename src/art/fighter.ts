@@ -1,4 +1,5 @@
-import { Container, Graphics } from 'pixi.js';
+import { Container, Graphics, Sprite } from 'pixi.js';
+import type { FighterArt } from './loadArt';
 import type { Look } from './looks';
 import {
   GEAR_ANTENNA,
@@ -165,7 +166,38 @@ function chain(x: number, y: number, upperLength: number): Chain {
   return { upper, lower, upperG, lowerG };
 }
 
-export function createFighterView(look: Look, color: number): FighterView {
+/**
+ * Cuelga un sprite de una articulación.
+ *
+ * El ancla del sprite ES el pivote del manifiesto: colocado en (0,0) del nodo,
+ * el punto de la imagen marcado como articulación cae exactamente sobre la
+ * articulación del esqueleto. Es lo que hace que un brazo dibujado gire desde el
+ * hombro sin una sola corrección.
+ */
+function hang(
+  parent: Container, art: FighterArt, part: string, tint: number,
+): Sprite | null {
+  const texture = art.textures[part as 'head'];
+  if (texture === undefined) return null;
+  const sprite = new Sprite(texture);
+  const [px, py] = art.pivots[part] ?? [0.5, 0.5];
+  sprite.anchor.set(px, py);
+  // El manifiesto dice cuántos píxeles mide una unidad del rig; el rig dibuja en
+  // sus propias unidades, así que la imagen se achica por esa razón.
+  sprite.scale.set(1 / art.unit);
+  sprite.tint = tint;
+  parent.addChild(sprite);
+  return sprite;
+}
+
+/**
+ * @param art piezas dibujadas. Sin ellas se usa el peleador vectorial, que es
+ *   lo que permite ver a un personaje con arte propio al lado de los que
+ *   todavía no lo tienen, en la misma pelea.
+ */
+export function createFighterView(
+  look: Look, color: number, art: FighterArt | null = null,
+): FighterView {
   const root = new Container() as FighterView;
 
   /** El que traduce de unidades del rig a unidades de mundo. */
@@ -204,7 +236,32 @@ export function createFighterView(look: Look, color: number): FighterView {
   const ball = new Graphics();
   if (look.ball) backArm.lower.addChild(ball);
 
+  if (art !== null) {
+    // Las piezas traseras usan la MISMA imagen con un tinte más oscuro. Dibujar
+    // dos versiones de cada brazo sería el doble de trabajo para el que dibuja y
+    // el doble de textura, para expresar una diferencia de luz.
+    const BACK_TINT = 0x8a8a8a;
+    hang(torsoG, art, 'torso', 0xffffff);
+    hang(head, art, 'head', 0xffffff);
+    hang(frontArm.upperG, art, 'armUpper', 0xffffff);
+    hang(frontArm.lowerG, art, 'armLower', 0xffffff);
+    hang(frontLeg.upperG, art, 'legUpper', 0xffffff);
+    hang(frontLeg.lowerG, art, 'legLower', 0xffffff);
+    hang(backArm.upperG, art, 'armUpper', BACK_TINT);
+    hang(backArm.lowerG, art, 'armLower', BACK_TINT);
+    hang(backLeg.upperG, art, 'legUpper', BACK_TINT);
+    hang(backLeg.lowerG, art, 'legLower', BACK_TINT);
+    if (look.blade) hang(blade, art, 'blade', 0xffffff);
+  }
+
   const draw = (tint: number, glow: boolean): void => {
+    if (art !== null) {
+      // Con arte dibujado, lo único que sigue siendo vectorial es el aura del
+      // gigantismo: es un efecto del juego, no una pieza del personaje.
+      aura.clear();
+      if (glow) aura.circle(0, 5, 74).fill({ color: 0xffd700, alpha: 0.2 });
+      return;
+    }
     const shade = darken(tint, SHADE);
     const deep = darken(tint, DEEP);
     const line: Line = { width: OUTLINE_WIDTH, color: OUTLINE, alignment: 0.5 };

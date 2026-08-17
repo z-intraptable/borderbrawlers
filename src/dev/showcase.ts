@@ -8,6 +8,7 @@ import {
   ACT_SUPER,
 } from '../art/fighter';
 import { lookFor } from '../art/looks';
+import { loadArt } from '../art/loadArt';
 import { ROSTER } from '../game/roster';
 import { TEAM_GREEN } from '../game/fighters';
 
@@ -54,10 +55,13 @@ host.appendChild(app.canvas);
 const stage = new Container();
 app.stage.addChild(stage);
 
-const views = ROSTER.map((character) => {
+const art = await Promise.all(ROSTER.map((character) => loadArt(character.armature)));
+
+const views = ROSTER.map((character, i) => {
   const view = createFighterView(
     lookFor(character.armature),
     character.team === TEAM_GREEN ? GREEN : RED,
+    art[i],
   );
   stage.addChild(view);
   return view;
