@@ -50,13 +50,15 @@ await new Promise((resolve, reject) => {
   });
 });
 
-// Sólo los cuadros: borrar la carpeta entera se llevaba puesto el GIF de la
-// corrida anterior, que es justamente lo que uno quiere conservar.
+// Se borra sólo lo de esta corrida. Borrar la carpeta entera se llevaba puesto
+// el GIF de la anterior, y borrar todos los `.webm` se llevaba el video de la
+// otra grabación, que es justo lo que uno quiere conservar. Por eso el video
+// crudo cae en una carpeta propia y desechable: Playwright le pone un nombre
+// aleatorio recién al cerrar el contexto, así que no hay a quién apuntarle.
 rmSync(`${OUT}/cuadros`, { recursive: true, force: true });
+rmSync(`${OUT}/crudo`, { recursive: true, force: true });
 mkdirSync(`${OUT}/cuadros`, { recursive: true });
-for (const stale of readdirSync(OUT, { withFileTypes: true })) {
-  if (stale.isFile() && stale.name.endsWith('.webm')) rmSync(`${OUT}/${stale.name}`);
-}
+mkdirSync(`${OUT}/crudo`, { recursive: true });
 
 const browser = await chromium.launch({
   executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
@@ -65,7 +67,7 @@ const browser = await chromium.launch({
 const context = await browser.newContext({
   viewport: SIZE,
   deviceScaleFactor: banco ? 3 : 1,
-  recordVideo: { dir: OUT, size: SIZE },
+  recordVideo: { dir: `${OUT}/crudo`, size: SIZE },
 });
 const page = await context.newPage();
 
@@ -94,9 +96,10 @@ const elapsed = (Date.now() - started) / 1000;
 await context.close();
 await browser.close();
 
-// Playwright le pone al video un nombre aleatorio recién al cerrar el contexto.
-const webm = readdirSync(OUT).find((f) => f.endsWith('.webm'));
-if (webm !== undefined) renameSync(`${OUT}/${webm}`, `${OUT}/pelea.webm`);
+const name = banco ? 'deadpool' : 'pelea';
+const webm = readdirSync(`${OUT}/crudo`).find((f) => f.endsWith('.webm'));
+if (webm !== undefined) renameSync(`${OUT}/crudo/${webm}`, `${OUT}/${name}.webm`);
+rmSync(`${OUT}/crudo`, { recursive: true, force: true });
 
 console.log(`${frames} cuadros en ${elapsed.toFixed(1)} s`);
 console.log(`captura real: ${(frames / elapsed).toFixed(1)} cuadros por segundo`);
