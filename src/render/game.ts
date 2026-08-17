@@ -38,7 +38,8 @@ import type { FighterArt } from '../art/loadArt';
 import { ROSTER, characterFor } from '../game/roster';
 import { burst, createFx, drawFx, dust, ring, trail, updateFx } from './fx';
 import { createBackdrop } from './backdrop';
-import { createStage, loadStage, stageNames, stageTint } from './stage';
+import { createStage, loadPlatforms, loadStage, stageNames, stageTint } from './stage';
+import type { StagePlatforms } from './stage';
 
 /**
  * La capa que dibuja. Lee el estado de la simulación y lo pinta; no decide nada.
@@ -151,8 +152,25 @@ export async function startGame(
   const world = new Container();
   app.stage.addChild(world);
 
+  /**
+   * Las losas: dibujadas si el escenario las trae, y las tres bandas de color
+   * de siempre si no. Se resuelve una vez acá y no cada frame — igual que el
+   * arte de los personajes, la ausencia no es un error.
+   *
+   * Se carga la dotación del escenario que ARRANCA. Los escenarios rotan con el
+   * super, pero las losas no rotan con ellos: cambiarlas en el mismo frame que
+   * el fondo pediría tener las nueve texturas de los cinco escenarios cargadas
+   * de entrada, y la mayoría de los escenarios todavía no tiene losas propias.
+   * Con `?stage=` —que es el modo de mirar un escenario— coincide siempre.
+   */
+  const platformArt = rotation.length === 0 ? null : await loadPlatforms(rotation[0]);
   const platforms = new Graphics();
-  world.addChild(platforms);
+  const platformSprites = platformArt === null ? null : buildStageSprites(platformArt);
+  if (platformSprites === null) {
+    world.addChild(platforms);
+  } else {
+    for (const sprite of platformSprites) world.addChild(sprite);
+  }
 
   /** Polvo y sombras: no brillan, van con el resto del mundo. */
   const plainFx = new Graphics();
@@ -310,7 +328,8 @@ export async function startGame(
     // durante el hitstop tiene que aparecer con el peleador que le tocó igual.
     relieve(match);
 
-    drawStage(platforms, match);
+    if (platformSprites === null) drawStage(platforms, match);
+    else placeStage(platformSprites, match);
     updateCamera(camera, match, dt);
     applyCamera(world, app, camera, match.shake);
     drawFighters(views, match, action, actionAge, dt, elapsed);
@@ -446,6 +465,49 @@ function emitTrails(match: Match, target: ReturnType<typeof createFx>): void {
     const color = match.team[i] === TEAM_GREEN ? GREEN : RED;
     trail(target, match.x[i], match.y[i], 0.3 * match.scale[i], color);
   }
+}
+
+/**
+ * Coloca las nueve losas dibujadas.
+ *
+ * Es el mismo dato que `drawStage` —x fijo, `topY` variable— pero escrito en
+ * `position` y `height` de un sprite en vez de en un `Graphics`. Se puede porque
+ * las nueve plataformas **no cambian de tamaño nunca**: sólo se mueven en Y. Si
+ * se redimensionaran habría que estirar la imagen cada frame, y ahí un sprite
+ * dejaría de ser más barato que las bandas.
+ *
+ * Los sprites se crean una vez al arrancar y de ahí en más esto sólo escribe
+ * números: cero asignaciones por frame, como el resto del camino de dibujo.
+ */
+function placeStage(sprites: readonly Sprite[], match: Match): void {
+  for (let i = 0; i < sprites.length; i++) {
+    sprites[i].y = -match.skyline.topY[i];
+  }
+}
+
+/**
+ * Prepara las nueve losas a partir de las dos imágenes del escenario: una
+ * central y ocho laterales, que es toda la variedad que hay porque las ocho
+ * laterales miden exactamente lo mismo.
+ *
+ * El ancho y el grosor se escriben una sola vez acá. La imagen se estira a la
+ * medida de la losa, y por eso el arte se pide con la proporción que el juego
+ * necesita —4,6 la central y 1,41 las laterales—; con otra proporción el dibujo
+ * entra igual pero deformado.
+ */
+function buildStageSprites(art: StagePlatforms): Sprite[] {
+  const sprites: Sprite[] = [];
+  for (let i = 0; i < PLATFORM_COUNT; i++) {
+    const sprite = new Sprite(i === 0 ? art.centro : art.lado);
+    // Anclado arriba y al medio: `topY` es justamente la cara de arriba, que es
+    // lo que la física usa como piso.
+    sprite.anchor.set(0.5, 0);
+    sprite.x = platformCenterX(i);
+    sprite.width = platformHalfWidth(i) * 2;
+    sprite.height = (i === 0 ? 0.9 : 0.55) + 0.14;
+    sprites.push(sprite);
+  }
+  return sprites;
 }
 
 function drawStage(g: Graphics, match: Match): void {

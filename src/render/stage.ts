@@ -76,6 +76,51 @@ export async function loadStage(name: string): Promise<Texture | null> {
   }
 }
 
+/**
+ * Las dos losas dibujadas de un escenario, si las tiene.
+ *
+ * Son OPCIONALES igual que el fondo: sin ellas las nueve plataformas se dibujan
+ * con las tres bandas de color de siempre y el juego corre igual. Un escenario
+ * puede tener fondo y no tener losas.
+ *
+ * Son sólo dos imágenes para nueve plataformas porque **las nueve tienen medidas
+ * constantes**: una central ancha y ocho laterales todas iguales. Pedirle al
+ * arte una por plataforma sería pedir ocho copias del mismo dibujo.
+ */
+export interface StagePlatforms {
+  centro: Texture;
+  lado: Texture;
+}
+
+async function loadTexture(url: string): Promise<Texture | null> {
+  try {
+    const response = await fetch(url, { method: 'HEAD' });
+    if (!response.ok) return null;
+    // Vite responde el index.html con 200 para rutas que no conoce.
+    const type = response.headers.get('content-type') ?? '';
+    if (!type.startsWith('image/')) return null;
+    return await Assets.load<Texture>(url);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Carga las losas de un escenario. Devuelve `null` si le falta alguna de las
+ * dos: media dotación —la central dibujada y las laterales de color— se vería
+ * peor que ninguna, porque el ojo lee la diferencia como un error y no como un
+ * estilo.
+ */
+export async function loadPlatforms(name: string): Promise<StagePlatforms | null> {
+  const carpeta = `/escenarios/${name.toLowerCase()}`;
+  const [centro, lado] = await Promise.all([
+    loadTexture(`${carpeta}/losa-centro.png`),
+    loadTexture(`${carpeta}/losa-lado.png`),
+  ]);
+  if (centro === null || lado === null) return null;
+  return { centro, lado };
+}
+
 export function createStage(texture: Texture): Stage {
   const sprite = new Sprite(texture);
   sprite.anchor.set(0.5);
