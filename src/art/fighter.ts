@@ -200,6 +200,19 @@ export function createFighterView(
 ): FighterView {
   const root = new Container() as FighterView;
 
+  // Las proporciones salen del dibujo cuando hay dibujo. Las constantes de
+  // arriba describen al peleador vectorial y no describen a nadie más: el
+  // primer personaje dibujado que llegó tenía la cabeza del doble y las caderas
+  // más anchas, y encajarlo en ellas le dejaba los brazos naciendo del aire.
+  const rig_ = art?.rig ?? null;
+  const shoulderX = rig_?.shoulderX ?? SHOULDER_X;
+  const shoulderY = rig_?.shoulderY ?? SHOULDER_Y;
+  const hipX = rig_?.hipX ?? HIP_X;
+  const hipY = rig_?.hipY ?? HIP_Y;
+  const headY = rig_?.headY ?? HEAD_Y;
+  const armUpper = rig_?.armUpper ?? ARM_UPPER;
+  const legUpper = rig_?.legUpper ?? LEG_UPPER;
+
   /** El que traduce de unidades del rig a unidades de mundo. */
   const rig = new Container();
   rig.scale.set(1 / RIG);
@@ -220,15 +233,15 @@ export function createFighterView(
   // Orden de dibujo: lo de atrás primero. En una figura de tres cuartos el
   // brazo y la pierna de atrás tienen que quedar detrás del torso, o el cuerpo
   // se ve plano y las extremidades parecen pegadas por delante.
-  const backArm = chain(-SHOULDER_X, SHOULDER_Y, ARM_UPPER);
-  const backLeg = chain(-HIP_X, HIP_Y, LEG_UPPER);
+  const backArm = chain(-shoulderX, shoulderY, armUpper);
+  const backLeg = chain(-hipX, hipY, legUpper);
   const torsoG = new Graphics();
-  const frontLeg = chain(HIP_X, HIP_Y, LEG_UPPER);
-  const frontArm = chain(SHOULDER_X, SHOULDER_Y, ARM_UPPER);
+  const frontLeg = chain(hipX, hipY, legUpper);
+  const frontArm = chain(shoulderX, shoulderY, armUpper);
   const head = new Container();
   const headG = new Graphics();
   head.addChild(headG);
-  head.y = HEAD_Y;
+  head.y = headY;
   body.addChild(backArm.upper, backLeg.upper, torsoG, frontLeg.upper, frontArm.upper, head);
 
   // La pelota va en el puño de atrás, así que es hija del brazo y lo acompaña
@@ -345,7 +358,7 @@ export function createFighterView(
       // rápido comunica que el golpe entró.
       torsoG.rotation = -0.32;
       head.rotation = -0.34;
-      head.y = HEAD_Y + 3;
+      head.y = headY + 3;
       set(backArm, 2.5, 0.5);
       set(frontArm, -2.5, 0.6);
       set(backLeg, 0.5, 0.5);
@@ -370,7 +383,7 @@ export function createFighterView(
       const rising = vy > 0;
       torsoG.rotation = rising ? 0.1 : -0.08;
       head.rotation = rising ? 0.08 : -0.1;
-      head.y = HEAD_Y;
+      head.y = headY;
       set(backArm, rising ? -2.3 : -1.5, rising ? 0.5 : 0.9);
       set(frontArm, rising ? 2.3 : 1.5, rising ? 0.4 : 0.8);
       set(backLeg, rising ? 0.75 : -0.3, rising ? 1.5 : 0.35);
@@ -402,7 +415,7 @@ export function createFighterView(
 
       // Dos rebotes por ciclo: el cuerpo sube en cada apoyo, no en cada paso.
       body.y = BODY_Y - Math.abs(Math.cos(cycle)) * 3.5;
-      head.y = HEAD_Y;
+      head.y = headY;
       return;
     }
 
@@ -410,7 +423,7 @@ export function createFighterView(
     const breath = Math.sin(elapsed * 1.9);
     torsoG.rotation = 0;
     head.rotation = breath * 0.04;
-    head.y = HEAD_Y - breath * 1.2;
+    head.y = headY - breath * 1.2;
     set(backArm, 0.16 + breath * 0.06, 0.3);
     set(frontArm, -0.16 - breath * 0.06, 0.34);
     set(backLeg, 0.03, 0.06);
@@ -434,7 +447,7 @@ export function createFighterView(
    * dos brazos en horizontal, sin salida ni vuelta.
    */
   function poseAction(action: number, impulse: number, t: number): void {
-    head.y = HEAD_Y;
+    head.y = headY;
     // Carga: el primer cuarto de la acción, en el que el golpe todavía no salió.
     // Es lo que hace que un golpe tenga anticipación en vez de aparecer.
     const windup = t < 0.25 ? 1 - t / 0.25 : 0;

@@ -1,5 +1,5 @@
 import { Assets, Texture } from 'pixi.js';
-import type { Manifest, PartName } from './manifest';
+import type { Manifest, PartName, Rig } from './manifest';
 import { parseManifest } from './manifest';
 
 /**
@@ -18,6 +18,8 @@ export interface FighterArt {
   pivots: Record<string, [number, number]>;
   /** Cuántos píxeles de la imagen mide una unidad del rig. */
   unit: number;
+  /** Las medidas del esqueleto sacadas del dibujo, si el manifiesto las trae. */
+  rig: Rig | null;
   /** Las URLs cargadas, para poder devolverlas después. */
   files: string[];
 }
@@ -72,7 +74,7 @@ export async function loadArt(armature: string): Promise<FighterArt | null> {
     files.push(file);
   }));
 
-  return { textures, pivots, unit: manifest.unit, files };
+  return { textures, pivots, unit: manifest.unit, rig: manifest.rig, files };
 }
 
 /**

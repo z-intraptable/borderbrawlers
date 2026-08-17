@@ -22,22 +22,30 @@ vectoriales, en la misma pelea, sin esperar a tenerlos todos.
                           public/art/<personaje>/
 ```
 
-Las piezas que salen y su tamaño, para referencia:
+Las piezas que salen son seis, y **una sola por lado**: el brazo y la pierna de
+atrás no son archivos aparte, el juego usa la misma imagen con un tinte más
+oscuro. Por eso un dibujo con las piernas juntas no es un problema — alcanza con
+poder recortar una.
 
-| Pieza | Lienzo |
+| Pieza | Qué es |
 |---|---|
-| `head.png` | 240 × 240 |
-| `torso.png` | 200 × 176 |
-| `armupper.png` | 96 × 110 |
-| `armlower.png` | 96 × 120 |
-| `legupper.png` | 110 × 110 |
-| `leglower.png` | 110 × 130 |
-| `blade.png` | 200 × 240 |
+| `head.png` | cabeza, con lo que lleve puesto |
+| `torso.png` | tronco, del cuello a la cadera |
+| `armupper.png` | del hombro al codo |
+| `armlower.png` | del codo al puño, puño incluido |
+| `legupper.png` | de la cadera a la rodilla |
+| `leglower.png` | de la rodilla al pie |
 
-Los miembros de atrás no son archivos aparte: el juego usa la misma imagen con
-un tinte más oscuro.
+El tamaño de cada pieza **no está fijado**: el lienzo de cada una es la pieza
+misma. Antes había medidas fijas y cada pieza se escalaba por su cuenta para
+entrar en la suya —la cabeza al 27%, el brazo al 24%— y el personaje terminaba
+desproporcionado consigo mismo. Ahora hay una sola reducción para todas.
 
-La escala es **1 unidad de rig = 4 píxeles**. El personaje entero mide 408 px.
+Tampoco están fijadas las proporciones del esqueleto. **El dibujo manda**: la
+receta dice dónde están el hombro, la cadera, el codo y la rodilla, y de ahí
+sale el esqueleto de ese personaje. El primero que llegó tenía la cabeza del
+doble que el muñeco vectorial y las caderas más anchas; metido a la fuerza en
+las medidas del vectorial, le nacían los brazos del aire.
 
 ---
 
@@ -93,25 +101,32 @@ promediar todo lo que vio asociado a un nombre.
 
 ## Paso 2 — Subirme la imagen. El corte lo hago yo.
 
-**Vos no tocás ningún editor.** Me pasás el PNG entero y yo lo miro, calculo
-dónde cortar cada pieza y corro la herramienta.
+**Vos no tocás ningún editor.** Me pasás el PNG entero y yo lo miro, mido dónde
+están las articulaciones y corro las herramientas.
 
 Lo que hago de mi lado, para que sepas qué está pasando:
 
-1. Miro la imagen y anoto la caja de cada pieza en una receta
-   (`recetas/deadpool.json`, hay una plantilla al lado).
-2. Corro `python3 scripts/cortar.py recetas/deadpool.json`, que recorta, endereza
-   los miembros que hayan quedado en diagonal, saca el margen transparente,
-   escala cada pieza a su lienzo y la coloca con la articulación sobre el pivote.
-3. Escribe `public/art/deadpool/` completo, manifiesto incluido.
-4. Lo miro en el banco de pruebas y ajusto las cajas hasta que encastre.
+1. `python3 scripts/fondo.py arte-crudo/deadpool.jpeg arte-crudo/deadpool.png`
+   le saca el fondo. Inunda desde el borde, así que los blancos encerrados —los
+   ojos— sobreviven, y se come dos píxeles del contorno para que no quede la
+   orla clara que deja el JPEG.
+2. Miro la imagen con una grilla encima y anoto en la receta la caja de cada
+   pieza y sus articulaciones (`recetas/deadpool.json`).
+3. `python3 scripts/cortar.py recetas/deadpool.json` recorta, **endereza cada
+   miembro solo** —sabiendo dónde están el hombro y el codo, el giro es una
+   cuenta—, saca el margen transparente, reduce todo con un factor único y
+   calcula el pivote de cada pieza.
+4. Escribe `public/art/deadpool/` completo, manifiesto y medidas del esqueleto
+   incluidas.
+5. Lo miro en el banco de pruebas y ajusto hasta que encastre.
 
-Lo único que necesito de tu lado es que la imagen cumpla el paso 1: brazos
-separados del cuerpo, fondo transparente, mirando a la derecha. Si eso no se
-cumple, no hay corte que lo salve.
+**El fondo no hace falta que sea transparente.** Es mejor si lo es, pero el
+paso 1 lo resuelve igual, y también resuelve el caso más común de todos: que el
+generador te devuelva el DAMERO gris y blanco pintado como píxeles, que es el
+símbolo de la transparencia y no la transparencia.
 
-Si querés hacerlo vos, la receta es un JSON con `box: [x, y, ancho, alto]` por
-pieza y la herramienta hace el resto.
+Lo que sí necesito de tu lado es lo otro: brazos separados del cuerpo y contorno
+oscuro cerrado. Si el brazo toca el torso, no hay corte que lo salve.
 
 ## Paso 3 — Mirarlo
 
@@ -134,12 +149,13 @@ color si los pies flotan.
 
 | # | Qué | Si está mal |
 |---|---|---|
-| 1 | **Los pies en `idle`.** ¿Apoyan? | Ajustá el `pivot` de `legLower` en Y. Más chico lo baja. |
-| 2 | **Los pivotes en `attack_punch`.** ¿El brazo gira desde el hombro? | Si gira desde el codo, el pivote de `armUpper` está muy bajo. |
-| 3 | **Los encastres en `super`**, con los brazos arriba. ¿Aparece un hueco en el hombro? | A la caja de `armUpper` le falta hombro: se corre para arriba en la receta. |
-| 4 | **Las rodillas en `run`.** ¿Se dobla la pierna o se parte? | Falta solape entre las cajas de `legUpper` y `legLower`. |
-| 5 | **El tamaño.** ¿Es mucho más grande o chico que los otros cinco? | `unit` en la receta. Más grande lo achica. |
-| 6 | Recién ahora: color, contorno, sombras. | |
+| 1 | **Los brazos en `idle`.** ¿Se ven, o sólo asoman los puños al costado de la cintura? | Los puntos de `shoulders` están muy adentro. Van en el borde de AFUERA del hombro, no donde el brazo toca el torso. |
+| 2 | **Los pies en `idle`.** ¿Apoyan? | `to` de `legLower` en Y. |
+| 3 | **Los pivotes en `attack_punch`.** ¿El brazo gira desde el hombro? | Si gira desde el codo, `from` de `armUpper` está mal ubicado. |
+| 4 | **Los encastres en `super`**, con los brazos arriba. ¿Aparece un hueco en el hombro? | A la caja de `armUpper` le falta hombro: se corre para arriba. |
+| 5 | **Las rodillas en `run`.** ¿Se dobla la pierna o se parte? | Falta solape entre las cajas de `legUpper` y `legLower`. |
+| 6 | **El tamaño.** ¿Es mucho más grande o chico que los otros cinco? | `unit` en la receta. Más grande lo achica. |
+| 7 | Recién ahora: color, contorno, sombras. | |
 
 ### Y en la pelea de verdad
 
@@ -183,7 +199,8 @@ la pantalla dejaría de decir quién está atacando.
 | Síntoma | Qué pasó |
 |---|---|
 | Sale el muñeco vectorial | No hay arte para ese personaje, o el manifiesto no está donde va. Tiene que ser `public/art/deadpool/deadpool.json`, todo en minúscula. |
-| `el pivote de "X" va en fracción de 0 a 1, no en píxeles` | Escribiste `[120, 24]` en vez de `[0.5, 0.10]`. |
+| Sólo asoman los puños al costado de la cintura | Los brazos cuelgan tapados por el torso. `shoulders` va en el borde de afuera del hombro. |
+| `"rig" no declara "X" como número` | El manifiesto se escribió con el cortador viejo. Volvé a correr `cortar.py`. |
 | `declara "X" y no se pudo cargar` | El nombre del PNG en el JSON no coincide con el archivo real. |
 | El personaje es gigante o diminuto | `unit` está mal. Es cuántos píxeles de la imagen mide una unidad del rig. |
 | Se ve girado o mirando al revés | La pieza está dibujada hacia la izquierda, o el miembro no quedó vertical al exportar. |

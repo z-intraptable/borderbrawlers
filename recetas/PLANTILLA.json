@@ -1,17 +1,18 @@
 {
-  "_": "Receta de corte. Copiala como <personaje>.json y ajustá las cajas. Las cajas las saco yo mirando la imagen: vos sólo tenés que subirla.",
-
-  "source": "arte-crudo/deadpool.png",
-  "armature": "Deadpool",
-  "unit": 4,
-
+  "_": "Copiá esto y cambiá los números. Todas las coordenadas en píxeles de la imagen original. Los hombros van en el BORDE DE AFUERA del hombro, no donde el brazo toca el torso.",
+  "source": "arte-crudo/PERSONAJE.png",
+  "armature": "Personaje",
+  "unit": 19.4,
+  "scale": 0.28,
+  "origin": [0, 0],
+  "shoulders": [[0, 0], [0, 0]],
+  "hips": [[0, 0], [0, 0]],
   "parts": {
-    "head":     { "box": [0, 0, 0, 0], "canvas": [240, 240], "pivot": [0.5, 0.5],  "anchor": "center" },
-    "torso":    { "box": [0, 0, 0, 0], "canvas": [200, 176], "pivot": [0.5, 0.43], "anchor": "center" },
-    "armUpper": { "box": [0, 0, 0, 0], "canvas": [96, 110],  "pivot": [0.5, 0.10] },
-    "armLower": { "box": [0, 0, 0, 0], "canvas": [96, 120],  "pivot": [0.5, 0.10] },
-    "legUpper": { "box": [0, 0, 0, 0], "canvas": [110, 110], "pivot": [0.5, 0.09] },
-    "legLower": { "box": [0, 0, 0, 0], "canvas": [110, 130], "pivot": [0.5, 0.09] },
-    "blade":    { "box": [0, 0, 0, 0], "canvas": [200, 240], "pivot": [0.5, 0.5],  "anchor": "center" }
+    "head": { "box": [0, 0, 0, 0], "joint": [0, 0] },
+    "torso": { "box": [0, 0, 0, 0], "joint": [0, 0] },
+    "armUpper": { "box": [0, 0, 0, 0], "from": [0, 0], "to": [0, 0] },
+    "armLower": { "box": [0, 0, 0, 0], "from": [0, 0], "to": [0, 0] },
+    "legUpper": { "box": [0, 0, 0, 0], "from": [0, 0], "to": [0, 0] },
+    "legLower": { "box": [0, 0, 0, 0], "from": [0, 0], "to": [0, 0] }
   }
 }

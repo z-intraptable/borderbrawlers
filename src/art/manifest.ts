@@ -26,10 +26,32 @@ export interface PartSpec {
   pivot: [number, number];
 }
 
+/**
+ * Las medidas del esqueleto, sacadas del dibujo.
+ *
+ * El peleador vectorial tiene proporciones fijas —cabeza de 23 unidades,
+ * hombros a 22— porque las eligió este archivo. Un personaje dibujado no tiene
+ * por qué respetarlas, y el primero que llegó no las respetaba ni de lejos:
+ * cabeza del doble y caderas más anchas. Metido a la fuerza en esas constantes,
+ * los brazos le nacían del aire.
+ *
+ * Así que el que dibuja manda: el cortador mide dónde están el hombro, la
+ * cadera, el codo y la rodilla en la imagen, y las escribe acá en unidades del
+ * rig. Sin este bloque se usan las constantes vectoriales, que es lo correcto
+ * para un personaje sin arte.
+ */
+export const RIG_KEYS = [
+  'shoulderX', 'shoulderY', 'hipX', 'hipY', 'headY', 'armUpper', 'legUpper',
+] as const;
+
+export type RigKey = (typeof RIG_KEYS)[number];
+export type Rig = Record<RigKey, number>;
+
 export interface Manifest {
   armature: string;
   /** Cuántos píxeles de la imagen mide una unidad del rig. */
   unit: number;
+  rig: Rig | null;
   parts: Record<PartName, PartSpec> & { blade?: PartSpec };
 }
 
@@ -78,5 +100,23 @@ export function parseManifest(raw: unknown): Manifest {
   }
   if (rawParts.blade !== undefined) parts.blade = checkPart(rawParts.blade, 'blade');
 
-  return { armature: data.armature, unit: data.unit, parts };
+  return { armature: data.armature, unit: data.unit, rig: checkRig(data.rig), parts };
+}
+
+function checkRig(raw: unknown): Rig | null {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'object') fail('"rig" no es un objeto');
+  const source = raw as Record<string, unknown>;
+
+  const rig = {} as Rig;
+  for (const key of RIG_KEYS) {
+    const value = source[key];
+    // A medias no sirve: un esqueleto con los hombros del dibujo y las caderas
+    // de las constantes es peor que cualquiera de los dos completo.
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      fail(`"rig" no declara "${key}" como número`);
+    }
+    rig[key] = value;
+  }
+  return rig;
 }

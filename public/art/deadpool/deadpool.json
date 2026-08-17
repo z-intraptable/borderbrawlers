@@ -1,0 +1,59 @@
+{
+  "armature": "Deadpool",
+  "unit": 5.432,
+  "rig": {
+    "armUpper": 11.584,
+    "armLower": 13.365,
+    "legUpper": 9.588,
+    "legLower": 14.845,
+    "shoulderX": 14.175,
+    "shoulderY": 0.026,
+    "hipX": 8.763,
+    "hipY": 19.639,
+    "headY": -6.237
+  },
+  "parts": {
+    "head": {
+      "file": "head.png",
+      "pivot": [
+        0.5096,
+        0.9782
+      ]
+    },
+    "torso": {
+      "file": "torso.png",
+      "pivot": [
+        0.4988,
+        0.2193
+      ]
+    },
+    "armUpper": {
+      "file": "armupper.png",
+      "pivot": [
+        0.395,
+        0.1531
+      ]
+    },
+    "armLower": {
+      "file": "armlower.png",
+      "pivot": [
+        0.3841,
+        0.0377
+      ]
+    },
+    "legUpper": {
+      "file": "legupper.png",
+      "pivot": [
+        0.3957,
+        0.1244
+      ]
+    },
+    "legLower": {
+      "file": "leglower.png",
+      "pivot": [
+        0.327,
+        0.0622
+      ]
+    }
+  }
+}
