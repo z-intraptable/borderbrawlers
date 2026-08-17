@@ -120,9 +120,10 @@ app.ticker.add(() => {
   const vx = running ? 3.6 : 0;
   const vy = step.label === 'jump' ? 8 : step.label === 'fall' ? -8 : 0;
   const looping = step.action === ACT_NONE;
-  // Las acciones se reproducen en bucle dentro de su tramo, para verlas varias
-  // veces en vez de una sola al entrar.
-  const actionT = looping ? 0 : (stepAge % 0.7) / 0.7;
+  // Con una pose fijada, la acción se congela en su EXTENSIÓN MÁXIMA —el 25% del
+  // recorrido, donde el impulso llega a 1—, que es el cuadro que hay que
+  // juzgar. Sin fijar, se reproduce en bucle para ver la salida y la vuelta.
+  const actionT = looping ? 0 : pinnedIndex >= 0 ? 0.25 : (stepAge % 0.7) / 0.7;
 
   for (let i = 0; i < views.length; i++) {
     const view = views[i];

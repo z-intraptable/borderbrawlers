@@ -64,18 +64,51 @@ const OUTLINE = 0x05070d;
 const OUTLINE_WIDTH = 5.5;
 /** Cuánto más oscuro es cada bloque de sombra. Bloques sólidos, nunca degradé. */
 const SHADE = 0.62;
-const DEEP = 0.4;
+/**
+ * Los miembros de atrás. No puede ser tan oscuro como para confundirse con el
+ * contorno ni con el fondo: si lo es, el brazo trasero desaparece y su puño
+ * queda flotando al costado como una bolita suelta.
+ */
+const DEEP = 0.5;
 
-const HEAD_Y = -24;
-const HEAD_R = 26;
-const SHOULDER_X = 17;
+/**
+ * La cabeza, alta y apenas más chica que el ancho del torso.
+ *
+ * Bajada y grande tapaba los hombros, y con los hombros tapados el brazo parece
+ * nacer de la oreja. Subirla deja ver el nacimiento de los brazos, que es lo que
+ * hace legible cualquier pose de golpe.
+ *
+ * Grande igual: es lo que permite que una figura de cuarenta píxeles se lea, y
+ * es por eso que los personajes de Brawlhalla son cabezones.
+ */
+const HEAD_Y = -29;
+const HEAD_R = 23;
+/**
+ * El hombro va POR FUERA del borde del torso, que llega a 19. Metido para
+ * adentro, el brazo trasero queda tapado entero y sólo asoma el puño al
+ * balancearse — se ve como una pelota despegada del cuerpo.
+ */
+const SHOULDER_X = 22;
 const SHOULDER_Y = -3;
 const HIP_X = 9;
 const HIP_Y = 16;
 const ARM_W = 15;
-const ARM_LEN = 21;
+/**
+ * Los miembros van partidos en dos, con codo y rodilla.
+ *
+ * Una extremidad de una sola pieza sólo puede rotar desde el hombro o la cadera,
+ * y eso es la mitad de por qué un personaje se ve rígido: al correr, la pierna
+ * barre como un péndulo en vez de recogerse; al pegar, el brazo sale como un
+ * palo. Con dos segmentos el codo carga antes de soltar el golpe y la rodilla se
+ * dobla en la fase de vuelo, que es lo que el ojo lee como peso.
+ *
+ * Es exactamente lo que DragonBones iba a aportar sobre el esqueleto anterior.
+ */
+const ARM_UPPER = 11;
+const ARM_LOWER = 12;
 const LEG_W = 17;
-const LEG_LEN = 24;
+const LEG_UPPER = 12;
+const LEG_LOWER = 14;
 /** Corrimiento del cuerpo entero para que los pies caigan en el piso. */
 const BODY_Y = 5;
 
@@ -102,14 +135,34 @@ export interface FighterView extends Container {
 
 type Line = { width: number; color: number; alignment: number };
 
-/** Una parte con pivote en su articulación. */
-function joint(x: number, y: number): { node: Container; g: Graphics } {
-  const node = new Container();
-  const g = new Graphics();
-  node.addChild(g);
-  node.x = x;
-  node.y = y;
-  return { node, g };
+/**
+ * Una extremidad de dos segmentos: el de arriba cuelga de la articulación raíz
+ * —hombro o cadera— y el de abajo cuelga del extremo del de arriba.
+ *
+ * La rotación del segundo es RELATIVA al primero, porque es su hijo. Un codo a
+ * cero es un brazo estirado, no un brazo colgando.
+ */
+interface Chain {
+  upper: Container;
+  lower: Container;
+  upperG: Graphics;
+  lowerG: Graphics;
+}
+
+function chain(x: number, y: number, upperLength: number): Chain {
+  const upper = new Container();
+  upper.x = x;
+  upper.y = y;
+  const upperG = new Graphics();
+  upper.addChild(upperG);
+
+  const lower = new Container();
+  lower.y = upperLength;
+  const lowerG = new Graphics();
+  lower.addChild(lowerG);
+  upper.addChild(lower);
+
+  return { upper, lower, upperG, lowerG };
 }
 
 export function createFighterView(look: Look, color: number): FighterView {
@@ -135,21 +188,21 @@ export function createFighterView(look: Look, color: number): FighterView {
   // Orden de dibujo: lo de atrás primero. En una figura de tres cuartos el
   // brazo y la pierna de atrás tienen que quedar detrás del torso, o el cuerpo
   // se ve plano y las extremidades parecen pegadas por delante.
-  const backArm = joint(-SHOULDER_X, SHOULDER_Y);
-  const backLeg = joint(-HIP_X, HIP_Y);
+  const backArm = chain(-SHOULDER_X, SHOULDER_Y, ARM_UPPER);
+  const backLeg = chain(-HIP_X, HIP_Y, LEG_UPPER);
   const torsoG = new Graphics();
-  const frontLeg = joint(HIP_X, HIP_Y);
-  const frontArm = joint(SHOULDER_X, SHOULDER_Y);
+  const frontLeg = chain(HIP_X, HIP_Y, LEG_UPPER);
+  const frontArm = chain(SHOULDER_X, SHOULDER_Y, ARM_UPPER);
   const head = new Container();
   const headG = new Graphics();
   head.addChild(headG);
   head.y = HEAD_Y;
-  body.addChild(backArm.node, backLeg.node, torsoG, frontLeg.node, frontArm.node, head);
+  body.addChild(backArm.upper, backLeg.upper, torsoG, frontLeg.upper, frontArm.upper, head);
 
   // La pelota va en el puño de atrás, así que es hija del brazo y lo acompaña
   // en toda la animación sin una línea de código extra.
   const ball = new Graphics();
-  if (look.ball) backArm.node.addChild(ball);
+  if (look.ball) backArm.lower.addChild(ball);
 
   const draw = (tint: number, glow: boolean): void => {
     const shade = darken(tint, SHADE);
@@ -160,20 +213,26 @@ export function createFighterView(look: Look, color: number): FighterView {
     // La de atrás bien oscura y la de adelante clara: es lo que separa las dos
     // piernas cuando se cruzan en el ciclo de carrera. Con el mismo tono, un
     // personaje corriendo parece tener una sola pierna gruesa.
-    for (const [g, fill] of [[backLeg.g, deep], [frontLeg.g, shade]] as const) {
-      g.clear();
-      g.roundRect(-LEG_W / 2, -4, LEG_W, LEG_LEN + 6, 7).fill(fill).stroke(line);
+    for (const [leg, fill] of [[backLeg, deep], [frontLeg, shade]] as const) {
+      // Muslo. Se solapa con la pantorrilla en la rodilla: sin ese solape,
+      // doblar la pierna abre un hueco justo en la articulación.
+      leg.upperG.clear();
+      leg.upperG.roundRect(-LEG_W / 2, -5, LEG_W, LEG_UPPER + 9, 7).fill(fill).stroke(line);
+      leg.lowerG.clear();
+      leg.lowerG.roundRect(-LEG_W / 2 + 1, -4, LEG_W - 2, LEG_LOWER + 5, 6).fill(fill).stroke(line);
       // El pie, más ancho que la pierna: es lo que da apoyo a la figura.
-      g.roundRect(-LEG_W / 2 - 1, LEG_LEN - 2, LEG_W + 8, 12, 5).fill(fill).stroke(line);
+      leg.lowerG.roundRect(-LEG_W / 2, LEG_LOWER - 2, LEG_W + 7, 12, 5).fill(fill).stroke(line);
     }
 
     /* --- brazos ------------------------------------------------------ */
-    for (const [g, fill] of [[backArm.g, deep], [frontArm.g, tint]] as const) {
-      g.clear();
-      g.roundRect(-ARM_W / 2, -4, ARM_W, ARM_LEN + 4, 7).fill(fill).stroke(line);
+    for (const [arm, fill] of [[backArm, deep], [frontArm, tint]] as const) {
+      arm.upperG.clear();
+      arm.upperG.roundRect(-ARM_W / 2, -5, ARM_W, ARM_UPPER + 9, 7).fill(fill).stroke(line);
+      arm.lowerG.clear();
+      arm.lowerG.roundRect(-ARM_W / 2 + 1, -4, ARM_W - 2, ARM_LOWER + 3, 6).fill(fill).stroke(line);
       // El puño redondo y grande: en proporción chibi es lo que hace legible un
       // golpe a cuarenta píxeles de alto.
-      g.circle(0, ARM_LEN + 4, 10.5).fill(fill).stroke(line);
+      arm.lowerG.circle(0, ARM_LOWER + 4, 10.5).fill(fill).stroke(line);
     }
 
     /* --- torso -------------------------------------------------------- */
@@ -189,7 +248,7 @@ export function createFighterView(look: Look, color: number): FighterView {
     headG.clear();
     drawGear(headG, look, tint, shade, line);
     headG.circle(0, 0, HEAD_R).fill(tint).stroke(line);
-    headG.circle(8, 2, 18).fill(shade);
+    headG.circle(7, 2, 16).fill(shade);
     drawFace(headG, look, line);
 
     /* --- accesorios ---------------------------------------------------- */
@@ -202,8 +261,8 @@ export function createFighterView(look: Look, color: number): FighterView {
     }
     if (look.ball) {
       ball.clear();
-      ball.circle(0, ARM_LEN + 4, 13).fill(look.accent).stroke(line);
-      ball.moveTo(-13, ARM_LEN + 4).lineTo(13, ARM_LEN + 4)
+      ball.circle(0, ARM_LOWER + 4, 13).fill(look.accent).stroke(line);
+      ball.moveTo(-13, ARM_LOWER + 4).lineTo(13, ARM_LOWER + 4)
         .stroke({ width: 2.5, color: OUTLINE, alignment: 0.5 });
     }
 
@@ -230,10 +289,10 @@ export function createFighterView(look: Look, color: number): FighterView {
       torsoG.rotation = -0.32;
       head.rotation = -0.34;
       head.y = HEAD_Y + 3;
-      backArm.node.rotation = 2.5;
-      frontArm.node.rotation = -2.5;
-      backLeg.node.rotation = 0.5;
-      frontLeg.node.rotation = -0.35;
+      set(backArm, 2.5, 0.5);
+      set(frontArm, -2.5, 0.6);
+      set(backLeg, 0.5, 0.5);
+      set(frontLeg, -0.35, 0.25);
       body.y = BODY_Y + 2;
       return;
     }
@@ -243,21 +302,22 @@ export function createFighterView(look: Look, color: number): FighterView {
       // lento: `impulse` sube en el primer cuarto y baja en el resto, que es lo
       // que hace que se lea como un golpe y no como un saludo.
       const t = Math.min(1, actionT);
-      poseAction(action, t < 0.25 ? t / 0.25 : 1 - (t - 0.25) / 0.75);
+      poseAction(action, t < 0.25 ? t / 0.25 : 1 - (t - 0.25) / 0.75, t);
       return;
     }
 
     if (!grounded) {
       // En el aire: subiendo se recoge, cayendo se abre. Es la lectura de peso
-      // más barata que hay.
+      // más barata que hay, y con rodilla se lee todavía mejor — el que sube
+      // lleva las piernas plegadas contra el cuerpo.
       const rising = vy > 0;
       torsoG.rotation = rising ? 0.1 : -0.08;
       head.rotation = rising ? 0.08 : -0.1;
       head.y = HEAD_Y;
-      backArm.node.rotation = rising ? -2.3 : -1.5;
-      frontArm.node.rotation = rising ? 2.3 : 1.5;
-      backLeg.node.rotation = rising ? 0.75 : -0.3;
-      frontLeg.node.rotation = rising ? -0.5 : 0.35;
+      set(backArm, rising ? -2.3 : -1.5, rising ? 0.5 : 0.9);
+      set(frontArm, rising ? 2.3 : 1.5, rising ? 0.4 : 0.8);
+      set(backLeg, rising ? 0.75 : -0.3, rising ? 1.5 : 0.35);
+      set(frontLeg, rising ? -0.5 : 0.35, rising ? 1.1 : 0.2);
       body.y = BODY_Y;
       return;
     }
@@ -270,12 +330,19 @@ export function createFighterView(look: Look, color: number): FighterView {
       const lean = Math.min(0.22, speed * 0.045);
       torsoG.rotation = lean;
       head.rotation = lean * 0.5;
-      backLeg.node.rotation = swing * 0.85;
-      frontLeg.node.rotation = -swing * 0.85;
+
+      // La rodilla se dobla en la fase de RECOBRO —cuando la pierna vuelve
+      // hacia adelante— y va estirada en la de apoyo. Doblarla siempre igual da
+      // el trote de juguete que se quería evitar.
+      set(backLeg, swing * 0.85, Math.max(0, -swing) * 1.35);
+      set(frontLeg, -swing * 0.85, Math.max(0, swing) * 1.35);
+
       // Los brazos van en contrafase con las piernas, que es como camina un
-      // bípedo. En fase se ve como un juguete a cuerda.
-      backArm.node.rotation = -swing * 0.7;
-      frontArm.node.rotation = swing * 0.7;
+      // bípedo. En fase se ve como un juguete a cuerda. El codo queda siempre
+      // algo flexionado: un brazo estirado corriendo se ve como un maniquí.
+      set(backArm, -swing * 0.7, 0.55 + Math.max(0, swing) * 0.5);
+      set(frontArm, swing * 0.7, 0.55 + Math.max(0, -swing) * 0.5);
+
       // Dos rebotes por ciclo: el cuerpo sube en cada apoyo, no en cada paso.
       body.y = BODY_Y - Math.abs(Math.cos(cycle)) * 3.5;
       head.y = HEAD_Y;
@@ -287,34 +354,57 @@ export function createFighterView(look: Look, color: number): FighterView {
     torsoG.rotation = 0;
     head.rotation = breath * 0.04;
     head.y = HEAD_Y - breath * 1.2;
-    backArm.node.rotation = 0.16 + breath * 0.06;
-    frontArm.node.rotation = -0.16 - breath * 0.06;
-    backLeg.node.rotation = 0.03;
-    frontLeg.node.rotation = -0.03;
+    set(backArm, 0.16 + breath * 0.06, 0.3);
+    set(frontArm, -0.16 - breath * 0.06, 0.34);
+    set(backLeg, 0.03, 0.06);
+    set(frontLeg, -0.03, 0.06);
     body.y = BODY_Y + breath * 1.2;
   };
 
-  function poseAction(action: number, impulse: number): void {
+  /** Rotación de la articulación raíz y del codo o rodilla, que es relativa. */
+  function set(part: Chain, root_: number, bend: number): void {
+    part.upper.rotation = root_;
+    part.lower.rotation = bend;
+  }
+
+  /**
+   * Las poses de acción se escriben como un DESVÍO desde el reposo, no como una
+   * postura absoluta: cada rotación va multiplicada por el impulso.
+   *
+   * Escritas como postura absoluta —`frontArm = -1.57`— el brazo aparece
+   * extendido desde el primer cuadro y se queda extendido en el último, porque
+   * con impulso cero la constante sigue ahí. El golpe se veía como una cruz: los
+   * dos brazos en horizontal, sin salida ni vuelta.
+   */
+  function poseAction(action: number, impulse: number, t: number): void {
     head.y = HEAD_Y;
+    // Carga: el primer cuarto de la acción, en el que el golpe todavía no salió.
+    // Es lo que hace que un golpe tenga anticipación en vez de aparecer.
+    const windup = t < 0.25 ? 1 - t / 0.25 : 0;
     switch (action) {
       case ACT_PUNCH:
-        // El brazo de adelante sale recto y el torso acompaña; el de atrás va
-        // para el otro lado como contrapeso.
+        // El codo se pliega en la carga y se estira al soltar. El brazo de
+        // atrás va para el otro lado como contrapeso.
         torsoG.rotation = impulse * 0.3;
         head.rotation = impulse * 0.12;
-        frontArm.node.rotation = -1.57 - impulse * 0.15;
-        backArm.node.rotation = 1.3 - impulse * 0.9;
-        backLeg.node.rotation = -impulse * 0.28;
-        frontLeg.node.rotation = impulse * 0.34;
+        set(frontArm, -1.72 * impulse, windup * 2.2);
+        // El codo SUMA sobre el hombro, porque es su hijo. Con 0,95 arriba y
+        // 1,05 abajo el puño trasero terminaba a la altura del hombro y los dos
+        // brazos quedaban en cruz. El de atrás es contrapeso: va abajo y atrás,
+        // cerca de la cadera.
+        set(backArm, 0.55 * impulse, 0.25 + impulse * 0.25);
+        set(backLeg, -impulse * 0.28, 0.15);
+        set(frontLeg, impulse * 0.34, 0.1);
         body.y = BODY_Y;
         break;
       case ACT_KICK:
         torsoG.rotation = -impulse * 0.42;
         head.rotation = -impulse * 0.2;
-        frontLeg.node.rotation = -1.5 * impulse;
-        backLeg.node.rotation = impulse * 0.3;
-        frontArm.node.rotation = impulse * 1.2;
-        backArm.node.rotation = -impulse * 1.5;
+        // Misma idea con la rodilla: se recoge y se estira al impactar.
+        set(frontLeg, -1.5 * impulse, windup * 1.9);
+        set(backLeg, impulse * 0.3, 0.2);
+        set(frontArm, 0.8 * impulse, 0.45);
+        set(backArm, -0.9 * impulse, 0.5);
         body.y = BODY_Y - impulse * 5;
         break;
       case ACT_SKILL:
@@ -322,20 +412,21 @@ export function createFighterView(look: Look, color: number): FighterView {
         // especiales sin comprometerse con ninguna en particular.
         torsoG.rotation = impulse * 0.16;
         head.rotation = -impulse * 0.1;
-        frontArm.node.rotation = -1.4 * impulse;
-        backArm.node.rotation = -1.15 * impulse;
-        backLeg.node.rotation = -impulse * 0.2;
-        frontLeg.node.rotation = impulse * 0.2;
+        set(frontArm, -1.45 * impulse, windup * 1.4 + 0.2);
+        set(backArm, -1.2 * impulse, windup * 1.4 + 0.25);
+        set(backLeg, -impulse * 0.2, 0.12);
+        set(frontLeg, impulse * 0.2, 0.12);
         body.y = BODY_Y;
         break;
       default:
-        // Super: brazos al cielo y cuerpo estirado.
+        // Super: brazos al cielo y cuerpo estirado. Codos y rodillas casi
+        // rectos, que es lo que da la silueta abierta.
         torsoG.rotation = -impulse * 0.2;
         head.rotation = -impulse * 0.3;
-        frontArm.node.rotation = 3.0 * impulse;
-        backArm.node.rotation = -3.0 * impulse;
-        backLeg.node.rotation = impulse * 0.16;
-        frontLeg.node.rotation = -impulse * 0.16;
+        set(frontArm, 3.0 * impulse, windup * 1.6);
+        set(backArm, -3.0 * impulse, windup * 1.6);
+        set(backLeg, impulse * 0.16, 0.08);
+        set(frontLeg, -impulse * 0.16, 0.08);
         body.y = BODY_Y - impulse * 10;
         break;
     }
