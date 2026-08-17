@@ -1,0 +1,23 @@
+{
+  "name": "border-brawlers-server",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Grabador y servidor de replay del VPS. No participa del camino en vivo.",
+  "scripts": {
+    "record": "tsx src/record.ts",
+    "replay": "tsx src/replay.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx scripts/smokeRecording.ts && tsx scripts/smokeReplayServer.ts",
+    "sizing": "tsx scripts/sizing.ts"
+  },
+  "dependencies": {
+    "ws": "8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "@types/ws": "8.18.1",
+    "tsx": "4.20.3",
+    "typescript": "5.9.3"
+  }
+}

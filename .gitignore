@@ -18,3 +18,14 @@ npm-debug.log*
 recordings/
 *.ndjson
 *.ndjson.gz
+
+tsconfig.tsbuildinfo
+
+# Capturas del script de verificación headless
+shots/
+
+# La figura entera del generador; las piezas cortadas sí van al repo
+arte-crudo/*.png
+
+# videos generados: se rehacen con scripts/video.mjs + scripts/gif.py
+shots/video/

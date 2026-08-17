@@ -1,0 +1,18 @@
+{
+  "_": "Copiá esto y cambiá los números. Todas las coordenadas en píxeles de la imagen original. Los hombros van en el BORDE DE AFUERA del hombro, no donde el brazo toca el torso.",
+  "source": "arte-crudo/PERSONAJE.png",
+  "armature": "Personaje",
+  "unit": 19.4,
+  "scale": 0.28,
+  "origin": [0, 0],
+  "shoulders": [[0, 0], [0, 0]],
+  "hips": [[0, 0], [0, 0]],
+  "parts": {
+    "head": { "box": [0, 0, 0, 0], "joint": [0, 0] },
+    "torso": { "box": [0, 0, 0, 0], "joint": [0, 0] },
+    "armUpper": { "box": [0, 0, 0, 0], "from": [0, 0], "to": [0, 0] },
+    "armLower": { "box": [0, 0, 0, 0], "from": [0, 0], "to": [0, 0] },
+    "legUpper": { "box": [0, 0, 0, 0], "from": [0, 0], "to": [0, 0] },
+    "legLower": { "box": [0, 0, 0, 0], "from": [0, 0], "to": [0, 0] }
+  }
+}

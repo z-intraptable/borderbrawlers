@@ -1,0 +1,59 @@
+{
+  "armature": "Asuri",
+  "unit": 11.5,
+  "rig": {
+    "armUpper": 13.051,
+    "armLower": 18.877,
+    "legUpper": 15.754,
+    "legLower": 12.298,
+    "shoulderX": 14.348,
+    "shoulderY": -0.87,
+    "hipX": 6.522,
+    "hipY": 21.739,
+    "headY": -2.609
+  },
+  "parts": {
+    "head": {
+      "file": "head.png",
+      "pivot": [
+        0.617,
+        0.9149
+      ]
+    },
+    "torso": {
+      "file": "torso.png",
+      "pivot": [
+        0.4643,
+        0.0566
+      ]
+    },
+    "armUpper": {
+      "file": "armupper.png",
+      "pivot": [
+        0.5227,
+        0.0643
+      ]
+    },
+    "armLower": {
+      "file": "armlower.png",
+      "pivot": [
+        0.5212,
+        0.0944
+      ]
+    },
+    "legUpper": {
+      "file": "legupper.png",
+      "pivot": [
+        0.4789,
+        0.1734
+      ]
+    },
+    "legLower": {
+      "file": "leglower.png",
+      "pivot": [
+        0.5091,
+        0.2045
+      ]
+    }
+  }
+}

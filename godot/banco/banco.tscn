@@ -1,0 +1,26 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://banco/banco.gd" id="1_banco"]
+
+[node name="Banco" type="Node2D"]
+script = ExtResource("1_banco")
+
+[node name="Interfaz" type="CanvasLayer" parent="."]
+
+[node name="Rotulo" type="Label" parent="Interfaz"]
+offset_left = 24.0
+offset_top = 18.0
+offset_right = 1256.0
+offset_bottom = 56.0
+theme_override_colors/font_color = Color(0.902, 0.929, 0.953, 1)
+theme_override_font_sizes/font_size = 26
+text = "cargando"
+
+[node name="Ayuda" type="Label" parent="Interfaz"]
+offset_left = 24.0
+offset_top = 674.0
+offset_right = 1256.0
+offset_bottom = 702.0
+theme_override_colors/font_color = Color(0.561, 0.639, 0.749, 1)
+theme_override_font_sizes/font_size = 16
+text = "← → pose    ↑ ↓ personaje    espacio pausar"
