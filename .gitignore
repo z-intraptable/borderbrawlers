@@ -27,5 +27,12 @@ shots/
 # La figura entera del generador; las piezas cortadas sí van al repo
 arte-crudo/*.png
 
+# Las capas crudas del escenario, como salen del ZIP. Sólo el fondo va al
+# repo, en public/escenarios/<slug>/fondo.jpg, que es lo único que el juego
+# carga (ver src/render/stage.ts). Guardar las plataformas y los props que
+# nadie lee son 17 MB de historia a cambio de nada.
+arte-crudo/escenarios/*/
+!arte-crudo/escenarios/LEEME.md
+
 # videos generados: se rehacen con scripts/video.mjs + scripts/gif.py
 shots/video/
