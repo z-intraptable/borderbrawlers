@@ -1,7 +1,9 @@
 # Guía paso a paso — dibujar a Deadpool
 
-El código ya está listo para recibir el arte. Cuando pongas los archivos en
-`public/art/deadpool/`, la escena los usa sola: no hay nada que programar.
+**Tu trabajo es UNA imagen.** El resto —cortarla en piezas, escalarlas, escribir
+el manifiesto— lo hace `scripts/cortar.py`, y el juego las usa solo.
+
+Sin DragonBones, sin editor de imágenes.
 
 Si un personaje no tiene arte, sale con el peleador vectorial. **Eso es a
 propósito**: podés ver a Deadpool dibujado peleando contra los otros cinco
@@ -9,22 +11,31 @@ vectoriales, en la misma pelea, sin esperar a tenerlos todos.
 
 ---
 
-## Lo que vas a producir
-
-Doce imágenes —bueno, siete, porque los miembros de atrás usan la misma imagen
-con un tinte— y un JSON:
+## El recorrido completo
 
 ```
-public/art/deadpool/
-├── deadpool.json
-├── head.png        240 × 240
-├── torso.png       200 × 176
-├── arm-upper.png    96 × 110
-├── arm-lower.png    96 × 120
-├── leg-upper.png   110 × 110
-├── leg-lower.png   110 × 130
-└── blade.png       200 × 240
+  vos                     yo                          el juego
+  ───                     ──                          ────────
+  generás UNA figura  →   miro dónde cortar       →   la escena la usa sola
+  arte-crudo/*.png        recetas/*.json
+                          scripts/cortar.py
+                          public/art/<personaje>/
 ```
+
+Las piezas que salen y su tamaño, para referencia:
+
+| Pieza | Lienzo |
+|---|---|
+| `head.png` | 240 × 240 |
+| `torso.png` | 200 × 176 |
+| `armupper.png` | 96 × 110 |
+| `armlower.png` | 96 × 120 |
+| `legupper.png` | 110 × 110 |
+| `leglower.png` | 110 × 130 |
+| `blade.png` | 200 × 240 |
+
+Los miembros de atrás no son archivos aparte: el juego usa la misma imagen con
+un tinte más oscuro.
 
 La escala es **1 unidad de rig = 4 píxeles**. El personaje entero mide 408 px.
 
@@ -80,74 +91,29 @@ promediar todo lo que vio asociado a un nombre.
 
 ---
 
-## Paso 2 — Cortar las piezas
+## Paso 2 — Subirme la imagen. El corte lo hago yo.
 
-Cualquier editor con capas sirve: Photopea (gratis, en el navegador, abre PSD),
-GIMP, Krita, Photoshop.
+**Vos no tocás ningún editor.** Me pasás el PNG entero y yo lo miro, calculo
+dónde cortar cada pieza y corro la herramienta.
 
-Para cada pieza: seleccionás, copiás, **pegás en un lienzo nuevo del tamaño de
-la tabla**, centrás y exportás PNG con transparencia.
+Lo que hago de mi lado, para que sepas qué está pasando:
 
-Lo que hay que respetar, en orden de cuánto duele equivocarse:
+1. Miro la imagen y anoto la caja de cada pieza en una receta
+   (`recetas/deadpool.json`, hay una plantilla al lado).
+2. Corro `python3 scripts/cortar.py recetas/deadpool.json`, que recorta, endereza
+   los miembros que hayan quedado en diagonal, saca el margen transparente,
+   escala cada pieza a su lienzo y la coloca con la articulación sobre el pivote.
+3. Escribe `public/art/deadpool/` completo, manifiesto incluido.
+4. Lo miro en el banco de pruebas y ajusto las cajas hasta que encastre.
 
-1. **Los miembros van verticales, colgando.** Si en el dibujo el brazo está
-   flexionado o en diagonal, rotalo hasta dejarlo vertical antes de exportar. El
-   código parte de esa posición: un brazo exportado en diagonal va a estar en
-   diagonal todo el juego.
+Lo único que necesito de tu lado es que la imagen cumpla el paso 1: brazos
+separados del cuerpo, fondo transparente, mirando a la derecha. Si eso no se
+cumple, no hay corte que lo salve.
 
-2. **Cortá por la articulación, con solape.** El brazo superior va del hombro al
-   codo, pero incluí un poco más allá del codo. Sin ese solape, al doblar el
-   codo se abre un hueco justo en la articulación. Lo mismo con la rodilla.
+Si querés hacerlo vos, la receta es un JSON con `box: [x, y, ancho, alto]` por
+pieza y la herramienta hace el resto.
 
-3. **El hombro entero va en `arm-upper.png`.** Un brazo cortado justo en la línea
-   del hombro deja un agujero cuando el brazo se levanta.
-
-4. **La articulación va ARRIBA de la pieza.** El hombro arriba del brazo
-   superior, el codo arriba del antebrazo, la cadera arriba del muslo, la rodilla
-   arriba de la pantorrilla.
-
-Los miembros de atrás no se dibujan: el código usa la misma imagen con un tinte
-más oscuro.
-
----
-
-## Paso 3 — El manifiesto
-
-Creá `public/art/deadpool/deadpool.json` con esto, tal cual:
-
-```json
-{
-  "armature": "Deadpool",
-  "unit": 4,
-  "parts": {
-    "head":     { "file": "head.png",      "pivot": [0.5, 0.5] },
-    "torso":    { "file": "torso.png",     "pivot": [0.5, 0.43] },
-    "armUpper": { "file": "arm-upper.png", "pivot": [0.5, 0.10] },
-    "armLower": { "file": "arm-lower.png", "pivot": [0.5, 0.10] },
-    "legUpper": { "file": "leg-upper.png", "pivot": [0.5, 0.09] },
-    "legLower": { "file": "leg-lower.png", "pivot": [0.5, 0.09] },
-    "blade":    { "file": "blade.png",     "pivot": [0.5, 0.5] }
-  }
-}
-```
-
-**El `pivot` es lo único que no se puede improvisar.** Es dónde está la
-articulación dentro de la imagen, como fracción de 0 a 1 — no en píxeles. La
-pieza rota alrededor de ese punto: si está mal, el brazo gira desde el codo y no
-hay ajuste posterior que lo arregle.
-
-`[0.5, 0.10]` quiere decir: al medio a lo ancho, al 10% de arriba hacia abajo.
-Que es donde queda el hombro si dibujaste el brazo colgando.
-
-Si te equivocás, el código te lo dice al cargar con el nombre de la pieza. Si
-ponés el pivote en píxeles, también te avisa: es el error más común.
-
-Si no hiciste la katana, borrá esa línea —y la coma de la anterior—. Es la única
-pieza opcional.
-
----
-
-## Paso 4 — Mirarlo
+## Paso 3 — Mirarlo
 
 ```bash
 npm run dev
@@ -170,9 +136,9 @@ color si los pies flotan.
 |---|---|---|
 | 1 | **Los pies en `idle`.** ¿Apoyan? | Ajustá el `pivot` de `legLower` en Y. Más chico lo baja. |
 | 2 | **Los pivotes en `attack_punch`.** ¿El brazo gira desde el hombro? | Si gira desde el codo, el pivote de `armUpper` está muy bajo. |
-| 3 | **Los encastres en `super`**, con los brazos arriba. ¿Aparece un hueco en el hombro? | A `arm-upper.png` le falta hombro: volvé a cortarla más arriba. |
-| 4 | **Las rodillas en `run`.** ¿Se dobla la pierna o se parte? | Falta solape en la rodilla entre `leg-upper` y `leg-lower`. |
-| 5 | **El tamaño.** ¿Es mucho más grande o chico que los otros cinco? | Cambiá `unit`. Más grande lo achica. |
+| 3 | **Los encastres en `super`**, con los brazos arriba. ¿Aparece un hueco en el hombro? | A la caja de `armUpper` le falta hombro: se corre para arriba en la receta. |
+| 4 | **Las rodillas en `run`.** ¿Se dobla la pierna o se parte? | Falta solape entre las cajas de `legUpper` y `legLower`. |
+| 5 | **El tamaño.** ¿Es mucho más grande o chico que los otros cinco? | `unit` en la receta. Más grande lo achica. |
 | 6 | Recién ahora: color, contorno, sombras. | |
 
 ### Y en la pelea de verdad
@@ -185,7 +151,7 @@ Deja diez capturas en `shots/`. Termina con `consola limpia` si no hubo errores.
 
 ---
 
-## Paso 5 — Los otros cinco
+## Paso 4 — Los otros cinco
 
 Cuando Deadpool esté bien, los demás son el mismo procedimiento cambiando la
 descripción del diseño y la carpeta:
@@ -216,7 +182,7 @@ la pantalla dejaría de decir quién está atacando.
 
 | Síntoma | Qué pasó |
 |---|---|
-| Sale el muñeco vectorial | El JSON no está donde va, o el nombre del archivo no coincide. Tiene que ser `public/art/deadpool/deadpool.json`, todo en minúscula. |
+| Sale el muñeco vectorial | No hay arte para ese personaje, o el manifiesto no está donde va. Tiene que ser `public/art/deadpool/deadpool.json`, todo en minúscula. |
 | `el pivote de "X" va en fracción de 0 a 1, no en píxeles` | Escribiste `[120, 24]` en vez de `[0.5, 0.10]`. |
 | `declara "X" y no se pudo cargar` | El nombre del PNG en el JSON no coincide con el archivo real. |
 | El personaje es gigante o diminuto | `unit` está mal. Es cuántos píxeles de la imagen mide una unidad del rig. |
