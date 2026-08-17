@@ -1,0 +1,39 @@
+; Proyecto de Godot de BorderBrawlers.
+;
+; Este archivo lo reescribe el editor cuando tocás algo en Configuración del
+; proyecto. Está escrito a mano para que abra limpio en 4.4 sin pedir
+; conversión; una vez abierto, mandá vos.
+;
+; Dos decisiones que están acá y no en el empaquetado, porque cambian el
+; proyecto y no el archivo final:
+;
+;   - `gl_compatibility` es el único método de dibujo que corre en la web sin
+;     problemas. Elegirlo después obliga a revisar todo lo visual.
+;   - sin hilos, para que el HTML exportado ande servido como archivo estático.
+;     Con hilos, el servidor tiene que mandar dos cabeceras de aislamiento
+;     (`Cross-Origin-Opener-Policy` y `Cross-Origin-Embedder-Policy`), y eso en
+;     Vercel es configuración aparte.
+
+config_version=5
+
+[application]
+
+config/name="BorderBrawlers"
+config/description="El order book de Binance como escenario de pelea."
+run/main_scene="res://banco/banco.tscn"
+config/features=PackedStringArray("4.4", "GL Compatibility")
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+; `canvas_items` escala el juego con la ventana en vez de recortarlo.
+window/stretch/mode="canvas_items"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+; El fondo del juego, el mismo azul casi negro que usa la versión de Pixi.
+environment/defaults/default_clear_color=Color(0.043, 0.059, 0.098, 1)
+
