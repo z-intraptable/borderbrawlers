@@ -14,6 +14,7 @@ import { mkdirSync } from 'node:fs';
 
 const seconds = Number(process.argv[2] ?? 12);
 const scenario = process.argv[3] ?? 'normal';
+const stage = process.argv[4] ? `&stage=${process.argv[4]}` : '';
 const OUT = 'shots';
 
 // `npx` deja un hijo suyo escuchando aunque se le mande SIGTERM al padre, así
@@ -45,7 +46,7 @@ const errors = [];
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
 
-await page.goto(`http://localhost:5199/?source=mock&scenario=${scenario}`, {
+await page.goto(`http://localhost:5199/?source=mock&scenario=${scenario}${stage}`, {
   waitUntil: 'networkidle',
 });
 

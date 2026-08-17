@@ -37,6 +37,7 @@ import type { FighterArt } from '../art/loadArt';
 import { characterFor } from '../game/roster';
 import { burst, createFx, drawFx, dust, ring, trail, updateFx } from './fx';
 import { createBackdrop } from './backdrop';
+import { createStage, loadStage, stageTint } from './stage';
 
 /**
  * La capa que dibuja. Lee el estado de la simulación y lo pinta; no decide nada.
@@ -117,6 +118,7 @@ export async function startGame(
   match: Match,
   client: BinanceFeedClient,
   onFrame: (ms: number) => void,
+  stageName: string | null = null,
 ): Promise<GameHandle> {
   const app = new Application();
   await app.init({
@@ -129,6 +131,10 @@ export async function startGame(
   host.appendChild(app.canvas);
 
   const backdrop = createBackdrop();
+  // El fondo pintado va debajo de los cristales de volumen, que son el dato.
+  const stageTexture = stageName === null ? null : await loadStage(stageName);
+  const stage = stageTexture === null ? null : createStage(stageTexture);
+  if (stage !== null) backdrop.view.addChildAt(stage.sprite, 0);
   app.stage.addChild(backdrop.view);
 
   /** Contenedor del mundo: acá vive la cámara, como escala y posición. */
@@ -269,7 +275,9 @@ export async function startGame(
     const greenShare = total > 0 ? buy / total : 0.5;
     const intensity = Math.min(1, Math.log1p(total) / 12);
     backdrop.update(greenShare, intensity, width, height, elapsed);
-    app.renderer.background.color = backdrop.skyColor(greenShare);
+    const sky = backdrop.skyColor(greenShare);
+    app.renderer.background.color = sky;
+    stage?.update(width, height, stageTint(sky));
 
     /* --- onda de choque ---------------------------------------------- */
     if (shockwaveTime >= 0) {

@@ -16,6 +16,7 @@ import { mountHud } from './hud/hud';
  *   ?scenario=stress      calm | normal | volatile | stress
  *   ?symbol=ethusdt
  *   ?vps=ws://host:8080
+ *   ?stage=lich           fondo pintado; sin esto, el fondo plano de siempre
  *
  * Sin `source` va contra Binance en vivo, que es el punto del proyecto. Los
  * valores se validan contra la lista permitida en vez de castearse: un
@@ -49,6 +50,11 @@ const source = pick(params.get('source'), SOURCES, 'binance-direct');
 const scenario = pick(params.get('scenario'), SCENARIOS, 'normal');
 const symbol = params.get('symbol') ?? 'btcusdt';
 const vps = params.get('vps') ?? '';
+// El escenario no se valida contra una lista: los fondos son archivos que se
+// agregan sueltos, y `loadStage` ya devuelve null si el nombre no existe. Lo
+// único que hace falta es que no se pueda escapar de la carpeta.
+const stageParam = params.get('stage');
+const stage = stageParam !== null && /^[a-z0-9-]+$/i.test(stageParam) ? stageParam : null;
 
 const host = document.getElementById('root');
 if (host === null) throw new Error('#root no existe');
@@ -78,7 +84,7 @@ if (source === 'mock') {
 // reproducirla sería una ráfaga de altas de trades viejos.
 document.addEventListener('visibilitychange', () => client.clearTrades());
 
-const game = await startGame(host, match, client, (ms) => { perf.frameMs = ms; });
+const game = await startGame(host, match, client, (ms) => { perf.frameMs = ms; }, stage);
 
 // Vite reemplaza el módulo en caliente; sin esto quedan dos canvas y dos
 // sockets vivos por cada guardado.
