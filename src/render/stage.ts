@@ -27,6 +27,31 @@ export interface Stage {
   sprite: Sprite;
   /** Encaja la imagen en la pantalla y la tiñe hacia el que domina. */
   update(width: number, height: number, tint: number): void;
+  /** Cambia de escenario sin tocar nada más. */
+  show(texture: Texture): void;
+}
+
+/**
+ * Los escenarios disponibles, en el orden en que se van turnando.
+ *
+ * Sale de `public/escenarios/lista.json`, que escribe `npm run escenarios`
+ * leyendo las carpetas. Un `import.meta.glob` no sirve acá: `public/` no pasa
+ * por Vite, justamente para que las imágenes se sirvan tal cual. Sin el archivo
+ * —o con uno roto— devuelve la lista vacía y el juego corre con el fondo plano,
+ * que es el comportamiento de siempre.
+ */
+export async function stageNames(): Promise<string[]> {
+  try {
+    const response = await fetch('/escenarios/lista.json');
+    if (!response.ok) return [];
+    const type = response.headers.get('content-type') ?? '';
+    if (!type.includes('json')) return [];
+    const raw: unknown = await response.json();
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((name): name is string => typeof name === 'string');
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -54,10 +79,16 @@ export async function loadStage(name: string): Promise<Texture | null> {
 export function createStage(texture: Texture): Stage {
   const sprite = new Sprite(texture);
   sprite.anchor.set(0.5);
+  let current = texture;
 
   return {
     sprite,
+    show(next): void {
+      current = next;
+      sprite.texture = next;
+    },
     update(width, height, tint): void {
+      const texture = current;
       // Encaje por COBERTURA, no por contención: se elige la escala más grande
       // de las dos y sobra por el lado que sobre. Con la más chica quedarían
       // dos bandas del color de fondo a los costados, y el escenario se vería

@@ -1,4 +1,5 @@
 import { Application, Container, Graphics } from 'pixi.js';
+import type { Texture } from 'pixi.js';
 import { AdvancedBloomFilter } from 'pixi-filters/advanced-bloom';
 import { ShockwaveFilter } from 'pixi-filters/shockwave';
 import type { Match } from '../game/match';
@@ -34,10 +35,10 @@ import {
 import { lookFor } from '../art/looks';
 import { loadArt, unloadArt } from '../art/loadArt';
 import type { FighterArt } from '../art/loadArt';
-import { characterFor } from '../game/roster';
+import { ROSTER, characterFor } from '../game/roster';
 import { burst, createFx, drawFx, dust, ring, trail, updateFx } from './fx';
 import { createBackdrop } from './backdrop';
-import { createStage, loadStage, stageTint } from './stage';
+import { createStage, loadStage, stageNames, stageTint } from './stage';
 
 /**
  * La capa que dibuja. Lee el estado de la simulación y lo pinta; no decide nada.
@@ -132,8 +133,17 @@ export async function startGame(
 
   const backdrop = createBackdrop();
   // El fondo pintado va debajo de los cristales de volumen, que son el dato.
-  const stageTexture = stageName === null ? null : await loadStage(stageName);
-  const stage = stageTexture === null ? null : createStage(stageTexture);
+  //
+  // Con `?stage=` se fija uno y no se mueve: es el modo de mirar un escenario.
+  // Sin él se cargan todos los que haya y **se cambia de escenario cada vez que
+  // alguien tira un super**. El super ya es el momento más ruidoso de la pelea
+  // —onda de choque, hitstop, media docena volando—, así que el corte se
+  // esconde ahí adentro en vez de parecer un parpadeo del fondo.
+  const rotation = stageName === null ? await stageNames() : [stageName];
+  const stageTextures = (await Promise.all(rotation.map(loadStage)))
+    .filter((texture): texture is Texture => texture !== null);
+  let stageIndex = 0;
+  const stage = stageTextures.length === 0 ? null : createStage(stageTextures[0]);
   if (stage !== null) backdrop.view.addChildAt(stage.sprite, 0);
   app.stage.addChild(backdrop.view);
 
@@ -148,31 +158,65 @@ export async function startGame(
   const plainFx = new Graphics();
   world.addChild(plainFx);
 
-  // Se pide el arte de cada personaje una sola vez, en paralelo. El que no lo
-  // tenga dibujado todavía devuelve null y sale vectorial, en la misma pelea.
-  const armatures = [...new Set(
-    Array.from(match.slot, (_, i) => characterFor(match.team[i], match.character[i]).armature),
-  )];
+  // Se pide el arte de TODA la plantilla una sola vez, en paralelo, y no sólo
+  // el de los seis que arrancan: al caerse uno entra otro en el mismo frame, y
+  // ahí no hay tiempo de ir a buscar una imagen. El que no lo tenga dibujado
+  // todavía devuelve null y sale vectorial, en la misma pelea.
+  const armatures = [...new Set(ROSTER.map((character) => character.armature))];
   const loaded = await Promise.all(armatures.map((name) => loadArt(name)));
   const artByArmature = new Map<string, FighterArt | null>(
     armatures.map((name, i) => [name, loaded[i]]),
   );
 
   /**
-   * Un cuerpo articulado por slot. El personaje que le toca a cada slot es fijo
-   * —un slot no cambia de bando— así que la silueta se resuelve una sola vez.
+   * Un cuerpo articulado por personaje, no por slot.
+   *
+   * El slot no cambia de bando pero **sí de personaje**: el que se cae del
+   * escenario no vuelve y entra otro de la plantilla. Construir el cuerpo en
+   * ese momento costaría una decena de `Graphics` y de `Sprite` en el frame más
+   * cargado que hay; construidos todos de entrada, el relevo es cambiar de
+   * `visible`. Son diecinueve cuerpos quietos y ocultos: no cuestan un draw
+   * call porque Pixi no dibuja lo invisible.
+   *
+   * Que sea por personaje y no por slot es lo que permite que la caché exista:
+   * `pickCharacter` no repite personaje entre slots activos del mismo bando, así
+   * que un cuerpo nunca hace falta en dos lugares a la vez.
    */
-  const views: FighterView[] = [];
-  for (let i = 0; i < match.slot.length; i++) {
-    const character = characterFor(match.team[i], match.character[i]);
+  const viewByArmature = new Map<string, FighterView>();
+  for (const character of ROSTER) {
     const view = createFighterView(
       lookFor(character.armature),
-      match.team[i] === TEAM_GREEN ? GREEN : RED,
+      character.team === TEAM_GREEN ? GREEN : RED,
       artByArmature.get(character.armature) ?? null,
     );
     view.visible = false;
     world.addChild(view);
+    viewByArmature.set(character.armature, view);
+  }
+
+  /** El cuerpo que le toca a cada slot ahora mismo. */
+  const views: FighterView[] = [];
+  /** Qué personaje está mostrando cada slot, para notar el relevo. */
+  const shown = new Uint8Array(match.slot.length);
+  for (let i = 0; i < match.slot.length; i++) {
+    const character = characterFor(match.team[i], match.character[i]);
+    shown[i] = match.character[i];
+    const view = viewByArmature.get(character.armature);
+    if (view === undefined) throw new Error(`sin cuerpo para ${character.armature}`);
     views.push(view);
+  }
+
+  /** Reengancha el cuerpo del slot cuando la simulación le cambió el personaje. */
+  function relieve(m: Match): void {
+    for (let i = 0; i < m.slot.length; i++) {
+      if (m.character[i] === shown[i]) continue;
+      views[i].visible = false;
+      shown[i] = m.character[i];
+      const armature = characterFor(m.team[i], m.character[i]).armature;
+      const view = viewByArmature.get(armature);
+      if (view === undefined) continue;
+      views[i] = view;
+    }
   }
 
   /**
@@ -260,6 +304,12 @@ export async function startGame(
     emitTrails(match, fx);
     updateFx(fx, dt);
 
+    // Antes de dibujar: si la simulación cambió de personaje algún slot, hay
+    // que enganchar el cuerpo nuevo. Se hace acá y no adentro de `drainEvents`
+    // porque el relevo no es un evento sino un estado — un slot que se llenó
+    // durante el hitstop tiene que aparecer con el peleador que le tocó igual.
+    relieve(match);
+
     drawStage(platforms, match);
     updateCamera(camera, match, dt);
     applyCamera(world, app, camera, match.shake);
@@ -336,6 +386,14 @@ export async function startGame(
           shockwaveX = x;
           shockwaveY = y;
           world.filters = [shockwave];
+          // Y se cambia de escenario. Cambiar una textura no reconstruye nada
+          // —el sprite es el mismo y el encaje se recalcula en el mismo frame,
+          // más abajo—, así que el corte cae dentro del hitstop del super y no
+          // se ve un salto de fondo suelto.
+          if (stage !== null && stageTextures.length > 1) {
+            stageIndex = (stageIndex + 1) % stageTextures.length;
+            stage.show(stageTextures[stageIndex]);
+          }
           break;
         case EVENT_KO:
           burst(target, x, y, 14, 9, 0.22, 0.8, 0xffffff);

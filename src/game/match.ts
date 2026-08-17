@@ -28,6 +28,7 @@ import {
   weightFor,
 } from './fighters';
 import type { MoveResult } from './physics';
+import { rosterSize } from './roster';
 import { createMoveResult, step as physicsStep } from './physics';
 
 /**
@@ -194,8 +195,14 @@ export interface Match {
 
   slot: Uint8Array;
   team: Uint8Array;
-  /** Índice del personaje del elenco que le tocó a este slot. */
+  /**
+   * Índice del personaje de la plantilla que le tocó a este slot AHORA. Cambia
+   * cada vez que el slot se llena de nuevo: el que se cayó del escenario no
+   * vuelve, entra el que sigue en la plantilla.
+   */
   character: Uint8Array;
+  /** Por dónde va la ronda de la plantilla en cada bando. */
+  cursor: Uint8Array;
   x: Float64Array;
   y: Float64Array;
   vx: Float64Array;
@@ -239,6 +246,7 @@ export function createMatch(): Match {
     slot: new Uint8Array(CAPACITY),
     team: new Uint8Array(CAPACITY),
     character: new Uint8Array(CAPACITY),
+    cursor: new Uint8Array(2),
     x: new Float64Array(CAPACITY),
     y: new Float64Array(CAPACITY),
     vx: new Float64Array(CAPACITY),
@@ -266,8 +274,9 @@ export function createMatch(): Match {
     shake: 0,
   };
 
-  // Un slot no cambia de bando nunca, así el color y el personaje se resuelven
-  // una sola vez.
+  // Un slot no cambia de bando nunca, así que el bando se resuelve una sola
+  // vez. El PERSONAJE sí cambia: éstos son sólo los tres primeros de cada
+  // plantilla, y `activate` reparte el resto a medida que caen.
   for (let i = 0; i < CAPACITY; i++) {
     m.team[i] = i < FIGHTERS_PER_TEAM ? TEAM_GREEN : TEAM_RED;
     m.character[i] = i % FIGHTERS_PER_TEAM;
@@ -582,10 +591,37 @@ function freeSlot(m: Match, team: number): number {
   return -1;
 }
 
+/**
+ * El próximo personaje de la plantilla para ese bando.
+ *
+ * Va en ronda desde donde quedó el cursor, salteando a los que ya están en el
+ * escenario: tres slots activos con el mismo personaje se verían como un error
+ * de dibujo, no como una decisión. Si toda la plantilla estuviera en juego —no
+ * puede pasar mientras haya más personajes que slots, pero la cuenta no se
+ * apoya en eso— se queda con el que ya tenía.
+ */
+function pickCharacter(m: Match, team: number, slot: number): number {
+  const size = rosterSize(team);
+  const from = team === TEAM_GREEN ? 0 : FIGHTERS_PER_TEAM;
+  for (let n = 0; n < size; n++) {
+    const candidate = (m.cursor[team] + n) % size;
+    let taken = false;
+    for (let i = from; i < from + FIGHTERS_PER_TEAM; i++) {
+      if (i === slot || m.slot[i] !== SLOT_ACTIVE) continue;
+      if (m.character[i] === candidate) { taken = true; break; }
+    }
+    if (taken) continue;
+    m.cursor[team] = (candidate + 1) % size;
+    return candidate;
+  }
+  return m.character[slot];
+}
+
 function activate(
   m: Match, slot: number, team: number,
   size: number, whale: boolean, median: number, now: number,
 ): void {
+  m.character[slot] = pickCharacter(m, team, slot);
   const weight = weightFor(size, median, whale);
   m.weight[slot] = weight;
   m.damage[slot] = 0;

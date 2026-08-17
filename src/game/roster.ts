@@ -1,13 +1,13 @@
 import { TEAM_GREEN, TEAM_RED } from './fighters';
 
 /**
- * El elenco y sus animaciones.
+ * La plantilla y sus animaciones.
  *
  * Es una tabla de datos, separada del comportamiento: la simulación decide
  * CUÁNDO se usa una habilidad y esta tabla dice CÓMO se llama la animación que
- * hay que reproducir. Esos nombres son el contrato con el rig de DragonBones —
- * si el rig las llama distinto, no anda, así que conviene que el que riggea
- * trabaje contra esta tabla y no contra la memoria.
+ * hay que reproducir. Esos nombres son el contrato con el rig — si el rig las
+ * llama distinto, no anda, así que conviene que el que riggea trabaje contra
+ * esta tabla y no contra la memoria.
  *
  * Reglas de disparo, según la especificación:
  *
@@ -19,10 +19,23 @@ import { TEAM_GREEN, TEAM_RED } from './fighters';
  *
  * Nada de esto lo dispara el usuario: no hay comandos. Los golpes salen del
  * contacto entre peleadores y el gigantismo sale de la liquidez del libro.
+ *
+ * **La plantilla es más grande que la pelea.** Se juega 3 contra 3, pero cada
+ * bando tiene diez y nueve nombres disponibles: el que se cae del escenario no
+ * vuelve, entra otro. Eso es lo que hace que la pelea no se repita a los dos
+ * minutos, y es la razón de que `Match.character` sea un dato por slot y no una
+ * constante.
+ *
+ * **El bando ya no se lee en la ropa.** Cada peleador conserva sus colores
+ * propios —son personajes dibujados, no siluetas teñidas— y lo que dice de qué
+ * lado está es el color de sus poderes: verde el equipo comprador, rojo el
+ * vendedor. Por eso la plantilla viene partida al medio de entrada, con el
+ * bando fijo por personaje: así el que dibuja el efecto de una habilidad sabe
+ * de qué color va antes de dibujarlo, y no hay que teñir nada en runtime.
  */
 
 export interface Character {
-  /** Nombre de la armadura en el archivo de DragonBones. */
+  /** Nombre de la carpeta del arte y de la armadura. */
   armature: string;
   team: number;
   /** Se muestra en el marcador y en los KO. */
@@ -45,82 +58,81 @@ export interface Character {
   super: string;
 }
 
+/** Las cuatro que tiene todo el mundo igual, para no repetirlas veinte veces. */
+const BASE = {
+  idle: 'idle', run: 'run', jump: 'jump', hurt: 'hurt',
+  punch: 'attack_punch', kick: 'attack_kick',
+} as const;
+
 /**
  * `idle`, `run`, `jump` y `hurt` no estaban en la ficha original pero hacen
  * falta igual: un personaje que sólo tiene animaciones de ataque se ve
  * congelado el 90% del tiempo. Se nombran con la misma convención para que
  * entren en el mismo rig.
+ *
+ * Quiénes están acá y quiénes no salió de una condición práctica, no de gusto:
+ * entran los que se pueden **cortar en piezas** de un solo dibujo — brazos
+ * despegados del torso, hueco entre las piernas y nada cruzando por delante del
+ * cuerpo. Un arma en diagonal sobre el pecho obliga a inventar lo que hay
+ * detrás, y eso ya no es cortar, es dibujar.
  */
 export const ROSTER: readonly Character[] = [
-  {
-    armature: 'EarthWormJim',
-    team: TEAM_GREEN,
-    label: 'JIM',
-    idle: 'idle', run: 'run', jump: 'jump', hurt: 'hurt',
-    punch: 'attack_punch', kick: 'attack_kick',
-    skill1: 'attack_zapper',
-    // La ficha traía a Jim incompleto: le faltaban skill2 y super. Estos son
-    // marcadores con la convención del resto; hay que confirmarlos antes de
-    // riggear, porque el nombre es el contrato.
-    skill2: 'attack_whip',
-    super: 'super_pocket_rocket',
-  },
-  {
-    armature: 'Platinio',
-    team: TEAM_GREEN,
-    label: 'PLAT',
-    idle: 'idle', run: 'run', jump: 'jump', hurt: 'hurt',
-    punch: 'attack_punch', kick: 'attack_kick',
-    skill1: 'attack_snoot_wave',
-    skill2: 'dash_invulnerable',
-    super: 'super_tornado_platinio',
-  },
-  {
-    armature: 'BlackieMouse',
-    team: TEAM_GREEN,
-    label: 'BLKY',
-    idle: 'idle', run: 'run', jump: 'jump', hurt: 'hurt',
-    punch: 'attack_punch', kick: 'attack_kick',
-    skill1: 'drop_trap',
-    skill2: 'parry_stance',
-    super: 'super_yunque_100t',
-  },
-  {
-    armature: 'ChicagoBull',
-    team: TEAM_RED,
-    label: 'BULL',
-    idle: 'idle', run: 'run', jump: 'jump', hurt: 'hurt',
-    punch: 'attack_punch', kick: 'attack_kick',
-    skill1: 'charge_armor',
-    skill2: 'ground_stomp',
-    super: 'super_estampida_extincion',
-  },
-  {
-    armature: 'MichaelJordan',
-    team: TEAM_RED,
-    label: 'MJ',
-    idle: 'idle', run: 'run', jump: 'jump', hurt: 'hurt',
-    punch: 'attack_punch', kick: 'attack_kick',
-    skill1: 'ball_pass',
-    skill2: 'dunk_zone_anchor',
-    super: 'super_meteor_dunk',
-  },
-  {
-    armature: 'Deadpool',
-    team: TEAM_RED,
-    label: 'DP',
-    idle: 'idle', run: 'run', jump: 'jump', hurt: 'hurt',
-    punch: 'attack_punch', kick: 'attack_kick',
-    skill1: 'taunt_4th_wall',
-    skill2: 'attack_katana_slash',
-    super: 'super_ui_smash',
-  },
+  /* --- verde: el bando comprador ------------------------------------- */
+  { armature: 'Asuri', team: TEAM_GREEN, label: 'ASU', ...BASE,
+    skill1: 'attack_claw_dash', skill2: 'attack_pounce', super: 'super_frenesi_felino' },
+  { armature: 'Caspian', team: TEAM_GREEN, label: 'CASP', ...BASE,
+    skill1: 'attack_gauntlet_hook', skill2: 'dash_wall_run', super: 'super_carrera_del_gremio' },
+  { armature: 'Dusk', team: TEAM_GREEN, label: 'DUSK', ...BASE,
+    skill1: 'attack_spirit_bolt', skill2: 'summon_totem', super: 'super_invocacion_ancestral' },
+  { armature: 'Ezio', team: TEAM_GREEN, label: 'EZIO', ...BASE,
+    skill1: 'attack_hidden_blade', skill2: 'throw_smoke_bomb', super: 'super_salto_de_fe' },
+  { armature: 'Isaiah', team: TEAM_GREEN, label: 'ISA', ...BASE,
+    skill1: 'attack_rocket_lance', skill2: 'hover_thrusters', super: 'super_bombardeo_orbital' },
+  { armature: 'WuShang', team: TEAM_GREEN, label: 'WU', ...BASE,
+    skill1: 'attack_palm_strike', skill2: 'dash_meditate', super: 'super_puno_del_dragon' },
+  { armature: 'Thea', team: TEAM_GREEN, label: 'THEA', ...BASE,
+    skill1: 'attack_chain_whip', skill2: 'grapple_pull', super: 'super_tormenta_de_cadenas' },
+  { armature: 'Yumiko', team: TEAM_GREEN, label: 'YUMI', ...BASE,
+    skill1: 'attack_fox_arrow', skill2: 'summon_kitsune', super: 'super_lluvia_de_flechas' },
+  { armature: 'LordVraxx', team: TEAM_GREEN, label: 'VRAX', ...BASE,
+    skill1: 'attack_blaster_shot', skill2: 'deploy_mine', super: 'super_barrido_orbital' },
+  { armature: 'SirRoland', team: TEAM_GREEN, label: 'ROL', ...BASE,
+    skill1: 'attack_lance_thrust', skill2: 'raise_guard', super: 'super_carga_del_caballero' },
+
+  /* --- rojo: el bando vendedor --------------------------------------- */
+  { armature: 'Deadpool', team: TEAM_RED, label: 'DP', ...BASE,
+    skill1: 'taunt_4th_wall', skill2: 'attack_katana_slash', super: 'super_ui_smash' },
+  { armature: 'Ragnir', team: TEAM_RED, label: 'RAGN', ...BASE,
+    skill1: 'attack_axe_swipe', skill2: 'leap_pounce', super: 'super_furia_de_la_manada' },
+  { armature: 'Cassidy', team: TEAM_RED, label: 'CASS', ...BASE,
+    skill1: 'attack_hammer_slam', skill2: 'blunderbuss_shot', super: 'super_ley_del_oeste' },
+  { armature: 'Tezca', team: TEAM_RED, label: 'TEZ', ...BASE,
+    skill1: 'attack_flame_kick', skill2: 'mask_swap', super: 'super_sol_ardiente' },
+  { armature: 'Kor', team: TEAM_RED, label: 'KOR', ...BASE,
+    skill1: 'attack_stone_fist', skill2: 'guard_stance', super: 'super_avalancha' },
+  { armature: 'Mako', team: TEAM_RED, label: 'MAKO', ...BASE,
+    skill1: 'attack_fin_slash', skill2: 'dash_frenzy', super: 'super_marea_carnicera' },
+  { armature: 'Gnash', team: TEAM_RED, label: 'GNSH', ...BASE,
+    skill1: 'attack_club_smash', skill2: 'throw_spear', super: 'super_estampida_primitiva' },
+  { armature: 'Petra', team: TEAM_RED, label: 'PETR', ...BASE,
+    skill1: 'attack_gauntlet_burst', skill2: 'dash_grav_kick', super: 'super_pulso_gravitatorio' },
+  { armature: 'Thor', team: TEAM_RED, label: 'THOR', ...BASE,
+    skill1: 'attack_hammer_toss', skill2: 'call_lightning', super: 'super_ira_del_trueno' },
 ];
 
 export const GREEN_ROSTER = ROSTER.filter((c) => c.team === TEAM_GREEN);
 export const RED_ROSTER = ROSTER.filter((c) => c.team === TEAM_RED);
 
-/** El personaje de un slot. Los slots no cambian de bando, así que es fijo. */
+/** Cuántos personajes tiene disponible un bando. */
+export function rosterSize(team: number): number {
+  return team === TEAM_GREEN ? GREEN_ROSTER.length : RED_ROSTER.length;
+}
+
+/**
+ * El personaje número `index` de un bando. El slot no cambia de bando nunca,
+ * pero sí de personaje: al caerse uno entra otro de la plantilla, y `index` es
+ * justo lo que cambia.
+ */
 export function characterFor(team: number, index: number): Character {
   const list = team === TEAM_GREEN ? GREEN_ROSTER : RED_ROSTER;
   return list[index % list.length];

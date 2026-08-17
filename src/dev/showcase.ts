@@ -55,9 +55,23 @@ host.appendChild(app.canvas);
 const stage = new Container();
 app.stage.addChild(stage);
 
-const art = await Promise.all(ROSTER.map((character) => loadArt(character.armature)));
+/**
+ * `?solo=asuri,deadpool` deja sólo a ésos.
+ *
+ * La plantilla pasó de seis a diecinueve y en una fila no se ve nada. Sin
+ * filtro se acomodan en una grilla; con filtro, los que se están cortando
+ * quedan grandes, que es para lo que existe este banco.
+ */
+const wanted = (new URLSearchParams(window.location.search).get('solo') ?? '')
+  .split(',').map((name) => name.trim().toLowerCase()).filter((name) => name !== '');
+const CAST = wanted.length === 0
+  ? ROSTER
+  : ROSTER.filter((character) => wanted.includes(character.armature.toLowerCase()));
+if (CAST.length === 0) throw new Error(`?solo= no coincide con nadie: ${wanted.join(', ')}`);
 
-const views = ROSTER.map((character, i) => {
+const art = await Promise.all(CAST.map((character) => loadArt(character.armature)));
+
+const views = CAST.map((character, i) => {
   const view = createFighterView(
     lookFor(character.armature),
     character.team === TEAM_GREEN ? GREEN : RED,
@@ -67,7 +81,7 @@ const views = ROSTER.map((character, i) => {
   return view;
 });
 
-const names = ROSTER.map((character) => {
+const names = CAST.map((character) => {
   const text = new Text({
     text: character.label,
     style: { fontFamily: 'monospace', fontSize: 14, fill: 0x8fa3bf },
@@ -114,8 +128,15 @@ app.ticker.add(() => {
   const width = app.renderer.width / app.renderer.resolution;
   const height = app.renderer.height / app.renderer.resolution;
   // Una unidad de mundo mide esto en píxeles. El personaje mide 1,04 de alto.
-  const unit = Math.min(height * 0.42, width / 9);
-  const slotWidth = width / (views.length + 1);
+  // Grilla: hasta seis por fila. Con diecinueve en una sola fila cada uno
+  // mediría treinta píxeles, que es justo el tamaño al que no se puede juzgar
+  // si un brazo está bien puesto — el defecto que este banco existe para no
+  // tener.
+  const columns = Math.min(views.length, 6);
+  const rows = Math.ceil(views.length / columns);
+  const unit = Math.min(height * 0.42 / rows, width / (columns * 1.5));
+  const slotWidth = width / (columns + 1);
+  const rowHeight = height * 0.8 / rows;
 
   // Las poses de vuelo y de golpe no se disparan solas acá: se fuerzan los
   // mismos parámetros con los que las llamaría la escena.
@@ -131,8 +152,8 @@ app.ticker.add(() => {
 
   for (let i = 0; i < views.length; i++) {
     const view = views[i];
-    view.x = slotWidth * (i + 1);
-    view.y = height * 0.62;
+    view.x = slotWidth * ((i % columns) + 1);
+    view.y = height * 0.2 + rowHeight * (Math.floor(i / columns) + 0.55);
     view.scale.set(unit);
     view.pose(vx, vy, !airborne, step.label === 'hurt', step.action, actionT, elapsed);
     names[i].x = view.x;

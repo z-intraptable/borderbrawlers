@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "tsx scripts/smokeMockFeed.ts && tsx scripts/smokeFeedCore.ts && tsx scripts/smokeFighters.ts && tsx scripts/smokePhysics.ts",
+    "escenarios": "node scripts/escenarios.mjs",
+    "test": "tsx scripts/smokeMockFeed.ts && tsx scripts/smokeFeedCore.ts && tsx scripts/smokeFighters.ts && tsx scripts/smokePhysics.ts && tsx scripts/smokeRoster.ts",
     "test:mem": "node --expose-gc --import tsx scripts/smokeFeedCore.ts"
   },
   "dependencies": {

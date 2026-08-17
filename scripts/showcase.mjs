@@ -5,13 +5,17 @@
  * a los personajes, grandes y sin nada encima. Cuando se toca una pose, esto es
  * lo que dice si quedó bien.
  *
- *   node scripts/showcase.mjs
+ *   node scripts/showcase.mjs [solo]
+ *
+ * `solo` es una lista separada por comas de armaduras — `asuri,deadpool` — y
+ * deja sólo a ésos, grandes. Sin eso salen los diecinueve en grilla.
  */
 import { chromium } from 'playwright';
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 
 const OUT = 'shots/elenco';
+const solo = process.argv[2] ? `&solo=${process.argv[2]}` : '';
 /** Las mismas poses que `src/dev/showcase.ts`. Se piden por nombre, una por carga. */
 const TOUR = [
   ['idle'], ['run'], ['jump'], ['fall'], ['hurt'],
@@ -46,7 +50,7 @@ for (let i = 0; i < TOUR.length; i++) {
   // Una carga por pose, con la pose fijada. Capturar por tiempo sobre el
   // recorrido automático dejaba las imágenes rotuladas con la pose de al lado
   // en cuanto un frame tardaba de más.
-  await page.goto(`http://localhost:5199/showcase.html?pose=${label}`, {
+  await page.goto(`http://localhost:5199/showcase.html?pose=${label}${solo}`, {
     waitUntil: 'networkidle',
   });
   // Lo justo para que la acción llegue a su punto de extensión máxima.

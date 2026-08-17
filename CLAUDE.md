@@ -257,6 +257,26 @@ cambio en `feedCore.ts` tiene que mantener esas suites en verde.
 Verde = compradores agresores, rojo = vendedores, 3 contra 3, sin comandos de
 usuario: todo lo maneja el libro.
 
+- **El bando se lee en los poderes, no en la ropa.** Cada peleador dibujado
+  conserva sus propios colores; lo que dice de qué lado está es el color de sus
+  efectos —verde el comprador, rojo el vendedor—. Por eso `src/game/roster.ts`
+  viene partido al medio con el bando fijo por personaje. El muñeco vectorial,
+  que es el marcador de posición mientras el dibujo no está cortado, sí sale
+  teñido del color del bando.
+- **La plantilla es más grande que la pelea.** Diez verdes y nueve rojos para
+  seis lugares. El que se cae del escenario no vuelve: entra el que sigue en la
+  ronda, salteando a los que ya están en pantalla. Los cuerpos se construyen
+  todos al arrancar y el relevo es cambiar de `visible`.
+- **Quién entra a la plantilla es una condición de corte, no de gusto**: brazos
+  despegados del torso, hueco entre las piernas y nada cruzando por delante del
+  cuerpo. Un arma en diagonal sobre el pecho obliga a inventar lo que hay
+  detrás, y eso ya no es cortar.
+- **El super cambia de escenario.** La rotación sale de
+  `public/escenarios/lista.json`, que escribe `npm run escenarios` leyendo las
+  carpetas — `public/` no pasa por Vite, así que el browser no puede listarlas.
+  El corte cae dentro del hitstop del super, que es el momento más ruidoso de la
+  pelea; suelto se vería como un parpadeo del fondo. Con `?stage=` se fija uno y
+  no se mueve.
 - **El libro es el escenario.** 9 losas que suben y bajan con la liquidez.
 - **Los trades hacen aparecer peleadores.** El tamaño define el peso, una ballena
   entra como peso pesado, y el flujo agresor le da ímpetu a su equipo.
