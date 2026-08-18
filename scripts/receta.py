@@ -38,9 +38,20 @@ Image.MAX_IMAGE_PIXELS = None
 
 ORDEN = ['head', 'torso', 'armUpper', 'armLower', 'legUpper', 'legLower']
 
-# Alto de figura, en unidades de rig, medido sobre Asuri —la receta que ya
-# funcionaba— para que todos entren a la pelea del mismo tamaño.
-ALTO_RIG = 87.0
+# Alto de figura, en unidades de rig. Todos los personajes se miden contra esto
+# para que entren a la pelea del mismo tamaño, sea cual sea la resolución de su
+# hoja.
+#
+# El contenedor del rig va con `scale.set(1 / RIG)` y `RIG = 100`
+# (src/art/fighter.ts), así que este número ES el alto del dibujo en centésimas
+# de unidad de mundo: 104 = 1,04 unidades.
+#
+# Estaba en 87 —heredado de Asuri, la primera receta que funcionó— y eso dejaba
+# el dibujo MÁS CHICO que su propio collider, que mide FIGHTER_HALF_HEIGHT * 2 =
+# 1,04 (src/game/match.ts). El personaje no llenaba su caja de colisión: le
+# sobraba un 17% de aire y parecía flotar sobre las plataformas. 104 lo hace
+# calzar exacto.
+ALTO_RIG = 104.0
 
 # Proporciones del esqueleto, como fracción del SEMIANCHO y del ALTO medidos del
 # torso. Salen de los números con los que Kor quedó bien armado tras la

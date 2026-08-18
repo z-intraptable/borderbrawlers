@@ -1,16 +1,16 @@
 {
   "armature": "Kor",
-  "unit": 50.195,
+  "unit": 41.99,
   "rig": {
-    "armUpper": 15.798,
-    "armLower": 26.915,
-    "legUpper": 13.806,
-    "legLower": 27.493,
-    "shoulderX": 12.611,
-    "shoulderY": 5.339,
-    "hipX": 5.917,
-    "hipY": 19.384,
-    "headY": 4.602
+    "armUpper": 18.885,
+    "armLower": 32.174,
+    "legUpper": 16.504,
+    "legLower": 32.865,
+    "shoulderX": 15.075,
+    "shoulderY": 6.382,
+    "hipX": 7.073,
+    "hipY": 23.172,
+    "headY": 5.501
   },
   "parts": {
     "head": {

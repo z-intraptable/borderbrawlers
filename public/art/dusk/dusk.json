@@ -1,16 +1,16 @@
 {
   "armature": "Dusk",
-  "unit": 33.218,
+  "unit": 27.788,
   "rig": {
-    "armUpper": 20.441,
-    "armLower": 21.524,
-    "legUpper": 15.775,
-    "legLower": 22.939,
-    "shoulderX": 7.677,
-    "shoulderY": 5.66,
-    "hipX": 3.612,
-    "hipY": 20.591,
-    "headY": 4.877
+    "armUpper": 24.435,
+    "armLower": 25.731,
+    "legUpper": 18.857,
+    "legLower": 27.422,
+    "shoulderX": 9.177,
+    "shoulderY": 6.766,
+    "hipX": 4.318,
+    "hipY": 24.615,
+    "headY": 5.83
   },
   "parts": {
     "head": {

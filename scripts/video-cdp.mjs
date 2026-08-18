@@ -24,6 +24,9 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 const frames = Number(process.argv[2] ?? 40);
 const scenario = process.argv[3] ?? 'volatile';
 const solo = process.argv[4] ?? '';
+// Fija un escenario en vez de dejar que el super lo rote: sin esto no hay forma
+// de mirar uno concreto, porque el cambio cae dentro del hitstop del super.
+const stage = process.argv[5] ?? '';
 const banco = solo !== '';
 const OUT = 'shots/video';
 const SIZE = banco ? { width: 1280, height: 720 } : { width: 960, height: 540 };
@@ -72,11 +75,15 @@ page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
 
 const url = banco
   ? `http://localhost:${PORT}/showcase.html?solo=${solo}`
-  : `http://localhost:${PORT}/?source=mock&scenario=${scenario}`;
+  : `http://localhost:${PORT}/?source=mock&scenario=${scenario}`
+    + (stage ? `&stage=${stage}` : '');
 await page.goto(url, { waitUntil: 'networkidle' });
 // Más respiro que en video.mjs: el libro tarda en llenarse y los primeros
 // cuadros de una escena vacía no muestran nada de lo que uno quiere ver.
-await page.waitForTimeout(5000);
+// El libro tarda en llenarse, el arte de los seis son 36 PNG y el tinte del
+// fondo arranca casi en blanco hasta que hay liquidez de los dos lados. Con 5 s
+// los primeros cuadros salen sin peleadores y sin losas.
+await page.waitForTimeout(Number(process.env.ESPERA ?? 5000));
 
 const cdp = await page.context().newCDPSession(page);
 

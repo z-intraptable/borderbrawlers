@@ -44,3 +44,5 @@ arte-crudo/escenarios/*/
 
 # videos generados: se rehacen con scripts/video.mjs + scripts/gif.py
 shots/video/
+
+__pycache__/

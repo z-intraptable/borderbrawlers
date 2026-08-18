@@ -1,16 +1,16 @@
 {
   "armature": "Ragnir",
-  "unit": 29.299,
+  "unit": 24.51,
   "rig": {
-    "armUpper": 27.271,
-    "armLower": 27.714,
-    "legUpper": 16.656,
-    "legLower": 27.953,
-    "shoulderX": 9.284,
-    "shoulderY": 6.041,
-    "hipX": 4.335,
-    "hipY": 22.014,
-    "headY": 5.222
+    "armUpper": 32.599,
+    "armLower": 33.129,
+    "legUpper": 19.91,
+    "legLower": 33.415,
+    "shoulderX": 11.098,
+    "shoulderY": 7.222,
+    "hipX": 5.182,
+    "hipY": 26.316,
+    "headY": 6.242
   },
   "parts": {
     "head": {

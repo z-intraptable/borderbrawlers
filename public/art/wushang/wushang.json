@@ -1,16 +1,16 @@
 {
-  "armature": "WuShang",
-  "unit": 29.609,
+  "armature": "Wushang",
+  "unit": 24.769,
   "rig": {
-    "armUpper": 20.298,
-    "armLower": 22.493,
-    "legUpper": 15.671,
-    "legLower": 24.722,
-    "shoulderX": 7.092,
-    "shoulderY": 5.404,
-    "hipX": 3.344,
-    "hipY": 19.656,
-    "headY": 4.661
+    "armUpper": 24.264,
+    "armLower": 26.888,
+    "legUpper": 18.733,
+    "legLower": 29.553,
+    "shoulderX": 8.478,
+    "shoulderY": 6.46,
+    "hipX": 3.997,
+    "hipY": 23.497,
+    "headY": 5.571
   },
   "parts": {
     "head": {

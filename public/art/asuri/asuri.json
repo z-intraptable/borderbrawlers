@@ -1,16 +1,16 @@
 {
   "armature": "Asuri",
-  "unit": 28.816,
+  "unit": 24.106,
   "rig": {
-    "armUpper": 13.742,
-    "armLower": 28.699,
-    "legUpper": 15.72,
-    "legLower": 28.977,
-    "shoulderX": 7.01,
-    "shoulderY": 4.615,
-    "hipX": 3.297,
-    "hipY": 16.762,
-    "headY": 3.991
+    "armUpper": 16.427,
+    "armLower": 34.307,
+    "legUpper": 18.792,
+    "legLower": 34.639,
+    "shoulderX": 8.38,
+    "shoulderY": 5.517,
+    "hipX": 3.941,
+    "hipY": 20.037,
+    "headY": 4.771
   },
   "parts": {
     "head": {

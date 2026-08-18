@@ -1,16 +1,16 @@
 {
   "armature": "Mako",
-  "unit": 28.23,
+  "unit": 23.615,
   "rig": {
-    "armUpper": 20.687,
-    "armLower": 25.08,
-    "legUpper": 19.199,
-    "legLower": 25.682,
-    "shoulderX": 9.245,
-    "shoulderY": 5.491,
-    "hipX": 4.322,
-    "hipY": 19.943,
-    "headY": 4.747
+    "armUpper": 24.73,
+    "armLower": 29.981,
+    "legUpper": 22.952,
+    "legLower": 30.701,
+    "shoulderX": 11.052,
+    "shoulderY": 6.564,
+    "hipX": 5.166,
+    "hipY": 23.841,
+    "headY": 5.674
   },
   "parts": {
     "head": {

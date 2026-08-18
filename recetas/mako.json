@@ -1,10 +1,10 @@
 {
   "_": "Mako. Kit generado en fila con el prompt de recetas/PROMPT-KIT-PARTES.md y escrito por scripts/receta.py midiendo la hoja: las seis cajas son componentes del alfa, no estimaciones. Las piezas ya vienen rectas y verticales.",
   "_esqueleto": "Los hombros y las caderas NO salen de dónde cayó cada pieza en la hoja —están en fila, esa posición no dice nada— sino de proporciones sobre el torso medido. Verificar con scripts/armar.py antes de dar por bueno.",
-  "_unit": "28.23: el alto de figura medido (2456 px, cabeza + torso + las dos de pierna) dividido por las 87.0 unidades de rig que mide Asuri, para que todos entren a la pelea del mismo tamaño.",
+  "_unit": "23.615: el alto de figura medido (2456 px, cabeza + torso + las dos de pierna) dividido por las 104.0 unidades de rig que mide Asuri, para que todos entren a la pelea del mismo tamaño.",
   "source": "arte-crudo/mako-kit-alfa.png",
   "armature": "Mako",
-  "unit": 28.23,
+  "unit": 23.615,
   "scale": 1,
   "origin": [
     1022,
