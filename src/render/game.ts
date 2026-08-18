@@ -161,6 +161,24 @@ const HITSTOP_MAX = 0.14;
  * así que el borde —que es donde se pierde la pelea— se sigue viendo entero.
  */
 const MIN_HALF_WIDTH = 5.5;
+/**
+ * Cuánto se puede ver a lo ALTO, en unidades de mundo (medio alto).
+ *
+ * El encuadre se calcula a lo ancho, y eso alcanza mientras la pantalla sea
+ * apaisada. En una pantalla angosta y alta —un teléfono en vertical— el alto
+ * visible sale del ancho por el aspecto: con medio ancho en 10 y un aspecto de
+ * 1,78 se ven **treinta y cinco unidades de alto**, y un peleador, que mide
+ * 1,04, queda ocupando el 3% de la pantalla. Brawlhalla, que es la referencia
+ * declarada del proyecto, los muestra cerca del 8%.
+ *
+ * Acotando el alto visible, en una pantalla angosta la cámara se ACERCA en vez
+ * de alejarse, y lo que se recorta son los costados. Se pierde ver el escenario
+ * entero, sí; se gana ver quién está peleando, que es lo que se vino a mirar.
+ *
+ * En 16:9 no cambia nada: el tope por alto da 13,3 de medio ancho, más que
+ * `MAX_HALF_WIDTH`, así que no llega a morder nunca.
+ */
+const MAX_HALF_HEIGHT = 7.5;
 const MAX_HALF_WIDTH = STAGE_HALF_WIDTH + 1;
 const CAMERA_LAMBDA = 3.2;
 /**
@@ -287,11 +305,10 @@ export async function startGame(
     const ancho = Math.round(caja.width);
     const alto = Math.round(caja.height);
     if (ancho <= 0 || alto <= 0) return;
-    // `renderer.width` viene en píxeles FÍSICOS y la caja en píxeles CSS: en una
-    // pantalla retina son el doble. Comparar sin dividir por la resolución da
-    // siempre distinto y se redimensiona en todos los cuadros.
-    if (app.renderer.width / app.renderer.resolution === ancho
-      && app.renderer.height / app.renderer.resolution === alto) return;
+    // Las dos medidas están en píxeles CSS —ver `pantalla`—, así que se comparan
+    // derecho. Dividiendo por `resolution`, como estaba, la comparación nunca
+    // daba igual en una pantalla retina y la salida temprana no servía de nada.
+    if (app.renderer.width === ancho && app.renderer.height === alto) return;
     app.renderer.resize(ancho, alto);
   }
 
@@ -617,8 +634,7 @@ export async function startGame(
     drawFx(fx, plainFx, glowFx);
 
     /* --- fondo ------------------------------------------------------- */
-    const width = app.renderer.width / app.renderer.resolution;
-    const height = app.renderer.height / app.renderer.resolution;
+    const { ancho: width, alto: height } = pantalla(app);
     const buy = client.stats.buyVolume;
     const sell = client.stats.sellVolume;
     const total = buy + sell;
@@ -1066,7 +1082,13 @@ function updateCamera(camera: Camera, match: Match, dt: number, aspect: number):
     CAMERA_Y_LOW * halfHeight,
     Math.min(CAMERA_Y_HIGH * halfHeight, targetY * 0.7 + 1),
   );
-  targetHalf = Math.max(MIN_HALF_WIDTH, Math.min(MAX_HALF_WIDTH, targetHalf));
+  // El tope por alto manda incluso sobre `MIN_HALF_WIDTH`: si el mínimo pudiera
+  // pisarlo, en vertical volveríamos a ver veinte unidades de alto y los
+  // personajes seguirían siendo hormigas. Ver `MAX_HALF_HEIGHT`.
+  const topeAlto = aspect > 0 ? MAX_HALF_HEIGHT / aspect : MAX_HALF_WIDTH;
+  const techo = Math.min(MAX_HALF_WIDTH, topeAlto);
+  const piso = Math.min(MIN_HALF_WIDTH, techo);
+  targetHalf = Math.max(piso, Math.min(techo, targetHalf));
 
   const k = 1 - Math.exp(-CAMERA_LAMBDA * dt);
   camera.x += (targetX - camera.x) * k;
@@ -1074,9 +1096,28 @@ function updateCamera(camera: Camera, match: Match, dt: number, aspect: number):
   camera.halfWidth += (targetHalf - camera.halfWidth) * k;
 }
 
+/**
+ * El tamaño de la pantalla en píxeles CSS, que es en lo que piensa todo el
+ * dibujo: la cámara, el encaje del escenario y las dos hogueras.
+ *
+ * **`renderer.width` NO son píxeles físicos.** En Pixi v8 es `screen.width`, o
+ * sea que ya viene en píxeles CSS; los físicos están en `renderer.canvas.width`.
+ * Cuatro lugares de este archivo lo dividían por `resolution` creyendo lo
+ * contrario, y ese error es invisible en un monitor común —ahí `resolution` es 1
+ * y dividir no hace nada— pero en cualquier pantalla retina o teléfono vale 2 y
+ * **el mundo entero se dibujaba a la mitad, apretado contra el rincón de
+ * arriba a la izquierda**, con el resto del lienzo pintado de fondo. Así se veía
+ * en el teléfono, y por eso ninguna captura headless a dpr 1 lo mostraba.
+ *
+ * La regla de `?medir` fue la que lo cerró: `renderer 402 x 714 @2x` contra
+ * `buffer 804 x 1428` dice exactamente cuál de los dos es cuál.
+ */
+function pantalla(app: Application): { ancho: number; alto: number } {
+  return { ancho: app.renderer.width, alto: app.renderer.height };
+}
+
 function applyCamera(world: Container, app: Application, camera: Camera, shake: number): void {
-  const width = app.renderer.width / app.renderer.resolution;
-  const height = app.renderer.height / app.renderer.resolution;
+  const { ancho: width, alto: height } = pantalla(app);
   const scale = width / (camera.halfWidth * 2);
 
   const jitterX = shake > 0 ? (Math.random() * 2 - 1) * shake * SHAKE_GAIN : 0;
