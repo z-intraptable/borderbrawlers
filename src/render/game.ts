@@ -255,8 +255,24 @@ export async function startGame(
   // —onda de choque, hitstop, media docena volando—, así que el corte se
   // esconde ahí adentro en vez de parecer un parpadeo del fondo.
   const rotation = stageName === null ? await stageNames() : [stageName];
-  const stageTextures = (await sinColgarse(
-    Promise.all(rotation.map(loadStage)), 'el fondo del escenario') ?? [])
+
+  // Las cuatro cargas arrancan JUNTAS y se esperan donde hacen falta. En fila
+  // —fondo, después losas, después arte, después hojas— cada una paga de nuevo
+  // el arranque del cargador de Pixi, que en una máquina ocupada es lo que más
+  // tarda de todo: medido, el primer archivo tardó once segundos y los
+  // siguientes uno o dos. Cuatro veces once segundos es una pantalla negra que
+  // parece un cuelgue.
+  const armatures = [...new Set(ROSTER.map((character) => character.armature))];
+  const pedidos = {
+    fondos: sinColgarse(Promise.all(rotation.map(loadStage)), 'el fondo del escenario'),
+    losas: rotation.length === 0
+      ? Promise.resolve(null)
+      : sinColgarse(loadPlatforms(rotation[0]), 'las losas'),
+    arte: sinColgarse(Promise.all(armatures.map((name) => loadArt(name))), 'el arte cortado'),
+    hojas: sinColgarse(Promise.all(armatures.map((name) => loadSheets(name))), 'las hojas de sprites'),
+  };
+
+  const stageTextures = (await pedidos.fondos ?? [])
     .filter((texture): texture is Texture => texture !== null);
   let stageIndex = 0;
   const stage = stageTextures.length === 0 ? null : createStage(stageTextures[0]);
@@ -278,9 +294,7 @@ export async function startGame(
    * de entrada, y la mayoría de los escenarios todavía no tiene losas propias.
    * Con `?stage=` —que es el modo de mirar un escenario— coincide siempre.
    */
-  const platformArt = rotation.length === 0
-    ? null
-    : await sinColgarse(loadPlatforms(rotation[0]), 'las losas');
+  const platformArt = await pedidos.losas;
   const platforms = new Graphics();
   const platformSprites = platformArt === null ? null : buildStageSprites(platformArt);
   if (platformSprites === null) {
@@ -297,10 +311,7 @@ export async function startGame(
   // el de los seis que arrancan: al caerse uno entra otro en el mismo frame, y
   // ahí no hay tiempo de ir a buscar una imagen. El que no lo tenga dibujado
   // todavía devuelve null y sale vectorial, en la misma pelea.
-  const armatures = [...new Set(ROSTER.map((character) => character.armature))];
-  const loaded = await sinColgarse(
-    Promise.all(armatures.map((name) => loadArt(name))), 'el arte cortado')
-    ?? armatures.map(() => null);
+  const loaded = await pedidos.arte ?? armatures.map(() => null);
   const artByArmature = new Map<string, FighterArt | null>(
     armatures.map((name, i) => [name, loaded[i]]),
   );
@@ -308,9 +319,7 @@ export async function startGame(
   // Y las hojas de sprites, con el mismo criterio: el que la tenga se dibuja
   // cuadro por cuadro, el que no sigue con el muñeco de piezas. Los dos en la
   // misma pelea.
-  const sheeted = await sinColgarse(
-    Promise.all(armatures.map((name) => loadSheets(name))), 'las hojas de sprites')
-    ?? armatures.map(() => null);
+  const sheeted = await pedidos.hojas ?? armatures.map(() => null);
   const sheetsByArmature = new Map<string, FighterSheets | null>(
     armatures.map((name, i) => [name, sheeted[i]]),
   );
