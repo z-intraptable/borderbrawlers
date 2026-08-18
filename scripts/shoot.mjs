@@ -37,7 +37,7 @@ mkdirSync(OUT, { recursive: true });
 const browser = await chromium.launch({
   // El navegador está preinstalado en el contenedor y la versión de Playwright
   // del proyecto no coincide con la suya, así que se apunta al binario.
-  executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
+  executablePath: chromium.executablePath(),
   args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'],
 });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });

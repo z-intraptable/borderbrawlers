@@ -20,11 +20,17 @@ import { TEAM_GREEN, TEAM_RED } from './fighters';
  * Nada de esto lo dispara el usuario: no hay comandos. Los golpes salen del
  * contacto entre peleadores y el gigantismo sale de la liquidez del libro.
  *
- * **La plantilla es más grande que la pelea.** Se juega 3 contra 3, pero cada
- * bando tiene diez y nueve nombres disponibles: el que se cae del escenario no
- * vuelve, entra otro. Eso es lo que hace que la pelea no se repita a los dos
- * minutos, y es la razón de que `Match.character` sea un dato por slot y no una
- * constante.
+ * **La plantilla es exactamente la pelea: seis, tres por bando.** No hay
+ * relevos. El que se cae del escenario reaparece él mismo en su slot, y son
+ * siempre los mismos seis en todos los escenarios.
+ *
+ * Antes la plantilla era más grande que la pelea —diecinueve nombres, y el que
+ * se caía dejaba entrar a otro— para que la pelea no se repitiera a los dos
+ * minutos. Se recortó a seis por una razón de producción y no de diseño: cada
+ * personaje necesita un dibujo cortado en piezas, y seis bien cortados se ven
+ * mucho mejor que diecinueve a medias. `Match.character` sigue siendo un dato
+ * por slot y no una constante, así que volver a agrandar la plantilla es sumar
+ * entradas acá y devolverle a `activate` el reparto por ronda.
  *
  * **El bando ya no se lee en la ropa.** Cada peleador conserva sus colores
  * propios —son personajes dibujados, no siluetas teñidas— y lo que dice de qué
@@ -78,46 +84,20 @@ const BASE = {
  */
 export const ROSTER: readonly Character[] = [
   /* --- verde: el bando comprador ------------------------------------- */
+  { armature: 'Kor', team: TEAM_GREEN, label: 'KOR', ...BASE,
+    skill1: 'attack_stone_fist', skill2: 'guard_stance', super: 'super_avalancha' },
+  { armature: 'Mako', team: TEAM_GREEN, label: 'MAKO', ...BASE,
+    skill1: 'attack_fin_slash', skill2: 'dash_frenzy', super: 'super_marea_carnicera' },
   { armature: 'Asuri', team: TEAM_GREEN, label: 'ASU', ...BASE,
     skill1: 'attack_claw_dash', skill2: 'attack_pounce', super: 'super_frenesi_felino' },
-  { armature: 'Caspian', team: TEAM_GREEN, label: 'CASP', ...BASE,
-    skill1: 'attack_gauntlet_hook', skill2: 'dash_wall_run', super: 'super_carrera_del_gremio' },
-  { armature: 'Dusk', team: TEAM_GREEN, label: 'DUSK', ...BASE,
-    skill1: 'attack_spirit_bolt', skill2: 'summon_totem', super: 'super_invocacion_ancestral' },
-  { armature: 'Ezio', team: TEAM_GREEN, label: 'EZIO', ...BASE,
-    skill1: 'attack_hidden_blade', skill2: 'throw_smoke_bomb', super: 'super_salto_de_fe' },
-  { armature: 'Isaiah', team: TEAM_GREEN, label: 'ISA', ...BASE,
-    skill1: 'attack_rocket_lance', skill2: 'hover_thrusters', super: 'super_bombardeo_orbital' },
-  { armature: 'WuShang', team: TEAM_GREEN, label: 'WU', ...BASE,
-    skill1: 'attack_palm_strike', skill2: 'dash_meditate', super: 'super_puno_del_dragon' },
-  { armature: 'Thea', team: TEAM_GREEN, label: 'THEA', ...BASE,
-    skill1: 'attack_chain_whip', skill2: 'grapple_pull', super: 'super_tormenta_de_cadenas' },
-  { armature: 'Yumiko', team: TEAM_GREEN, label: 'YUMI', ...BASE,
-    skill1: 'attack_fox_arrow', skill2: 'summon_kitsune', super: 'super_lluvia_de_flechas' },
-  { armature: 'LordVraxx', team: TEAM_GREEN, label: 'VRAX', ...BASE,
-    skill1: 'attack_blaster_shot', skill2: 'deploy_mine', super: 'super_barrido_orbital' },
-  { armature: 'SirRoland', team: TEAM_GREEN, label: 'ROL', ...BASE,
-    skill1: 'attack_lance_thrust', skill2: 'raise_guard', super: 'super_carga_del_caballero' },
 
   /* --- rojo: el bando vendedor --------------------------------------- */
-  { armature: 'Deadpool', team: TEAM_RED, label: 'DP', ...BASE,
-    skill1: 'taunt_4th_wall', skill2: 'attack_katana_slash', super: 'super_ui_smash' },
   { armature: 'Ragnir', team: TEAM_RED, label: 'RAGN', ...BASE,
-    skill1: 'attack_axe_swipe', skill2: 'leap_pounce', super: 'super_furia_de_la_manada' },
-  { armature: 'Cassidy', team: TEAM_RED, label: 'CASS', ...BASE,
-    skill1: 'attack_hammer_slam', skill2: 'blunderbuss_shot', super: 'super_ley_del_oeste' },
-  { armature: 'Tezca', team: TEAM_RED, label: 'TEZ', ...BASE,
-    skill1: 'attack_flame_kick', skill2: 'mask_swap', super: 'super_sol_ardiente' },
-  { armature: 'Kor', team: TEAM_RED, label: 'KOR', ...BASE,
-    skill1: 'attack_stone_fist', skill2: 'guard_stance', super: 'super_avalancha' },
-  { armature: 'Mako', team: TEAM_RED, label: 'MAKO', ...BASE,
-    skill1: 'attack_fin_slash', skill2: 'dash_frenzy', super: 'super_marea_carnicera' },
-  { armature: 'Gnash', team: TEAM_RED, label: 'GNSH', ...BASE,
-    skill1: 'attack_club_smash', skill2: 'throw_spear', super: 'super_estampida_primitiva' },
-  { armature: 'Petra', team: TEAM_RED, label: 'PETR', ...BASE,
-    skill1: 'attack_gauntlet_burst', skill2: 'dash_grav_kick', super: 'super_pulso_gravitatorio' },
-  { armature: 'Thor', team: TEAM_RED, label: 'THOR', ...BASE,
-    skill1: 'attack_hammer_toss', skill2: 'call_lightning', super: 'super_ira_del_trueno' },
+    skill1: 'attack_claw_rake', skill2: 'leap_pounce', super: 'super_aliento_de_fuego' },
+  { armature: 'WuShang', team: TEAM_RED, label: 'WU', ...BASE,
+    skill1: 'attack_palm_strike', skill2: 'dash_meditate', super: 'super_puno_del_dragon' },
+  { armature: 'Dusk', team: TEAM_RED, label: 'DUSK', ...BASE,
+    skill1: 'attack_spirit_bolt', skill2: 'summon_totem', super: 'super_invocacion_ancestral' },
 ];
 
 export const GREEN_ROSTER = ROSTER.filter((c) => c.team === TEAM_GREEN);

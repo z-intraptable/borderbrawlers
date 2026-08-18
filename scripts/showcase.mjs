@@ -12,7 +12,7 @@
  */
 import { chromium } from 'playwright';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 
 const OUT = 'shots/elenco';
 const solo = process.argv[2] ? `&solo=${process.argv[2]}` : '';
@@ -36,10 +36,65 @@ await new Promise((resolve, reject) => {
 
 mkdirSync(OUT, { recursive: true });
 const browser = await chromium.launch({
-  executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
+  executablePath: chromium.executablePath(),
   args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'],
 });
-const page = await browser.newPage({ viewport: { width: 1280, height: 620 } });
+const SIZE = { width: 1280, height: 620 };
+/**
+ * El tamaño que van a tener las imágenes. La ventana, en cambio, crece un píxel
+ * por captura y el recorte se hace con `clip` — ver `capturar()`, que explica por
+ * qué.
+ *
+ * El resumen: en este contenedor el WebGL lo emula SwiftShader por software, y
+ * ahí el primer cuadro de Pixi se dibuja pero no se entrega. La captura sale con
+ * el color de fondo y nada más, sin un solo error en consola, igual que si la
+ * escena estuviera vacía. Agrandar la ventana invalida el buffer y lo obliga a
+ * entregarlo; achicarla no. Medido: cero píxeles pintados antes, dieciocho mil
+ * después.
+ */
+const page = await browser.newPage({ viewport: SIZE });
+
+/**
+ * Cuánto puede pesar un PNG de 1280x620 de un solo color. Una captura en blanco
+ * ronda los 3,7 kB porque comprime a nada; una con el personaje dibujado pasa
+ * los 15 kB. No hace falta decodificar la imagen para distinguirlas, y así el
+ * script no necesita una librería de imágenes para verificar su propio trabajo.
+ */
+const VACIA = 8000;
+const INTENTOS = 6;
+
+let sobra = 0;
+
+/**
+ * Captura, y si sale en blanco vuelve a intentar.
+ *
+ * El empujón de tamaño entrega el cuadro casi siempre, pero no siempre: es una
+ * carrera contra el compositor y con nueve poses seguidas fallaban dos o tres,
+ * cambiando de pose entre corridas. Perseguir el temporizado exacto es pelearle
+ * a algo que no está bajo control; verificar el resultado sí lo está.
+ *
+ * Si tras `INTENTOS` sigue en blanco, corta con error en vez de dejar una imagen
+ * vacía en `shots/`: una captura en blanco que nadie mira se lee como "el
+ * personaje no se dibuja" y manda a buscar el defecto al lado equivocado.
+ */
+async function capturar(destino, etiqueta) {
+  for (let intento = 1; intento <= INTENTOS; intento++) {
+    sobra += 1;
+    await page.setViewportSize({
+      width: SIZE.width + sobra,
+      height: SIZE.height + sobra,
+    });
+    await page.waitForTimeout(400);
+    const png = await page.screenshot({
+      clip: { x: 0, y: 0, width: SIZE.width, height: SIZE.height },
+    });
+    if (png.length >= VACIA) {
+      writeFileSync(destino, png);
+      return intento;
+    }
+  }
+  throw new Error(`${etiqueta}: salió en blanco en ${INTENTOS} intentos`);
+}
 
 const errors = [];
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
@@ -55,7 +110,10 @@ for (let i = 0; i < TOUR.length; i++) {
   });
   // Lo justo para que la acción llegue a su punto de extensión máxima.
   await page.waitForTimeout(500);
-  await page.screenshot({ path: `${OUT}/${String(i).padStart(2, '0')}-${label}.png` });
+  const intentos = await capturar(
+    `${OUT}/${String(i).padStart(2, '0')}-${label}.png`, label,
+  );
+  console.log(`  ${label.padEnd(14)} ${intentos > 1 ? `${intentos} intentos` : 'ok'}`);
 }
 
 console.log(errors.length === 0 ? 'consola limpia' : `ERRORES (${errors.length}):`);

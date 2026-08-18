@@ -1,10 +1,12 @@
 /*
- * Smoke test del relevo de plantilla.
+ * Smoke test de la plantilla fija.
  *
- * Lo que se prueba es la regla nueva: el que se cae del escenario NO vuelve —
- * el slot se llena con el que sigue en la plantilla. Es una propiedad fácil de
- * romper sin que se note, porque un personaje repetido o uno que vuelve
- * enseguida se ve como una pelea normal si uno no está mirando ese detalle.
+ * Lo que se prueba es que NO hay relevos: pelean siempre los mismos seis y el
+ * que se cae del escenario reaparece él mismo en su slot. Es una propiedad
+ * fácil de romper sin que se note —un personaje que cambia al reaparecer se ve
+ * como una pelea normal si uno no está mirando ese detalle— y romperla además
+ * saca en pantalla a un personaje sin arte cortado, que la escena dibuja
+ * vectorial y desentona con los demás.
  *
  * Sin red y sin Pixi: se le empujan trades a mano a la simulación.
  */
@@ -28,8 +30,9 @@ const stats: FeedStats = {
 
 console.log('\n== la plantilla ==');
 {
-  check('hay más personajes que slots en cada bando',
-    GREEN_ROSTER.length > FIGHTERS_PER_TEAM && RED_ROSTER.length > FIGHTERS_PER_TEAM,
+  check('cada bando tiene exactamente los slots que pelea',
+    GREEN_ROSTER.length === FIGHTERS_PER_TEAM
+    && RED_ROSTER.length === FIGHTERS_PER_TEAM,
     `${GREEN_ROSTER.length} verdes, ${RED_ROSTER.length} rojos`);
 
   const armatures = new Set(ROSTER.map((c) => c.armature));
@@ -44,7 +47,7 @@ console.log('\n== la plantilla ==');
   check('cada personaje declara nueve animaciones distintas', nine);
 }
 
-console.log('\n== relevo al caerse ==');
+console.log('\n== reaparición al caerse ==');
 {
   const m = createMatch();
   const trades = new TradeRingBuffer(64);
@@ -73,7 +76,7 @@ console.log('\n== relevo al caerse ==');
 
   fill();
   check('el slot se vuelve a llenar', m.slot[0] === SLOT_ACTIVE);
-  check('y no con el mismo que se cayó', m.character[0] !== first[0],
+  check('y con el mismo que se cayó', m.character[0] === first[0],
     `${characterFor(TEAM_GREEN, first[0]).label} → ${characterFor(TEAM_GREEN, m.character[0]).label}`);
 
   const green = new Set<number>();
@@ -82,14 +85,16 @@ console.log('\n== relevo al caerse ==');
     green.size === FIGHTERS_PER_TEAM, `${[...green]}`);
 }
 
-console.log('\n== la ronda recorre la plantilla entera ==');
+console.log('\n== la plantilla no rota ==');
 {
   const m = createMatch();
   const trades = new TradeRingBuffer(64);
-  const seen = new Set<number>();
 
-  // Se tira al del slot 0 una y otra vez: si la ronda avanza, en unas cuantas
-  // vueltas tienen que haber pasado todos los verdes por ese slot.
+  // Se tira al del slot 0 una y otra vez. Con relevos, en unas cuantas vueltas
+  // habrían pasado varios personajes por ese slot; sin relevos tiene que volver
+  // siempre el mismo, y ésta es la prueba que se pone roja si alguien le
+  // devuelve el reparto por ronda a `activate` sin querer.
+  const seen = new Set<number>();
   for (let round = 0; round < GREEN_ROSTER.length * 3; round++) {
     for (let n = 0; n < CAPACITY; n++) trades.push(n, 'buy', 100, 1, false, n);
     for (let n = 0; n < 8; n++) stepMatch(m, trades, stats, 1 / 60);
@@ -99,13 +104,15 @@ console.log('\n== la ronda recorre la plantilla entera ==');
       stepMatch(m, trades, stats, 1 / 60);
     }
   }
-  // Todos menos dos: los otros dos slots verdes nunca se caen en esta prueba,
-  // así que esos dos personajes están ocupados de punta a punta y no pueden
-  // aparecer en el slot 0. Que sean exactamente dos es la prueba de que no hay
-  // repetidos — si los hubiera, el número daría más alto.
-  const reachable = GREEN_ROSTER.length - (FIGHTERS_PER_TEAM - 1);
-  check('la ronda recorre toda la plantilla disponible',
-    seen.size === reachable, `${seen.size} de ${reachable}`);
+  check('por el slot 0 pasa siempre el mismo personaje',
+    seen.size === 1, `${seen.size} distinto(s): ${[...seen]}`);
+
+  // Y la plantilla tiene que dar justo para la pelea, sin suplentes: si alguien
+  // suma un séptimo personaje, esto avisa que hay que decidir qué hacer con él.
+  check('la plantilla es exactamente la pelea',
+    GREEN_ROSTER.length === FIGHTERS_PER_TEAM
+    && RED_ROSTER.length === FIGHTERS_PER_TEAM,
+    `${GREEN_ROSTER.length} verdes, ${RED_ROSTER.length} rojos`);
 }
 
 console.log(failures === 0 ? '\nTODO OK\n' : `\n${failures} FALLOS\n`);

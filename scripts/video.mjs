@@ -71,8 +71,16 @@ rmSync(`${OUT}/crudo`, { recursive: true, force: true });
 mkdirSync(`${OUT}/cuadros`, { recursive: true });
 mkdirSync(`${OUT}/crudo`, { recursive: true });
 
+/**
+ * El ejecutable lo resuelve Playwright, no una ruta escrita a mano. Antes acá
+ * había `/opt/pw-browsers/chromium-1194/...` fijo, y se rompía en cuanto la
+ * versión de `playwright` del `package.json` bajaba otra revisión —la 1.49.1
+ * instala la 1148, no la 1194—, con un `error while loading shared libraries`
+ * que no dice nada del número de versión. `executablePath()` sale del mismo
+ * registro que hizo la descarga, así que siempre coinciden.
+ */
 const browser = await chromium.launch({
-  executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
+  executablePath: chromium.executablePath(),
   args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'],
 });
 const context = await browser.newContext({
@@ -94,15 +102,68 @@ await page.goto(url, { waitUntil: 'networkidle' });
 // los primeros cuadros de una escena vacía no son lo que nadie quiere ver.
 await page.waitForTimeout(2500);
 
+/**
+ * En este contenedor el WebGL lo emula SwiftShader por software, y ahí Pixi
+ * dibuja un cuadro pero el compositor a veces no lo entrega: `page.screenshot`
+ * se queda esperando uno que no llega. No es sólo el primer cuadro —medido acá
+ * mismo, sale intermitente frame a frame, aunque el ticker siga corriendo— así
+ * que cada captura se pide, se verifica por los píxeles de verdad, y si salió
+ * en blanco se agranda la ventana un poco más y se reintenta. Agrandar entrega
+ * el cuadro; achicar no (medido también). El fondo es `0x0b0f19`
+ * (`src/render/game.ts`): un pixel bien lejos de ese tono es prueba de que algo
+ * se dibujó encima.
+ */
+const FONDO = [0x0b, 0x0f, 0x19];
+async function huboAlgoDibujado() {
+  return page.evaluate(([r, g, b]) => {
+    const canvas = document.querySelector('canvas');
+    if (canvas === null) return false;
+    const gl = canvas.getContext('webgl2', { preserveDrawingBuffer: true })
+      ?? canvas.getContext('webgl', { preserveDrawingBuffer: true });
+    if (gl === null) return false;
+    const w = canvas.width, h = canvas.height;
+    const px = new Uint8Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    let distintos = 0;
+    // Uno de cada cien píxeles alcanza: no hace falta mirar los millones.
+    for (let i = 0; i < px.length; i += 400) {
+      if (Math.abs(px[i] - r) > 20 || Math.abs(px[i + 1] - g) > 20
+        || Math.abs(px[i + 2] - b) > 20) distintos++;
+    }
+    return distintos > 20;
+  }, FONDO);
+}
+
+let sobra = 0;
+async function capturarCuadro(destino) {
+  for (let intento = 0; intento < 8; intento++) {
+    if (intento > 0) {
+      sobra += 1;
+      await page.setViewportSize({
+        width: SIZE.width + sobra, height: SIZE.height + sobra,
+      });
+      await page.waitForTimeout(120);
+    }
+    if (await huboAlgoDibujado()) {
+      await page.screenshot({ path: destino, animations: 'allow' });
+      return intento;
+    }
+  }
+  // Se captura igual, para no frenar toda la corrida por un cuadro: mejor un
+  // GIF con un cuadro repetido que ninguno.
+  await page.screenshot({ path: destino, animations: 'allow' });
+  return -1;
+}
 
 const started = Date.now();
+let reintentos = 0;
 for (let i = 0; i < frames; i++) {
-  await page.screenshot({
-    path: `${OUT}/cuadros/${String(i).padStart(4, '0')}.png`,
-    animations: 'allow',
-  });
+  const r = await capturarCuadro(`${OUT}/cuadros/${String(i).padStart(4, '0')}.png`);
+  if (r > 0) reintentos++;
+  if (r < 0) console.log(`  cuadro ${i}: no se pudo verificar, se guardó igual`);
 }
 const elapsed = (Date.now() - started) / 1000;
+if (reintentos > 0) console.log(`${reintentos} cuadro(s) necesitaron reintento`);
 
 await context.close();
 await browser.close();

@@ -263,10 +263,17 @@ usuario: todo lo maneja el libro.
   viene partido al medio con el bando fijo por personaje. El muñeco vectorial,
   que es el marcador de posición mientras el dibujo no está cortado, sí sale
   teñido del color del bando.
-- **La plantilla es más grande que la pelea.** Diez verdes y nueve rojos para
-  seis lugares. El que se cae del escenario no vuelve: entra el que sigue en la
-  ronda, salteando a los que ya están en pantalla. Los cuerpos se construyen
-  todos al arrancar y el relevo es cambiar de `visible`.
+- **La plantilla es exactamente la pelea: seis, tres por bando, y no hay
+  relevos.** El que se cae del escenario reaparece él mismo en su slot, y son
+  siempre los mismos seis en todos los escenarios. Los cuerpos se construyen
+  todos al arrancar y reaparecer es cambiar de `visible`.
+
+  Antes eran diecinueve para seis lugares, con relevo por ronda, para que la
+  pelea no se repitiera. Se recortó por producción y no por diseño: cada
+  personaje necesita su dibujo cortado en piezas, y seis bien cortados se ven
+  mejor que diecinueve a medias. Volver a agrandarla es sumar entradas en
+  `src/game/roster.ts` y devolverle a `activate` el reparto por ronda —
+  `Match.character` sigue siendo un dato por slot justamente para eso.
 - **Quién entra a la plantilla es una condición de corte, no de gusto**: brazos
   despegados del torso, hueco entre las piernas y nada cruzando por delante del
   cuerpo. Un arma en diagonal sobre el pecho obliga a inventar lo que hay
