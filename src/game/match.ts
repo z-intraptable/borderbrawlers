@@ -64,17 +64,61 @@ export const STOCKS = 3;
 /* --- geometría del escenario ---------------------------------------- */
 
 export const STAGE_HALF_WIDTH = 9;
-export const CENTER_HALF_WIDTH = 2.4;
-export const PLATFORMS_PER_SIDE = 4;
+/**
+ * La losa del centro, que es donde se pelea.
+ *
+ * Subió de 2,4 a 3,2 —de 4,8 a 6,4 unidades de ancho— porque ahí arriba hay
+ * SEIS cuerpos de 0,6 cada uno. Con 4,8 los seis ocupaban tres cuartos de la
+ * losa y peleaban hombro con hombro contra el borde; ahora entran con lugar
+ * para moverse, que es de lo que se trata.
+ */
+export const CENTER_HALF_WIDTH = 3.2;
+/**
+ * Cuántas losas por costado. **Bajó de 4 a 2, y son más anchas.**
+ *
+ * Con cuatro, cada una medía 0,98 unidades —1,6 cuerpos— y no era una
+ * plataforma: era una repisa donde no entra una pelea. La referencia declarada
+ * del proyecto tiene una losa grande y dos o tres flotando, no ocho repisas.
+ *
+ * Se pierde resolución del libro: cada losa lateral ahora resume diez niveles
+ * en vez de cinco. Es un cambio real y va a favor: lo que el escenario tiene
+ * que decir es "de este lado hay más liquidez que del otro", y eso se lee igual
+ * con dos columnas por lado y con cuatro. Lo que no se leía era una pelea
+ * repartida, porque no había dónde repartirla.
+ */
+export const PLATFORMS_PER_SIDE = 2;
 export const PLATFORM_COUNT = PLATFORMS_PER_SIDE * 2 + 1;
 
-const SIDE_INNER = 3.1;
+/**
+ * Dónde empieza la primera losa lateral. Corrido a la par del centro, que se
+ * ensanchó: si no, la del costado se le montaba encima y desaparecía el pozo.
+ */
+const SIDE_INNER = 4.05;
 const SIDE_SLOT = (STAGE_HALF_WIDTH - SIDE_INNER) / PLATFORMS_PER_SIDE;
 /** El hueco entre losas es deliberado: sin pozos no hay nada que saltar. */
 const SIDE_HALF_WIDTH = SIDE_SLOT / 2 - 0.25;
 
 export const PLATFORM_MIN_Y = 0.6;
-export const PLATFORM_MAX_Y = 6.5;
+/**
+ * Lo más alto que sube una losa lateral. **Era 6,5 y estaba fuera de alcance.**
+ *
+ * Ésta es la razón de fondo de que la pelea se juntara siempre en el centro, y
+ * no era la IA. Con `JUMP_SPEED` en 11 y `GRAVITY` en −34, un salto sube
+ * `11² / (2·34) = 1,78` unidades, y el segundo salto, tirado desde el vértice
+ * del primero, suma otras 1,78: el techo real de un peleador son **3,56
+ * unidades**. Una losa a 6,5 está tres unidades por encima de eso, o sea que
+ * era **físicamente inalcanzable**: los ocho costados desaparecían del juego en
+ * cuanto el libro los levantaba y quedaban los seis apretados en la losa del
+ * medio, que es exactamente lo que se veía.
+ *
+ * 3,1 deja un margen sobre el techo teórico —hay que llegar con algo de
+ * velocidad horizontal y aterrizar, no rozar el borde con la cabeza—, y como
+ * las laterales arrancan en 0,6 el salto entre dos vecinas nunca pasa de 2,5.
+ *
+ * Lo verifica `scripts/smokeFighters.ts`, para que no vuelva a irse de rango
+ * el día que alguien toque la gravedad o el salto.
+ */
+export const PLATFORM_MAX_Y = 3.1;
 /** Tope de velocidad de una plataforma. Ver `SNAP_UP` en physics.ts. */
 const PLATFORM_MAX_SPEED = 2.2;
 const PLATFORM_LAMBDA = 2.5;
@@ -729,10 +773,17 @@ export function stepMatch(
         emit(m.events, EVENT_MELEE, m.x[j], m.y[j], m.lastBlow[j], m.team[j], j);
       }
 
-      // El temblor lo pone el que pegó, no el par. Con `m.team[i]` fijo, un
-      // golpe que tiraba sólo J salía con el color del bando de I.
+      // **El cuerpo a cuerpo ya no sacude la cámara.** Con la cadencia actual
+      // entra un golpe cada 0,25 s por pareja y hay tres parejas: `shake` no
+      // bajaba nunca de 0,45 y el escenario entero vibraba de forma permanente.
+      // Eso no se lee como impacto, se lee como una imagen sucia — y encima
+      // arruina el dibujo de los personajes, que es lo que hay que mirar.
+      //
+      // El temblor queda para lo que pasa cada tanto: una especial, el super,
+      // un KO. Una ballena sí sacude, porque es el único cuerpo a cuerpo que
+      // no es rutina.
       const heavy = (golpeaI && m.whale[i] === 1) || (golpeaJ && m.whale[j] === 1);
-      m.shake = Math.max(m.shake, heavy ? 1 : 0.45);
+      if (heavy) m.shake = Math.max(m.shake, 0.7);
     }
   }
 

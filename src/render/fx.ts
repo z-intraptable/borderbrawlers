@@ -31,7 +31,13 @@ import type { Graphics } from 'pixi.js';
 
 export const FX_SPARK = 0;
 export const FX_DUST = 1;
-export const FX_RING = 2;
+/**
+ * El orbe: una bola de energía con núcleo blanco, corona del color del bando y
+ * contorno oscuro. **Reemplaza al anillo**, que era un círculo fino que se
+ * expandía; con dos o tres a la vez la pantalla quedaba llena de aros rojos y
+ * amarillos que no se parecían a un poder sino a una onda de radar.
+ */
+export const FX_ORB = 2;
 export const FX_TRAIL = 3;
 /** El fogonazo del impacto: una estrella que aparece y se va en un suspiro. */
 export const FX_FLASH = 4;
@@ -39,13 +45,29 @@ export const FX_FLASH = 4;
 export const FX_SLASH = 5;
 /** Esquirla: un triángulo que gira y cae. Es la materia que salta del impacto. */
 export const FX_SHARD = 6;
-/** Onda de choque: anillo achatado contra el piso. */
+/** Onda de choque: banda gruesa corriendo por el piso. */
 export const FX_WAVE = 7;
+/** Rayo: una cuña que sale del centro. Es el estallido radial del super. */
+export const FX_BEAM = 8;
 
 const CAPACITY = 420;
 
 /** Puntas del fogonazo. Seis llena; con cuatro quedaba una estrella de lente. */
 const PUNTAS = 6;
+
+/**
+ * Grosor del contorno, en unidades de mundo.
+ *
+ * **El contorno lleva el color del BANDO y el relleno es blanco caliente.** Es
+ * lo que hace Brawlhalla y es de donde se lee de quién es el golpe: un núcleo
+ * blanco con un halo verde o rojo. Reemplaza a las dos ideas anteriores —el
+ * aura pegada al cuerpo y la flecha sobre la cabeza—, que tapaban o distraían;
+ * el borde del efecto no ocupa lugar nuevo porque ya estaba ahí.
+ *
+ * Constante y no proporcional al efecto: un contorno que crece con la figura
+ * deja de leerse como línea y pasa a ser otra forma.
+ */
+const TINTA = 0.07;
 
 /** Gravedad de las partículas. Menos que la de los personajes: flotan un poco. */
 const FX_GRAVITY = -16;
@@ -53,9 +75,9 @@ const FX_GRAVITY = -16;
  * Rozamiento por segundo, por tipo. El polvo se frena enseguida, la chispa casi
  * no, y la esquirla queda en el medio porque pesa.
  */
-const DRAG: readonly number[] = [1.6, 4.5, 0, 3, 0, 0, 1.1, 0];
+const DRAG: readonly number[] = [1.6, 4.5, 0, 3, 0, 0, 1.1, 0, 0];
 /** Cuáles se mueven solas. Los demás se quedan donde nacieron. */
-const VUELA: readonly boolean[] = [true, true, false, false, false, false, true, false];
+const VUELA: readonly boolean[] = [true, true, false, false, false, false, true, false, false];
 
 export interface Fx {
   kind: Uint8Array;
@@ -266,9 +288,34 @@ export function dust(fx: Fx, x: number, y: number, strength: number): void {
   }
 }
 
-/** Anillo que se expande. Es el cuerpo de una habilidad. */
-export function ring(fx: Fx, x: number, y: number, radius: number, life: number, color: number): void {
-  spawn(fx, FX_RING, x, y, 0, 0, radius, life, color);
+/**
+ * Una bola de energía. Es el cuerpo de una habilidad.
+ *
+ * `color` es el del BANDO y se usa para la corona y el contorno; el centro es
+ * siempre blanco caliente. Ésa es la regla nueva de toda esta capa: el poder se
+ * dibuja igual para los seis y lo que dice de quién es, es el borde.
+ */
+export function orb(fx: Fx, x: number, y: number, radius: number, life: number, color: number): void {
+  spawn(fx, FX_ORB, x, y, 0, 0, radius, life, color, Math.random() * Math.PI);
+}
+
+/**
+ * El estallido radial: `count` cuñas saliendo del centro.
+ *
+ * Es la forma que el dibujo animado usa para una descarga de energía —una bola
+ * y rayos— y es lo que separa un poder de una onda expansiva. Sin esto el super
+ * era un aro creciendo, que se lee como un radar y no como algo que revienta.
+ */
+export function beams(
+  fx: Fx, x: number, y: number, count: number, largo: number, life: number, color: number,
+): void {
+  const offset = Math.random() * Math.PI * 2;
+  for (let n = 0; n < count; n++) {
+    const angle = offset + (n / count) * Math.PI * 2;
+    // Alternados largo/corto: todos iguales queda una estrella de reloj.
+    const escala = n % 2 === 0 ? 1 : 0.62;
+    spawn(fx, FX_BEAM, x, y, 0, 0, largo * escala, life * (0.8 + escala * 0.2), color, angle);
+  }
 }
 
 /** Onda de choque contra el piso: el anillo del super, achatado. */
@@ -320,9 +367,36 @@ export function updateFx(fx: Fx, dt: number): void {
  * sólo a esta capa brillan el super, las habilidades y el aura del gigantismo,
  * y el resto queda limpio.
  */
-export function drawFx(fx: Fx, plain: Graphics, glow: Graphics): void {
+/**
+ * Dibuja en TRES capas, y el reparto es lo que da el estilo.
+ *
+ *   plain  polvo. No brilla y va detrás de todo.
+ *   glow   los rellenos calientes. Es la única capa con Bloom.
+ *   ink    los contornos: negro afuera y el color del BANDO adentro. Va encima
+ *          del Bloom y no lo atraviesa, así que sale nítido.
+ *
+ * **Por qué tres y no dos.** Los efectos anteriores eran trazos finos y
+ * brillantes: un anillo que se expande, unas chispas, todo resuelto con luz.
+ * Eso se ve como un juego de naves, no como éste. Los seis personajes están
+ * dibujados con relleno plano y contorno negro —es todo el estilo del juego— y
+ * los poderes tienen que estar dibujados igual, que es lo que hacen Smash,
+ * Brawlhalla, Dragon Ball y Street Fighter: formas LLENAS, borde duro, mucho
+ * contraste, nada de degradés.
+ *
+ * Con dos capas no se puede: si el contorno va en la capa que brilla, el Bloom
+ * se lo come y vuelve a ser una mancha; si va en la de atrás, queda tapado por
+ * su propio relleno. Tiene que ir en una tercera, adelante y sin filtro.
+ *
+ * **Y de ahí sale de qué bando es el golpe.** El relleno es siempre blanco
+ * caliente —un poder es un poder—, y el borde lleva el color del equipo. Antes
+ * eso lo decía un aura pegada al cuerpo, y después una flecha sobre la cabeza;
+ * las dos tapaban o distraían. El contorno del efecto no ocupa lugar: ya estaba
+ * ahí.
+ */
+export function drawFx(fx: Fx, plain: Graphics, glow: Graphics, ink: Graphics): void {
   plain.clear();
   glow.clear();
+  ink.clear();
   for (let i = 0; i < CAPACITY; i++) {
     if (fx.age[i] >= fx.life[i]) continue;
     const t = fx.age[i] / fx.life[i];
@@ -332,94 +406,125 @@ export function drawFx(fx: Fx, plain: Graphics, glow: Graphics): void {
     const color = fx.color[i];
 
     switch (fx.kind[i]) {
-      case FX_RING: {
-        // El anillo nace chico y termina en `size`; el grosor se afina al
-        // expandirse, que es lo que lo hace leer como una onda y no como un
-        // círculo que crece. Un segundo anillo más chico y más brillante
-        // adentro le da espesor sin costar otra partícula.
-        const radius = fx.size[i] * (0.15 + t * 0.95);
-        ovalo(glow, px, py, radius, radius);
-        glow.stroke({ width: 0.2 * fade + 0.03, color, alpha: fade });
-        ovalo(glow, px, py, radius * 0.55, radius * 0.55);
-        glow.stroke({ width: 0.07 * fade + 0.012, color: 0xffffff, alpha: fade * 0.26 });
+      case FX_ORB: {
+        // La bola de energía. Nace de golpe, aguanta y se apaga encogiendo un
+        // poco: el ciclo de un ki blast. Tres anillos concéntricos rellenos
+        // —blanco, color, contorno— es lo que le da el borde duro.
+        const brote = t < 0.18 ? t / 0.18 : 1;
+        const r = fx.size[i] * brote * (1 - t * 0.25);
+        const vivo = 0.5 + fade * 0.5;
+
+        // Corona del bando, y adentro el núcleo blanco. El núcleo es más chico
+        // que la mitad a propósito: si ocupa casi todo, el color del equipo
+        // queda de filete y no se lee a la distancia de la cámara.
+        ovalo(glow, px, py, r, r);
+        glow.fill({ color, alpha: vivo });
+        ovalo(glow, px, py, r * 0.52, r * 0.52);
+        glow.fill({ color: 0xffffff, alpha: vivo });
+
+        // Las púas: cuatro puntas cortas que hacen que la bola no sea un punto.
+        const a0 = fx.angle[i] + t * 1.6;
+        for (let k = 0; k < 4; k++) {
+          const a = a0 + (k * Math.PI) / 2;
+          const largo = r * (1.75 + brote * 0.5);
+          const ancho = r * 0.3;
+          glow.moveTo(px + Math.cos(a) * largo, py + Math.sin(a) * largo);
+          glow.lineTo(px + Math.cos(a + 1.57) * ancho, py + Math.sin(a + 1.57) * ancho);
+          glow.lineTo(px + Math.cos(a - 1.57) * ancho, py + Math.sin(a - 1.57) * ancho);
+          glow.closePath();
+          glow.fill({ color, alpha: vivo * 0.85 });
+        }
+
+        ovalo(ink, px, py, r, r);
+        ink.stroke({ width: TINTA, color, alpha: vivo });
+        break;
+      }
+      case FX_BEAM: {
+        // Una cuña que sale disparada y se afina. El vértice arranca pegado al
+        // centro y se va alejando: así el rayo SALE en vez de aparecer entero.
+        const desde = fx.size[i] * t * 0.55;
+        const hasta = fx.size[i] * (0.35 + t * 0.9);
+        const a = -fx.angle[i];
+        const ancho = fx.size[i] * 0.14 * fade;
+        const cx = Math.cos(a);
+        const cy = Math.sin(a);
+        const nx = -cy * ancho;
+        const ny = cx * ancho;
+        glow.moveTo(px + cx * hasta, py + cy * hasta);
+        glow.lineTo(px + cx * desde + nx, py + cy * desde + ny);
+        glow.lineTo(px + cx * desde - nx, py + cy * desde - ny);
+        glow.closePath();
+        glow.fill({ color, alpha: 0.35 + fade * 0.65 });
         break;
       }
       case FX_WAVE: {
-        // Achatada a un tercio: la onda del super corre por el PISO, y un
-        // círculo perfecto la haría ver de frente, flotando en el aire.
-        const radius = fx.size[i] * (0.1 + t * 1.05);
-        ovalo(glow, px, py, radius, radius * 0.32);
-        glow.stroke({ width: 0.26 * fade + 0.04, color, alpha: fade });
+        // La onda del super: una BANDA gruesa contra el piso, no un aro fino.
+        // Achatada a un tercio porque corre por el suelo; vista de frente
+        // parecería flotando en el aire.
+        const r = fx.size[i] * (0.1 + t * 1.05);
+        const grosor = fx.size[i] * 0.16 * fade + 0.04;
+        ovalo(glow, px, py, r, r * 0.32);
+        ovalo(glow, px, py, Math.max(0.01, r - grosor), Math.max(0.01, (r - grosor) * 0.32));
+        // `evenodd`: el óvalo de adentro perfora al de afuera y queda la banda.
+        // Con el relleno por defecto se llenaría el disco entero.
+        glow.fill({ color: 0xffffff, alpha: fade * 0.9 });
+        ovalo(ink, px, py, r, r * 0.32);
+        ink.stroke({ width: TINTA, color, alpha: fade });
         break;
       }
       case FX_FLASH: {
-        // Un fogonazo de seis puntas con cuerpo.
-        //
-        // La primera versión eran dos rombos cruzados de cuatro puntas muy
-        // finas —`ancho = radio × 0,18`— y con el Bloom encima salía una
-        // estrella de purpurina: cuatro rayos larguísimos y nada en el medio.
-        // Un golpe no es un destello de lente, es una mancha que revienta. Seis
-        // puntas y un radio corto que no baja de 0,44 dejan una silueta llena,
-        // que es lo que el dibujo animado usa para decir "acá pegó".
+        // El fogonazo del impacto: una estrella de seis puntas irregular,
+        // rellena y con contorno. Es el "hit spark" de Smash y de Brawlhalla, y
+        // la razón de que sea llena y no de rayos finos es que un golpe tiene
+        // que TAPAR algo por un instante.
         const brote = t < 0.25 ? t / 0.25 : 1;
         const r = fx.size[i] * (0.5 + brote * 0.6) * (1 - t * 0.3);
         const corto = r * 0.56;
         const a = fx.angle[i];
         for (let k = 0; k < PUNTAS * 2; k++) {
           const ang = a + (k * Math.PI) / PUNTAS;
-          // Las puntas largas se alternan entre enteras y al 80%: una estrella
-          // perfectamente regular se lee como un ícono, no como un impacto.
           const rad = k % 2 === 1 ? corto : (k % 4 === 0 ? r : r * 0.78);
           const qx = px + Math.cos(ang) * rad;
           const qy = py + Math.sin(ang) * rad;
-          if (k === 0) glow.moveTo(qx, qy);
-          else glow.lineTo(qx, qy);
+          if (k === 0) { glow.moveTo(qx, qy); ink.moveTo(qx, qy); }
+          else { glow.lineTo(qx, qy); ink.lineTo(qx, qy); }
         }
         glow.closePath();
-        glow.fill({ color, alpha: 0.4 + fade * 0.6 });
+        glow.fill({ color: 0xffffff, alpha: 0.45 + fade * 0.55 });
+        ink.closePath();
+        ink.stroke({ width: TINTA, color, alpha: 0.5 + fade * 0.5 });
         break;
       }
       case FX_SLASH: {
-        // Medialuna: dos arcos concéntricos cerrados. Es el rastro del brazo que
-        // pasó, así que **abraza el golpe**: el centro del arco va detrás del
-        // punto de impacto y la panza de la medialuna cae encima de él.
-        //
-        // Antes el arco se centraba EN el impacto y perpendicular a la
-        // dirección, y quedaba una sonrisa colgada abajo del destello, separada
-        // de él y sin relación con hacia dónde iba el golpe. Un tajo que no
-        // toca lo que corta no es un tajo.
+        // Medialuna: el rastro del brazo que pasó, así que **abraza el golpe**.
+        // El centro del arco va detrás del punto de impacto y la panza cae
+        // encima de él; centrada EN el impacto quedaba una sonrisa colgada
+        // abajo, sin relación con hacia dónde iba el golpe.
         const r = fx.size[i] * (0.45 + t * 1.1);
-        // Lineal y no cuadrático: ver el `alpha` de abajo.
         const grosor = fx.size[i] * 0.4 * (1 - t);
-        // Ojo: el eje Y de Pixi apunta al revés que el del juego, así que el
-        // ángulo del golpe se refleja antes de dibujar. Sin esto el tajo sale
-        // espejado en vertical y contradice al puño que lo produjo.
+        // El eje Y de Pixi apunta al revés que el del juego: se refleja el
+        // ángulo antes de dibujar o el tajo sale espejado.
         const medio = -fx.angle[i];
         const abre = 1.15 - t * 0.5;
         const cx = px - Math.cos(medio) * r * 0.7;
         const cy = py - Math.sin(medio) * r * 0.7;
-        // El `moveTo` NO es decorativo. `arc` une con una recta desde el punto
-        // en que quedó el camino, y el camino de este `Graphics` viene de la
-        // partícula anterior: sin esto, cada tajo salía con una cuña de
-        // quinientos píxeles apuntando a donde había terminado la chispa de
-        // antes. Se veía como un rayo de luz cruzando media pantalla y no había
-        // nada en el código del tajo que lo explicara.
-        arco(glow, cx, cy, r, r, medio - abre, medio + abre, true);
         const interior = Math.max(0.01, r - grosor);
-        arco(glow, cx, cy, interior, interior, medio + abre, medio - abre, false);
-        glow.closePath();
-        // `fade` es cuadrático y dejaba el tajo al 18% a media vida, o sea
-        // invisible justo en los cuadros en que el brazo pasa. Lineal se ve
-        // todo el barrido, que es lo único que este efecto tiene para contar.
-        glow.fill({ color, alpha: (1 - t) * 0.9 });
+        for (const capa of [glow, ink]) {
+          arco(capa, cx, cy, r, r, medio - abre, medio + abre, true);
+          arco(capa, cx, cy, interior, interior, medio + abre, medio - abre, false);
+          capa.closePath();
+        }
+        glow.fill({ color: 0xffffff, alpha: (1 - t) * 0.85 });
+        ink.stroke({ width: TINTA, color, alpha: (1 - t) * 0.95 });
         break;
       }
       case FX_SPARK: {
         // Una RAYA en el sentido de la velocidad, no un punto. El largo sale de
-        // cuán rápido va, así que una chispa lenta es casi un punto y una
-        // rápida es un trazo: sale gratis y es lo que da sensación de fuerza.
-        const largo = Math.min(0.8, Math.hypot(fx.vx[i], fx.vy[i]) * 0.055);
-        const inv = largo > 1e-4 ? largo / Math.hypot(fx.vx[i], fx.vy[i]) : 0;
+        // cuán rápido va: una chispa lenta es casi un punto y una rápida es un
+        // trazo. Sale gratis y es lo que da sensación de fuerza.
+        const rapidez = Math.hypot(fx.vx[i], fx.vy[i]);
+        const largo = Math.min(0.8, rapidez * 0.055);
+        const inv = largo > 1e-4 && rapidez > 1e-4 ? largo / rapidez : 0;
         glow.moveTo(px, py);
         glow.lineTo(px - fx.vx[i] * inv, py + fx.vy[i] * inv);
         glow.stroke({
@@ -431,15 +536,21 @@ export function drawFx(fx: Fx, plain: Graphics, glow: Graphics): void {
         break;
       }
       case FX_SHARD: {
-        // Triángulo girando. Es lo que hace que un super se sienta como algo que
-        // ROMPIÓ, en vez de una luz que se prende.
+        // Triángulo girando: la materia que salta del impacto. Es lo que hace
+        // que un super se sienta como algo que ROMPIÓ y no como una luz que se
+        // prende.
         const r = fx.size[i] * (0.6 + fade * 0.6);
         const a = fx.angle[i];
-        glow.moveTo(px + Math.cos(a) * r, py + Math.sin(a) * r);
-        glow.lineTo(px + Math.cos(a + 2.4) * r * 0.75, py + Math.sin(a + 2.4) * r * 0.75);
-        glow.lineTo(px + Math.cos(a - 2.4) * r * 0.75, py + Math.sin(a - 2.4) * r * 0.75);
-        glow.closePath();
-        glow.fill({ color, alpha: 0.45 + fade * 0.55 });
+        const p0x = px + Math.cos(a) * r;
+        const p0y = py + Math.sin(a) * r;
+        for (const capa of [glow, ink]) {
+          capa.moveTo(p0x, p0y);
+          capa.lineTo(px + Math.cos(a + 2.4) * r * 0.75, py + Math.sin(a + 2.4) * r * 0.75);
+          capa.lineTo(px + Math.cos(a - 2.4) * r * 0.75, py + Math.sin(a - 2.4) * r * 0.75);
+          capa.closePath();
+        }
+        glow.fill({ color: 0xffffff, alpha: 0.4 + fade * 0.5 });
+        ink.stroke({ width: TINTA * 0.8, color, alpha: 0.5 + fade * 0.5 });
         break;
       }
       case FX_TRAIL: {

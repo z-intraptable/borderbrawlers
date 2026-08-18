@@ -41,8 +41,8 @@ import type { FighterSheets } from '../art/loadSheets';
 import { createSpriteFighterView } from '../art/spriteFighter';
 import { ROSTER, characterFor } from '../game/roster';
 import {
-  burst, createFx, drawFx, dust, flash, impact, ring, shards, slash, trail,
-  updateFx, wave,
+  beams, burst, createFx, drawFx, dust, flash, impact, orb, shards, slash,
+  trail, updateFx, wave,
 } from './fx';
 import { createBackdrop } from './backdrop';
 import { createStage, loadFlames, loadPlatforms, loadStage, stageNames, stageTint } from './stage';
@@ -189,7 +189,15 @@ const CAMERA_LAMBDA = 3.2;
 const CAMERA_Y_HIGH = 0.55;
 const CAMERA_Y_LOW = 0.28;
 const PAN_LIMIT_X = STAGE_HALF_WIDTH * 0.3;
-const SHAKE_GAIN = 0.35;
+/**
+ * Cuánto se corre la cámara por unidad de `shake`.
+ *
+ * Bajó de 0,35 a 0,22. Con 0,35 un temblor de 1 movía el encuadre ±0,35
+ * unidades sesenta veces por segundo, que a la escala actual —la cámara se
+ * acercó bastante— son casi veinte píxeles de vibración: el escenario dejaba
+ * de leerse. Un golpe se siente igual con la mitad.
+ */
+const SHAKE_GAIN = 0.22;
 
 /**
  * A partir de esta rapidez, el peleador deja estela.
@@ -540,25 +548,6 @@ export async function startGame(
    * La capa que brilla. Es hija de `world` para heredar la cámara, y lleva el
    * Bloom puesto encima.
    */
-  /**
-   * La marca de bando: una punta de flecha sobre la cabeza de cada peleador.
-   *
-   * **Reemplaza al aura.** La regla del proyecto es que el bando se lee en los
-   * poderes y no en la ropa, y hasta acá lo que lo decía era la estela: una
-   * bola de luz verde o roja pegada al cuerpo. Cumplía la regla y arruinaba el
-   * dibujo, que es de lo que el arte se ocupó seis personajes.
-   *
-   * Una punta ARRIBA de la cabeza dice lo mismo y no tapa nada. Es además lo
-   * que usa el género —Smash pone el indicador de jugador exactamente ahí—, y
-   * como está fuera de la silueta se lee igual con seis en pantalla, con el
-   * fondo claro o con el fondo oscuro.
-   *
-   * Va en su propia capa, encima de los cuerpos y **fuera del Bloom**: sobre la
-   * capa que brilla volvería a ser una mancha, que es justo lo que se sacó.
-   */
-  const marcas = new Graphics();
-  world.addChild(marcas);
-
   const glowFx = new Graphics();
   const glowLayer = new Container();
   glowLayer.addChild(glowFx);
@@ -570,6 +559,17 @@ export async function startGame(
     quality: 4,
   })];
   world.addChild(glowLayer);
+
+  /**
+   * Los contornos de los efectos. Encima de la capa que brilla y **sin filtro**.
+   *
+   * Es lo que da el borde del color del bando alrededor del núcleo blanco. Tiene
+   * que ir en su propia capa porque el Bloom se come cualquier línea que pase
+   * por él: metido adentro de `glowLayer` el contorno volvería a ser una mancha,
+   * y detrás quedaría tapado por su propio relleno.
+   */
+  const inkFx = new Graphics();
+  world.addChild(inkFx);
 
   const shockwave = new ShockwaveFilter({
     amplitude: 22,
@@ -657,8 +657,7 @@ export async function startGame(
     updateCamera(camera, match, dt, app.renderer.height / app.renderer.width);
     applyCamera(world, app, camera, match.shake);
     drawFighters(views, match, action, actionAge, dtPelea, elapsed, cobrarGolpe);
-    drawFx(fx, plainFx, glowFx);
-    drawMarcas(marcas, match);
+    drawFx(fx, plainFx, glowFx, inkFx);
 
     /* --- fondo ------------------------------------------------------- */
     const { ancho: width, alto: height } = pantalla(app);
@@ -748,15 +747,19 @@ export async function startGame(
       // fogonazo blanco al centro y un tajo ancho en la dirección en que la
       // tiró. `magnitude` es 0 o 1: cuál de las dos le tocó, así que las dos
       // se ven distintas.
+      // La A es un TAJO: bola chica y medialuna ancha en la dirección del golpe.
+      // La B es una DESCARGA: bola grande, rayos y esquirlas. Que se vean
+      // distintas es lo que hace que alternarlas sirva de algo.
       const variante = magnitude >= 0.5;
-      flash(fx, x, y, 0.62, 0.16, 0xffffff);
-      ring(fx, x, y, variante ? 2.6 : 2.1, 0.44, teamColor);
+      flash(fx, x, y, 0.62, 0.16, teamColor);
       if (variante) {
-        slash(fx, x + hacia * 0.5, y, hacia > 0 ? 0 : Math.PI, 1.7, 0.24, teamColor);
-        burst(fx, x, y, 10, 6.5, 0.1, 0.42, teamColor);
+        orb(fx, x + hacia * 0.3, y, 0.62, 0.3, teamColor);
+        slash(fx, x + hacia * 0.35, y, hacia > 0 ? 0 : Math.PI, 1.25, 0.24, teamColor);
+        burst(fx, x, y, 8, 6.5, 0.1, 0.42, teamColor);
       } else {
-        shards(fx, x, y, 7, 5.5, teamColor);
-        burst(fx, x, y, 8, 5, 0.09, 0.38, 0xffffff);
+        orb(fx, x, y, 0.95, 0.34, teamColor);
+        beams(fx, x, y, 6, 2.1, 0.28, teamColor);
+        shards(fx, x, y, 6, 5.5, teamColor);
       }
       return;
     }
@@ -764,11 +767,12 @@ export async function startGame(
     // El super. Es el único momento en que vale gastar todo: onda de choque
     // contra el piso, esquirlas doradas, dos anillos y un fogonazo. Sale una vez
     // cada medio minuto largo, así que acá el exceso es el punto.
-    flash(fx, x, y, 1.05, 0.2, 0xffffff);
+    flash(fx, x, y, 1.05, 0.2, teamColor);
+    orb(fx, x, y, magnitude * 0.42, 0.42, teamColor);
+    beams(fx, x, y, 10, magnitude * 1.15, 0.4, teamColor);
     wave(fx, x, y - FIGHTER_HALF_HEIGHT, magnitude * 1.6, 0.55, GOLD);
-    ring(fx, x, y, magnitude, 0.6, GOLD);
-    shards(fx, x, y, 14, 9, GOLD);
-    burst(fx, x, y, 14, 11, 0.16, 0.7, GOLD);
+    shards(fx, x, y, 12, 9, GOLD);
+    burst(fx, x, y, 12, 11, 0.16, 0.7, GOLD);
     hitstop = Math.max(hitstop, HITSTOP_SUPER);
     shockwaveTime = 0;
     shockwaveX = x;
@@ -832,17 +836,17 @@ export async function startGame(
         case EVENT_KO:
           // Se va de pantalla: fogonazo grande, esquirlas del color del que lo
           // sacó y un anillo. Es el único efecto que conviene que tape.
-          flash(target, x, y, 0.95, 0.22, 0xffffff);
+          flash(target, x, y, 0.95, 0.22, teamColor);
+          orb(target, x, y, 1.1, 0.34, teamColor);
           shards(target, x, y, 10, 8, teamColor);
-          burst(target, x, y, 14, 9, 0.16, 0.8, 0xffffff);
-          ring(target, x, y, 2.6, 0.55, teamColor);
+          burst(target, x, y, 12, 9, 0.16, 0.8, teamColor);
           stop = Math.max(stop, HITSTOP_KO);
           break;
         case EVENT_LAND:
           dust(target, x, y - FIGHTER_HALF_HEIGHT, Math.min(1.4, magnitude));
           break;
         case EVENT_GROW:
-          ring(target, x, y, 1.4 + magnitude * 0.5, 0.5, GOLD);
+          orb(target, x, y, 0.55 + magnitude * 0.2, 0.5, GOLD);
           break;
         default:
           break;
@@ -883,36 +887,6 @@ export async function startGame(
 }
 
 /* ------------------------------------------------------------------ */
-
-/** Alto de la punta de bando, y a cuánto de la cabeza flota. */
-const MARCA_ALTO = 0.26;
-const MARCA_AIRE = 0.3;
-
-/**
- * La punta de bando sobre cada cabeza. Ver la capa `marcas`.
- *
- * Es un triángulo apuntando al peleador, con un borde oscuro para que se lea
- * también sobre un fondo claro —los escenarios pintados van de un desierto
- * blanco a una cripta negra, y un verde puro se pierde en el primero—.
- */
-function drawMarcas(g: Graphics, match: Match): void {
-  g.clear();
-  for (let i = 0; i < match.slot.length; i++) {
-    if (match.slot[i] !== SLOT_ACTIVE) continue;
-    const escala = match.scale[i];
-    const x = match.x[i];
-    // Y de PANTALLA: la del mundo crece para arriba y la de Pixi para abajo.
-    const cima = -(match.y[i] + FIGHTER_HALF_HEIGHT * escala + MARCA_AIRE * escala);
-    const media = MARCA_ALTO * escala * 0.62;
-    const alto = MARCA_ALTO * escala;
-    g.moveTo(x, cima);
-    g.lineTo(x - media, cima - alto);
-    g.lineTo(x + media, cima - alto);
-    g.closePath();
-    g.fill({ color: match.team[i] === TEAM_GREEN ? GREEN : RED, alpha: 0.9 });
-    g.stroke({ width: 0.035, color: 0x0b0f19, alpha: 0.85 });
-  }
-}
 
 /**
  * Un tramo de estela por cuadro en el que sale volando, DETRÁS del cuerpo.
