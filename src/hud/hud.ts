@@ -46,10 +46,18 @@ export function mountHud(
   perf: { frameMs: number },
 ): HudHandle {
   /* --- barra de mercado, arriba a la izquierda --------------------- */
+  // Las medidas van con `clamp` y no fijas: en un teléfono de 390 px de ancho,
+  // ocho datos a 12 px con separación de 14 se salen de la pantalla, y los dos
+  // paneles de 220 px no entran uno al lado del otro. Con `clamp` la misma
+  // barra se achica sola sin una segunda hoja de estilos ni un media query, y
+  // en pantalla grande queda exactamente como estaba.
   const bar = el('div',
-    'position:absolute;top:12px;left:12px;display:flex;align-items:center;gap:14px;' +
-    'padding:8px 12px;border-radius:8px;background:rgba(11,15,25,.75);' +
-    `border:1px solid #263041;font:12px/1.4 ${MONO};color:#e6edf3;user-select:none`);
+    'position:absolute;top:10px;left:10px;right:10px;display:flex;align-items:center;' +
+    'flex-wrap:wrap;gap:clamp(6px,1.8vw,14px);width:fit-content;max-width:calc(100% - 20px);' +
+    'padding:clamp(5px,1.5vw,8px) clamp(8px,2vw,12px);border-radius:8px;' +
+    'background:rgba(11,15,25,.75);' +
+    `border:1px solid #263041;font:clamp(9px,2.4vw,12px)/1.4 ${MONO};` +
+    'color:#e6edf3;user-select:none');
 
   const title = el('strong', 'letter-spacing:2px');
   title.innerHTML = `<span style="color:${BULL}">BORDER</span><span style="color:${BEAR}">BRAWLERS</span>`;
@@ -64,16 +72,19 @@ export function mountHud(
 
   /* --- marcador, abajo al centro ----------------------------------- */
   const board = el('div',
-    'position:absolute;left:0;right:0;bottom:18px;display:flex;justify-content:center;' +
-    'gap:18px;pointer-events:none;user-select:none');
+    'position:absolute;left:0;right:0;bottom:clamp(8px,2vw,18px);display:flex;' +
+    'justify-content:center;gap:clamp(6px,2.5vw,18px);padding:0 clamp(6px,2vw,12px);' +
+    'pointer-events:none;user-select:none');
 
   const panels = [TEAM_GREEN, TEAM_RED].map((team) => {
     const color = team === TEAM_GREEN ? BULL : BEAR;
     const panel = el('div',
-      'min-width:220px;padding:10px 16px 12px;border-radius:12px;' +
+      'flex:1 1 0;min-width:0;max-width:240px;' +
+      'padding:clamp(6px,1.6vw,10px) clamp(8px,2.6vw,16px) clamp(7px,1.8vw,12px);' +
+      'border-radius:12px;' +
       'background:linear-gradient(180deg,rgba(11,15,25,.55),rgba(11,15,25,.88));' +
       `border:2px solid ${color};box-shadow:0 0 22px ${color}33;` +
-      `font:12px/1.2 ${MONO};color:#e6edf3;text-align:center`);
+      `font:clamp(9px,2.4vw,12px)/1.2 ${MONO};color:#e6edf3;text-align:center`);
 
     const head = el('div', 'display:flex;justify-content:space-between;align-items:center');
     const label = el('strong', `color:${color};letter-spacing:3px`,
@@ -82,11 +93,12 @@ export function mountHud(
     head.append(label, kos);
 
     const damage = el('div',
-      `font:700 40px/1 ${MONO};color:${color};` +
+      `font:700 clamp(22px,7vw,40px)/1 ${MONO};color:${color};` +
       `text-shadow:0 2px 0 #05070d,0 0 18px ${color}66;` +
       'font-variant-numeric:tabular-nums;margin:4px 0 6px', '0%');
 
-    const row = el('div', 'display:flex;justify-content:center;gap:12px;align-items:center');
+    const row = el('div',
+      'display:flex;justify-content:center;gap:clamp(5px,2vw,12px);align-items:center;flex-wrap:wrap');
     const lives = el('span', 'display:flex;gap:4px');
     const dots: HTMLElement[] = [];
     for (let i = 0; i < FIGHTERS_PER_TEAM; i++) {

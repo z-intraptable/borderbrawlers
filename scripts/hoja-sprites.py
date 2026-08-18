@@ -13,7 +13,13 @@ Cada argumento es `accion=origen`, y el origen puede ser de dos clases:
   gira a vista frontal y ahí deja de servir como sprite lateral. El recorte se
   elige mirando la tira que este mismo script imprime.
 - **una hoja de poses**, una imagen con las figuras en fila sobre blanco, y
-  opcionalmente cuántas figuras tiene que haber: `hoja.png:5`. Para el salto es
+  opcionalmente cuántas figuras tiene que haber: `hoja.png:5`. Con un tercer
+  campo `parejo` —`hoja.png:3:parejo`— cada figura se escala por su cuenta hasta
+  igualar el área de silueta de las demás, en vez de compartir una escala. Hace
+  falta cuando la hoja viene de un generador que dibujó cada pose de un tamaño
+  distinto; sin eso el personaje late al cambiar de cuadro. No es el modo por
+  defecto porque en una hoja bien dibujada el área SÍ cambia un poco de pose a
+  pose —un cuerpo encogido tapa menos— y forzarla lo estropearía. Para el salto es
   lo que corresponde y no un clip: pedido como video, el modelo lo mandó hacia
   el fondo en vez de hacia arriba —el personaje se achicaba a un tercio— y en un
   juego de peleas un salto son cinco dibujos, porque el arco lo pone la física.
@@ -144,10 +150,22 @@ def inundar(cuadro: Image.Image) -> Image.Image:
 
 
 # Qué fracción del ancho tiene que cubrir una fila para ser una línea de piso y
-# no parte de un personaje, y cuánto puede medir de alto. Ninguna figura ocupa
-# la mitad del ancho de la hoja en una franja de menos del 1,5% del alto.
+# no parte de un personaje, y cuánto puede medir de alto. Se mide sobre la
+# CORRIDA más larga de tinta seguida, no sobre el total de la fila: seis figuras
+# en hilera tienen seis hombros a la misma altura y entre todas pasan la mitad
+# del ancho sin que haya ninguna línea. Medido por total, la regla les blanqueaba
+# esa fila y el personaje salía con una raya blanca cruzándole el pecho.
 REGLA_ANCHO = 0.5
 REGLA_ALTO = 0.015
+
+
+def corrida_maxima(fila: np.ndarray) -> int:
+    """El tramo de tinta seguida más largo de una fila."""
+    bordes = np.diff(np.concatenate(([0], fila.astype(np.int8), [0])))
+    ini = np.nonzero(bordes == 1)[0]
+    if len(ini) == 0:
+        return 0
+    return int((np.nonzero(bordes == -1)[0] - ini).max())
 
 
 def sin_borde(cuadro: Image.Image, piso: bool = True) -> Image.Image:
@@ -185,8 +203,13 @@ def sin_borde(cuadro: Image.Image, piso: bool = True) -> Image.Image:
     if not piso:
         return Image.fromarray(a)
 
-    # Las franjas finas que cruzan media hoja: se blanquean enteras.
-    llena = tinta.sum(axis=1) > ancho * REGLA_ANCHO
+    # Las franjas finas que cruzan media hoja de un tirón: se blanquean enteras.
+    minimo = ancho * REGLA_ANCHO
+    # El total de la fila es sólo el filtro barato: si ni sumando todos los
+    # pedazos llega, no hace falta medir la corrida.
+    llena = np.zeros(alto, dtype=bool)
+    for y in np.nonzero(tinta.sum(axis=1) > minimo)[0]:
+        llena[y] = corrida_maxima(tinta[y]) > minimo
     ini = None
     for y in range(alto + 1):
         if y < alto and llena[y]:
@@ -313,7 +336,22 @@ def figuras_de_la_hoja(hoja: Path, esperadas: int = 0) -> list[Image.Image]:
     def es_regla(m):
         filas = np.nonzero(m.any(axis=1))[0]
         cols = np.nonzero(m.any(axis=0))[0]
-        return (cols[-1] - cols[0] + 1) > (filas[-1] - filas[0] + 1) * 20
+        alto = filas[-1] - filas[0] + 1
+        ancho = cols[-1] - cols[0] + 1
+        # En los dos sentidos. Horizontal es la línea de piso; vertical es el
+        # borde del panel que el generador dibuja entre pose y pose aunque se le
+        # pida que no, y que se agrupaba con la figura de al lado: a Ragnir le
+        # quedó una raya negra pegada al costado en el puño y en el quieto.
+        # Ninguna parte de un personaje es veinte veces más larga que ancha…
+        # …pero sí lo son la ceja de Asuri y la franja del cinturón, que el
+        # contorno negro deja como manchas sueltas. Por proporción sola se las
+        # comía y al personaje le quedaba una banda blanca cruzándole la cara.
+        # Lo que separa una raya del generador de una raya del dibujo es el
+        # TAMAÑO: la línea de piso cruza la hoja entera de punta a punta y el
+        # borde de panel la cruza de arriba abajo, mientras que una franja del
+        # personaje no puede pasar del ancho de ese personaje.
+        return ((ancho > alto * 20 and ancho > mask.shape[1] * 0.5)
+                or (alto > ancho * 20 and alto > mask.shape[0] * 0.5))
     manchas = [m for m in manchas if not es_regla(m)]
     if not manchas:
         raise SystemExit(f'{hoja}: sólo se encontraron líneas, ninguna figura')
@@ -429,6 +467,7 @@ def main() -> None:
     # otro. Lo que iguala a las dos es el ÁREA de silueta, que es lo que no
     # cambia cuando el personaje se encoge.
     escalas: dict[str, float] = {}
+    por_cuadro: dict[str, list[float]] = {}
     lado_patron = None
     alto_crudo = None
 
@@ -441,6 +480,7 @@ def main() -> None:
         if not origen.exists():
             raise SystemExit(f'no existe {origen}')
 
+        parejo = False
         if origen.suffix.lower() in ('.mp4', '.webm', '.mov'):
             desde = float(partes[1]) if len(partes) > 1 and partes[1] else 0.0
             hasta = float(partes[2]) if len(partes) > 2 and partes[2] else 0.0
@@ -452,6 +492,7 @@ def main() -> None:
             # puntos es cuántas figuras tiene que haber.
             esperadas = int(partes[1]) if len(partes) > 1 and partes[1] else 0
             crudos = figuras_de_la_hoja(origen, esperadas)
+            parejo = len(partes) > 2 and partes[2] == 'parejo'
         piezas = [recortar(c) for c in crudos]
         if alto_crudo is None:
             # La mediana y no el máximo: un cuadro con el brazo en alto no puede
@@ -467,8 +508,13 @@ def main() -> None:
             alto_crudo = float(np.median([p[0].height for p in piezas]))
             lado_patron = lado * (ALTO / alto_crudo)
         escalas[nombre] = lado_patron / lado
+        # Una escala por cuadro. Normalmente son todas la misma; con `parejo`,
+        # cada una lleva su cuadro al mismo lado de silueta que el resto.
+        por_cuadro[nombre] = ([lado_patron / float(np.sqrt(pieza[2])) for pieza in piezas]
+                              if parejo else [escalas[nombre]] * len(piezas))
         print(f'  {nombre:8s} {len(crudos):3d} cuadros -> {len(piezas)}'
-              f'  (lado de silueta {lado:.0f} px, escala {escalas[nombre]:.3f})')
+              f'  (lado de silueta {lado:.0f} px, escala {escalas[nombre]:.3f}'
+              f'{", parejo" if parejo else ""})')
 
     assert alto_crudo is not None and alto_crudo > 0
 
@@ -486,9 +532,8 @@ def main() -> None:
     # todas las acciones, para que un solo número alcance para leer la hoja.
     celdas = []
     for nombre, piezas in acciones.items():
-        for img, centro, _ in piezas:
-            celdas.append((round(img.width * escalas[nombre]),
-                           round(img.height * escalas[nombre])))
+        for escala, (img, centro, _) in zip(por_cuadro[nombre], piezas):
+            celdas.append((round(img.width * escala), round(img.height * escala)))
     celda_w = max(c[0] for c in celdas) + MARGEN * 2
     celda_h = max(c[1] for c in celdas) + MARGEN * 2
 
@@ -512,8 +557,7 @@ def main() -> None:
 
     for fila, (nombre, piezas) in enumerate(acciones.items()):
         cuadros = []
-        escala = escalas[nombre]
-        for col, (img, centro, _) in enumerate(piezas):
+        for col, (escala, (img, centro, _)) in enumerate(zip(por_cuadro[nombre], piezas)):
             w, h = round(img.width * escala), round(img.height * escala)
             chico = img.resize((max(1, w), max(1, h)), Image.LANCZOS)
             x = col * celda_w + (celda_w - w) // 2

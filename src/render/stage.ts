@@ -1,4 +1,4 @@
-import { Assets, Sprite, Texture } from 'pixi.js';
+import { Assets, Rectangle, Sprite, Texture } from 'pixi.js';
 import { assetEmbedded, assetUrl } from '../art/assetUrl';
 
 /**
@@ -126,13 +126,62 @@ async function loadTexture(url: string): Promise<Texture | null> {
  * estilo.
  */
 export async function loadPlatforms(name: string): Promise<StagePlatforms | null> {
-  const carpeta = `/escenarios/${name.toLowerCase()}`;
+  const propias = await desdeCarpeta(`/escenarios/${name.toLowerCase()}`);
+  // Las losas del escenario mandan, y si no tiene van las compartidas. Antes
+  // devolvía `null` y el escenario se quedaba sin plataformas dibujadas: de los
+  // cinco escenarios sólo `lich` tenía losas, así que en los otros cuatro se
+  // peleaba sobre rectángulos de color. Son rocas grises: sirven en todos.
+  return propias ?? await desdeCarpeta('/escenarios/losas');
+}
+
+async function desdeCarpeta(carpeta: string): Promise<StagePlatforms | null> {
   const [centro, lado] = await Promise.all([
     loadTexture(`${carpeta}/losa-centro.png`),
     loadTexture(`${carpeta}/losa-lado.png`),
   ]);
   if (centro === null || lado === null) return null;
   return { centro, lado };
+}
+
+/**
+ * Carga una tira de llamas, si está. La corta `scripts/hoja-fuego.py`.
+ *
+ * Devuelve los cuadros como sub-texturas de UNA sola fuente, igual que las hojas
+ * de los personajes: las llamas de un lado son un draw call, no seis.
+ *
+ * Vale la misma regla que para todo el arte: que no esté no es un error. El
+ * fondo se dibuja entonces con los cristales de polígonos de siempre.
+ */
+export async function loadFlames(color: 'verde' | 'rojo'): Promise<Texture[] | null> {
+  const url = `/escenarios/fuego-${color}.json`;
+  let raw: unknown;
+  try {
+    const response = await fetch(assetUrl(url));
+    if (!response.ok) return null;
+    const type = response.headers.get('content-type') ?? '';
+    if (!type.includes('json')) return null;
+    raw = await response.json();
+  } catch {
+    return null;
+  }
+
+  const v = raw as { file?: unknown; cell?: unknown; frames?: unknown };
+  if (typeof v.file !== 'string' || typeof v.frames !== 'number'
+    || !Array.isArray(v.cell) || v.cell.length !== 2) return null;
+  const [ancho, alto] = v.cell as [number, number];
+  if (!(ancho > 0) || !(alto > 0) || !(v.frames > 0)) return null;
+
+  const base = await loadTexture(`/escenarios/${v.file}`);
+  if (base === null) return null;
+
+  const cuadros: Texture[] = [];
+  for (let i = 0; i < v.frames; i++) {
+    cuadros.push(new Texture({
+      source: base.source,
+      frame: new Rectangle(i * ancho, 0, ancho, alto),
+    }));
+  }
+  return cuadros;
 }
 
 export function createStage(texture: Texture): Stage {

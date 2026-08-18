@@ -25,6 +25,7 @@ import type { BinanceFeedClient } from '../net/feedCore';
 import { createFighterView } from '../art/fighter';
 import type { FighterView } from '../art/fighter';
 import {
+  ACTION_HIT,
   ACTION_TIME,
   ACT_KICK,
   ACT_NONE,
@@ -41,7 +42,7 @@ import { createSpriteFighterView } from '../art/spriteFighter';
 import { ROSTER, characterFor } from '../game/roster';
 import { burst, createFx, drawFx, dust, ring, trail, updateFx } from './fx';
 import { createBackdrop } from './backdrop';
-import { createStage, loadPlatforms, loadStage, stageNames, stageTint } from './stage';
+import { createStage, loadFlames, loadPlatforms, loadStage, stageNames, stageTint } from './stage';
 import type { StagePlatforms } from './stage';
 
 /**
@@ -89,6 +90,23 @@ const PLATFORM_SHADE = 0x2b3552;
 
 /** Paso fijo de simulación. La física no depende de los fps del monitor. */
 const FIXED_DT = 1 / 60;
+
+/**
+ * A qué velocidad corre la pelea respecto del reloj de pared. En 0,5 va a la
+ * mitad.
+ *
+ * **No se toca `FIXED_DT`.** El paso de simulación sigue siendo 1/60: todas las
+ * constantes de física —gravedad, impulsos, umbrales de knockback— están
+ * calibradas contra ese paso, y agrandarlo las invalida a todas de una. Lo que
+ * se escala es cuánto tiempo ENTRA al acumulador, así que la pelea da la mitad
+ * de pasos por segundo y se ve a la mitad de velocidad con la misma física.
+ *
+ * El reloj de dibujo se escala igual, para que la respiración del quieto y las
+ * chispas no vayan al doble que los cuerpos. La cámara NO: sigue amortiguando
+ * en tiempo real, porque una cámara a media velocidad se siente pesada aunque
+ * lo que persigue vaya lento.
+ */
+const RITMO = 0.5;
 /** Tope de pasos por frame: tras un hipo, se pierde tiempo antes que congelar. */
 const MAX_STEPS = 5;
 
@@ -218,6 +236,7 @@ export async function startGame(
   client: BinanceFeedClient,
   onFrame: (ms: number) => void,
   stageName: string | null = null,
+  ritmo: number = RITMO,
 ): Promise<GameHandle> {
   const app = new Application();
   await app.init({
@@ -242,9 +261,21 @@ export async function startGame(
    * Un `ResizeObserver` sobre el host avisa de cualquier cambio de caja, el
    * primer layout incluido, que es justo lo que falta.
    */
-  const observador = new ResizeObserver(() => app.resize());
+  function encuadrar(): void {
+    const ancho = host.clientWidth;
+    const alto = host.clientHeight;
+    if (ancho <= 0 || alto <= 0) return;
+    // `renderer.width` viene en píxeles FÍSICOS y `clientWidth` en píxeles CSS:
+    // en una pantalla retina son el doble. Comparar sin dividir por la
+    // resolución da siempre distinto y se redimensiona en todos los cuadros.
+    if (app.renderer.width / app.renderer.resolution === ancho
+      && app.renderer.height / app.renderer.resolution === alto) return;
+    app.renderer.resize(ancho, alto);
+  }
+
+  const observador = new ResizeObserver(encuadrar);
   observador.observe(host);
-  app.resize();
+  encuadrar();
 
   const backdrop = createBackdrop();
   // El fondo pintado va debajo de los cristales de volumen, que son el dato.
@@ -256,7 +287,7 @@ export async function startGame(
   // esconde ahí adentro en vez de parecer un parpadeo del fondo.
   const rotation = stageName === null ? await stageNames() : [stageName];
 
-  // Las cuatro cargas arrancan JUNTAS y se esperan donde hacen falta. En fila
+  // Las cargas arrancan JUNTAS y se esperan donde hacen falta. En fila
   // —fondo, después losas, después arte, después hojas— cada una paga de nuevo
   // el arranque del cargador de Pixi, que en una máquina ocupada es lo que más
   // tarda de todo: medido, el primer archivo tardó once segundos y los
@@ -270,7 +301,19 @@ export async function startGame(
       : sinColgarse(loadPlatforms(rotation[0]), 'las losas'),
     arte: sinColgarse(Promise.all(armatures.map((name) => loadArt(name))), 'el arte cortado'),
     hojas: sinColgarse(Promise.all(armatures.map((name) => loadSheets(name))), 'las hojas de sprites'),
+    fuegos: sinColgarse(
+      Promise.all([loadFlames('verde'), loadFlames('rojo')]), 'las hogueras'),
   };
+
+  // Las hogueras entran cuando llegan y nadie las espera: hasta entonces el
+  // fondo son los cristales de polígonos, que no necesitan cargar nada. Es la
+  // única carga de la pantalla que puede llegar tarde sin que se note, así que
+  // es la única que no bloquea el arranque.
+  void pedidos.fuegos.then((par) => {
+    if (par === null) return;
+    const [verdes, rojos] = par;
+    if (verdes !== null && rojos !== null) backdrop.useFlames(verdes, rojos);
+  });
 
   const stageTextures = (await pedidos.fondos ?? [])
     .filter((texture): texture is Texture => texture !== null);
@@ -396,6 +439,18 @@ export async function startGame(
    */
   const action = new Uint8Array(match.slot.length);
   const actionAge = new Float32Array(match.slot.length);
+  /**
+   * El golpe de la habilidad y del super, esperando su cuadro.
+   *
+   * La simulación avisa que el personaje tiró la especial en el instante en que
+   * la decide, pero el DIBUJO tarda: primero carga. Así que el evento no dispara
+   * el efecto, lo agenda, y lo cobra `drawFighters` cuando la animación llega a
+   * `ACTION_HIT`. Guardar el equipo y la magnitud acá es más barato que ir a
+   * buscarlos después, porque para entonces la cola de eventos ya se vació.
+   */
+  const golpeKind = new Uint8Array(match.slot.length);
+  const golpeMagnitud = new Float32Array(match.slot.length);
+  const golpeEquipo = new Uint8Array(match.slot.length);
 
   /**
    * La capa que brilla. Es hija de `world` para heredar la cámara, y lleva el
@@ -435,8 +490,11 @@ export async function startGame(
   const tick = (): void => {
     const started = performance.now();
     const frameMs = app.ticker.deltaMS;
+    /** Tiempo real, para la cámara y el hitstop. */
     const dt = Math.min(frameMs / 1000, 0.1);
-    elapsed += dt;
+    /** Tiempo de la pelea: el mismo, a la velocidad de `RITMO`. */
+    const dtPelea = dt * ritmo;
+    elapsed += dtPelea;
 
     // El escenario se recalcula sólo cuando llega un snapshot nuevo.
     if (client.book.lastUpdateId !== lastBookId && client.book.mid > 0) {
@@ -455,7 +513,7 @@ export async function startGame(
       // estaba en vez de dar un salto para recuperar el atraso.
       hitstop -= dt;
     } else {
-      accumulator += Math.min(frameMs, 250) / 1000;
+      accumulator += Math.min(frameMs, 250) / 1000 * ritmo;
       let steps = 0;
       while (accumulator >= FIXED_DT && steps < MAX_STEPS) {
         stepMatch(match, client.trades, client.stats, FIXED_DT);
@@ -472,7 +530,7 @@ export async function startGame(
     // Estelas: sólo el que va rápido de verdad, y siempre — también durante el
     // hitstop, porque congelar los efectos delataría la pausa.
     emitTrails(match, fx);
-    updateFx(fx, dt);
+    updateFx(fx, dtPelea);
 
     // Antes de dibujar: si la simulación cambió de personaje algún slot, hay
     // que enganchar el cuerpo nuevo. Se hace acá y no adentro de `drainEvents`
@@ -484,7 +542,7 @@ export async function startGame(
     else placeStage(platformSprites, match);
     updateCamera(camera, match, dt, app.renderer.height / app.renderer.width);
     applyCamera(world, app, camera, match.shake);
-    drawFighters(views, match, action, actionAge, dt, elapsed);
+    drawFighters(views, match, action, actionAge, dtPelea, elapsed, cobrarGolpe);
     drawBars(bars, match);
     drawFx(fx, plainFx, glowFx);
 
@@ -520,6 +578,52 @@ export async function startGame(
     onFrame(performance.now() - started);
   };
 
+  function agendar(slot: number, kind: number, magnitude: number, team: number): void {
+    if (slot < 0 || slot >= action.length) return;
+    startAction(action, actionAge, slot, kind);
+    golpeKind[slot] = kind;
+    golpeMagnitud[slot] = magnitude;
+    golpeEquipo[slot] = team;
+  }
+
+  /**
+   * Cobra el golpe agendado de un slot: efectos, hitstop y cambio de escenario.
+   *
+   * Llega desde `drawFighters`, o sea DESPUÉS del bucle de simulación de este
+   * frame. Escribir `hitstop` acá no descarta nada: el frame que viene lo lee al
+   * empezar y congela desde ahí, que es justo cuando se ve el impacto.
+   */
+  function cobrarGolpe(slot: number, x: number, y: number): void {
+    const kind = golpeKind[slot];
+    if (kind === 0) return;
+    golpeKind[slot] = 0;
+    const magnitude = golpeMagnitud[slot];
+    const teamColor = golpeEquipo[slot] === TEAM_GREEN ? GREEN : RED;
+
+    if (kind === ACT_SKILL) {
+      ring(fx, x, y, 2.3, 0.42, teamColor);
+      burst(fx, x, y, 8, 5, 0.1, 0.4, teamColor);
+      return;
+    }
+
+    ring(fx, x, y, magnitude, 0.6, GOLD);
+    ring(fx, x, y, magnitude * 0.6, 0.45, 0xffffff);
+    burst(fx, x, y, 14, 11, 0.2, 0.7, GOLD);
+    hitstop = Math.max(hitstop, HITSTOP_SUPER);
+    shockwaveTime = 0;
+    shockwaveX = x;
+    shockwaveY = y;
+    world.filters = [shockwave];
+    // Y se cambia de escenario. Cambiar una textura no reconstruye nada —el
+    // sprite es el mismo y el encaje se recalcula en el mismo frame, más
+    // abajo—, así que el corte cae dentro del hitstop del super y no se ve un
+    // salto de fondo suelto.
+    if (stage !== null && stageTextures.length > 1) {
+      stageIndex = (stageIndex + 1) % stageTextures.length;
+      stage.show(stageTextures[stageIndex]);
+    }
+  }
+
   /** Drena la cola de eventos y devuelve cuánto hitstop pide este paso. */
   function drainEvents(m: Match, target: typeof fx): number {
     let stop = 0;
@@ -544,28 +648,11 @@ export async function startGame(
             magnitude === 0 ? ACT_PUNCH : ACT_KICK);
           break;
         case EVENT_SKILL:
-          startAction(action, actionAge, m.events.slot[e], ACT_SKILL);
-          ring(target, x, y, 2.3, 0.42, teamColor);
-          burst(target, x, y, 8, 5, 0.1, 0.4, teamColor);
-          break;
         case EVENT_SUPER:
-          startAction(action, actionAge, m.events.slot[e], ACT_SUPER);
-          ring(target, x, y, magnitude, 0.6, GOLD);
-          ring(target, x, y, magnitude * 0.6, 0.45, 0xffffff);
-          burst(target, x, y, 14, 11, 0.2, 0.7, GOLD);
-          stop = Math.max(stop, HITSTOP_SUPER);
-          shockwaveTime = 0;
-          shockwaveX = x;
-          shockwaveY = y;
-          world.filters = [shockwave];
-          // Y se cambia de escenario. Cambiar una textura no reconstruye nada
-          // —el sprite es el mismo y el encaje se recalcula en el mismo frame,
-          // más abajo—, así que el corte cae dentro del hitstop del super y no
-          // se ve un salto de fondo suelto.
-          if (stage !== null && stageTextures.length > 1) {
-            stageIndex = (stageIndex + 1) % stageTextures.length;
-            stage.show(stageTextures[stageIndex]);
-          }
+          // Ni anillo ni chispas todavía: el personaje recién está cargando. Se
+          // agenda y lo cobra `agendarGolpe` en el cuadro en que suelta.
+          agendar(m.events.slot[e], kind === EVENT_SUPER ? ACT_SUPER : ACT_SKILL,
+            magnitude, m.events.team[e]);
           break;
         case EVENT_KO:
           burst(target, x, y, 14, 9, 0.22, 0.8, 0xffffff);
@@ -690,6 +777,7 @@ function drawFighters(
   views: FighterView[], match: Match,
   action: Uint8Array, actionAge: Float32Array,
   dt: number, elapsed: number,
+  cobrarGolpe: (slot: number, x: number, y: number) => void,
 ): void {
   for (let i = 0; i < views.length; i++) {
     const view = views[i];
@@ -707,8 +795,16 @@ function drawFighters(
     // una animación, y tiene que seguir avanzando durante el hitstop o el golpe
     // se vería congelado a mitad de camino.
     if (action[i] !== ACT_NONE) {
+      const total = ACTION_TIME[action[i]];
+      const antes = actionAge[i];
       actionAge[i] += dt;
-      if (actionAge[i] >= ACTION_TIME[action[i]]) action[i] = ACT_NONE;
+      // El cruce y no el "ya pasó": si preguntara por mayor o igual, el golpe se
+      // cobraría en todos los frames que quedan de la acción.
+      const golpe = ACTION_HIT[action[i]] * total;
+      if (antes < golpe && actionAge[i] >= golpe) {
+        cobrarGolpe(i, match.x[i], match.y[i]);
+      }
+      if (actionAge[i] >= total) action[i] = ACT_NONE;
     }
     const duration = ACTION_TIME[action[i]];
     const progress = duration > 0 ? actionAge[i] / duration : 0;

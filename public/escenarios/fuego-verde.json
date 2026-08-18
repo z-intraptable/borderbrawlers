@@ -1,0 +1,10 @@
+{
+  "_": "Tira de llamas cortada por scripts/hoja-fuego.py. El ancla es la base del cuadro, no su centro: la hoguera está clavada al piso.",
+  "file": "fuego-verde.png",
+  "cell": [
+    196,
+    392
+  ],
+  "frames": 5,
+  "base": 4
+}

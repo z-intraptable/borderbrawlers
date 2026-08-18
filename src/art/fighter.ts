@@ -39,6 +39,22 @@ export const ACT_SUPER = 4;
 /** Cuánto dura cada acción en pantalla, en segundos. */
 export const ACTION_TIME: readonly number[] = [0, 0.26, 0.3, 0.45, 0.75];
 
+/**
+ * En qué punto de la acción cae el golpe, como fracción de su duración.
+ *
+ * Existe porque una acción dibujada tiene **anticipación**: el primer cuadro de
+ * la habilidad es el personaje cargando, con las manos atrás. Si el anillo y las
+ * chispas salen cuando la simulación emite el evento —o sea al empezar— la
+ * explosión ocurre antes de que el personaje tire el golpe, y con el juego a
+ * mitad de velocidad esa diferencia pasa de un parpadeo a un cuarto de segundo
+ * de dos cosas que no tienen nada que ver.
+ *
+ * El super remata más tarde que la habilidad porque su arco es otro: carga,
+ * estalla hacia arriba y recién en el tercer dibujo baja los puños al piso. El
+ * golpe es ese último, no el del medio.
+ */
+export const ACTION_HIT: readonly number[] = [0, 0.5, 0.5, 0.36, 0.72];
+
 /* --- escala del dibujo ----------------------------------------------- */
 
 /**

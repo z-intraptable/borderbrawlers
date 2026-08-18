@@ -1,5 +1,5 @@
 import { Container, Sprite } from 'pixi.js';
-import { ACT_KICK, ACT_NONE, ACT_PUNCH, ACT_SKILL, ACT_SUPER } from './fighter';
+import { ACTION_HIT, ACT_KICK, ACT_NONE, ACT_PUNCH, ACT_SKILL, ACT_SUPER } from './fighter';
 import type { FighterView } from './fighter';
 import type { FighterSheets, SheetFrame } from './loadSheets';
 
@@ -55,6 +55,41 @@ const FALLBACK: Record<number, readonly string[]> = {
   [ACT_SUPER]: ['super', 'skill', 'punch', 'attack'],
 };
 
+/**
+ * Cuánto se corre el dibujo hacia adelante en el golpe, en unidades de rig.
+ *
+ * Un peleador que tira una especial sin moverse del lugar parece que la mima. La
+ * física no lo puede hacer —moverlo de verdad cambiaría a quién le pega y desde
+ * dónde—, así que el empujón es del DIBUJO: sale y vuelve dentro de la misma
+ * acción, y al terminar el sprite está exactamente donde lo dejó la simulación.
+ *
+ * Va en el sprite y no en el contenedor porque el contenedor lo posiciona
+ * `game.ts` desde la física; escribir ahí sería pelearse con ella cada frame.
+ * El super empuja más que el puño: es la diferencia entre un jab y tirarse
+ * encima del otro.
+ */
+const EMBESTIDA: Record<number, number> = {
+  [ACT_PUNCH]: 7,
+  [ACT_KICK]: 10,
+  [ACT_SKILL]: 14,
+  [ACT_SUPER]: 20,
+};
+
+/**
+ * La curva del empujón: de 0 al golpe y del golpe de vuelta a 0.
+ *
+ * Es asimétrica a propósito, y por eso no alcanza con un seno. El golpe de la
+ * habilidad cae al 36% de la acción y el del super al 72%: con una curva
+ * simétrica el super llegaría a su punto más adelantado bastante antes de bajar
+ * los puños, que es justo el cuadro donde tiene que estar más lejos.
+ */
+function embestida(action: number, t: number): number {
+  const golpe = ACTION_HIT[action] ?? 0;
+  if (!(golpe > 0) || !(golpe < 1)) return 0;
+  const fase = t < golpe ? t / golpe : (1 - t) / (1 - golpe);
+  return (1 - Math.cos(Math.PI * Math.max(0, Math.min(1, fase)))) / 2;
+}
+
 export function createSpriteFighterView(sheets: FighterSheets): FighterView {
   const root = new Container() as FighterView;
 
@@ -72,6 +107,7 @@ export function createSpriteFighterView(sheets: FighterSheets): FighterView {
   const run = sheets.animations.get('run') ?? null;
   const jump = sheets.animations.get('jump') ?? null;
   const hurtAnim = sheets.animations.get('hurt') ?? null;
+  const fallAnim = sheets.animations.get('fall') ?? null;
   // Sin `idle` propio, el primer cuadro de la carrera hace de pose de pie: es
   // el mismo personaje parado en una zancada, y se lee mucho mejor que dejarlo
   // en blanco.
@@ -92,6 +128,8 @@ export function createSpriteFighterView(sheets: FighterSheets): FighterView {
     sprite.texture = frame.texture;
     sprite.anchor.set(frame.anchorX, frame.anchorY);
     sprite.scale.set(scale);
+    // Sin acción no hay empujón; la que lo quiera lo escribe después de `show`.
+    sprite.x = 0;
     // El centroide queda en el origen del rig; de ahí a los pies hay `ground`
     // unidades, y los pies tienen que caer a `HALF` del centro del cuerpo.
     sprite.y = HALF - sheets.ground;
@@ -116,9 +154,16 @@ export function createSpriteFighterView(sheets: FighterSheets): FighterView {
     lastElapsed = elapsed;
     travelled += Math.abs(vx) * dt;
 
-    if (hurt && hurtAnim !== null) {
-      show(hurtAnim, Math.floor(actionT * hurtAnim.length));
-      return;
+    if (hurt) {
+      // Golpeado en el piso es un retroceso; golpeado en el aire es salir
+      // despedido, que es otro dibujo: el cuerpo va dando vueltas. Es la
+      // diferencia entre encajar un golpe y que te saquen del escenario, y en un
+      // juego donde el knockback es la mecánica central se tiene que ver.
+      const cual = !grounded && fallAnim !== null ? fallAnim : hurtAnim;
+      if (cual !== null) {
+        show(cual, Math.floor(actionT * cual.length));
+        return;
+      }
     }
 
     if (action !== ACT_NONE) {
@@ -129,6 +174,7 @@ export function createSpriteFighterView(sheets: FighterSheets): FighterView {
         // `actionT` ya viene normalizado de 0 a 1 por `game.ts`, así que la
         // acción no necesita reloj propio y no puede quedar desfasada del golpe.
         show(frames, Math.floor(actionT * frames.length));
+        sprite.x = (EMBESTIDA[action] ?? 0) * embestida(action, actionT);
         return;
       }
     }

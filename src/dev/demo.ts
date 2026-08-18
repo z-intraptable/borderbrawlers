@@ -8,7 +8,7 @@ import type { FighterView } from '../art/fighter';
 import { createBackdrop } from '../render/backdrop';
 import { createStage, loadPlatforms, loadStage, stageTint } from '../render/stage';
 import { GRAVITY } from '../game/physics';
-import { ACT_NONE } from '../art/fighter';
+import { ACT_KICK, ACT_NONE, ACT_PUNCH, ACT_SKILL, ACT_SUPER, ACTION_TIME } from '../art/fighter';
 
 /**
  * Un personaje corriendo y saltando en el escenario, y nada más.
@@ -126,6 +126,45 @@ let grounded = true;
 let facing = 1;
 let elapsed = 0;
 
+/**
+ * La ronda de acciones: el banco las va tirando una tras otra.
+ *
+ * Sin esto sólo se veían la carrera, el salto y el quieto, que son los estados
+ * continuos; la patada, la habilidad y el super no se veían nunca, y son
+ * justamente los que hay que mirar de cerca porque son tres dibujos y no un
+ * ciclo. `pausa` es el aire entre una y la siguiente: pegadas no se distingue
+ * dónde termina una acción y arranca la otra.
+ */
+const RONDA: readonly number[] = [ACT_PUNCH, ACT_KICK, ACT_SKILL, ACT_SUPER];
+/** Segundos de carrera entre una ronda de acciones y la siguiente. */
+const CORRER = 5;
+const NOMBRE: Record<number, string> = {
+  [ACT_PUNCH]: 'puño', [ACT_KICK]: 'patada',
+  [ACT_SKILL]: 'habilidad', [ACT_SUPER]: 'super',
+};
+const PAUSA = 0.7;
+let cual = 0;
+let accion = ACT_NONE;
+let edad = 0;
+/** Cuánto hace que terminó la última ronda. Mientras cuenta, el peleador corre. */
+let descanso = 0;
+let mostrando = false;
+
+function girarAccion(dt: number): void {
+  edad += dt;
+  if (accion === ACT_NONE) {
+    if (edad < PAUSA) return;
+    accion = RONDA[cual % RONDA.length];
+    cual++;
+    edad = 0;
+  } else if (edad >= ACTION_TIME[accion]) {
+    accion = ACT_NONE;
+    edad = 0;
+  }
+  const cartel = document.getElementById('accion');
+  if (cartel !== null) cartel.textContent = accion === ACT_NONE ? '' : NOMBRE[accion];
+}
+
 /** La losa que hay abajo de `x`, o null si está sobre el hueco. */
 function losaBajo(px: number): typeof LOSAS[number] | null {
   for (const losa of LOSAS) {
@@ -154,10 +193,28 @@ const BORDE = 4.0;
 function paso(dt: number): void {
   elapsed += dt;
 
+  // Turnos: cinco segundos corriendo y saltando, y después se planta a tirar la
+  // ronda de acciones. Las acciones no se pueden mirar en movimiento —el arco de
+  // la habilidad son tres dibujos y la carrera doce— y frenar sólo hace falta
+  // acá, en el banco; en la pelea de verdad se tiran corriendo.
+  if (!mostrando) {
+    descanso += dt;
+    if (descanso >= CORRER && grounded) {
+      mostrando = true;
+      descanso = 0;
+      vx = 0;
+      edad = PAUSA;
+    }
+  } else if (accion === ACT_NONE && cual > 0 && cual % RONDA.length === 0 && edad === 0) {
+    mostrando = false;
+    cual = 0;
+    vx = facing * RUN_SPEED;
+  }
+
   // Da la vuelta en las puntas del escenario.
   if (x > BORDE && vx > 0) vx = -RUN_SPEED;
   if (x < -BORDE && vx < 0) vx = RUN_SPEED;
-  if (conviene_saltar()) {
+  if (!mostrando && conviene_saltar()) {
     vy = JUMP_SPEED;
     grounded = false;
   }
@@ -186,7 +243,10 @@ function paso(dt: number): void {
 
   view.x = x;
   view.y = -y;
-  view.pose(vx, vy, grounded, false, ACT_NONE, 0, elapsed);
+  girarAccion(mostrando ? dt : 0);
+  const duracion = ACTION_TIME[accion];
+  view.pose(vx, vy, grounded, false, accion,
+    duracion > 0 ? edad / duracion : 0, elapsed);
   // Squash & stretch, igual que en la pelea: se estira al subir y se aplasta al
   // caer. Es lo que separa un muñeco que se traslada de uno que se mueve.
   const stretch = Math.max(-0.18, Math.min(0.18, vy * 0.014));

@@ -59,6 +59,13 @@ const stage = stageParam !== null && /^[a-z0-9-]+$/i.test(stageParam) ? stagePar
 // de pelea sin seis cuerpos encima; sin el parámetro es la pelea de siempre.
 const vsParam = Number(params.get('vs'));
 const lanes = Number.isFinite(vsParam) && vsParam > 0 ? vsParam : 3;
+// A qué velocidad corre la pelea. Sin el parámetro va la de siempre, que desde
+// el 18/08 es la mitad del reloj de pared: a velocidad real no se llegaba a ver
+// quién le pegaba a quién.
+const ritmoParam = Number(params.get('ritmo'));
+const ritmo = Number.isFinite(ritmoParam) && ritmoParam > 0 && ritmoParam <= 4
+  ? ritmoParam
+  : undefined;
 
 const host = document.getElementById('root');
 if (host === null) throw new Error('#root no existe');
@@ -88,7 +95,7 @@ if (source === 'mock') {
 // reproducirla sería una ráfaga de altas de trades viejos.
 document.addEventListener('visibilitychange', () => client.clearTrades());
 
-const game = await startGame(host, match, client, (ms) => { perf.frameMs = ms; }, stage);
+const game = await startGame(host, match, client, (ms) => { perf.frameMs = ms; }, stage, ritmo);
 
 // Enganche de desarrollo: deja mirar el renderer desde afuera —tamaño,
 // resolución, draw calls— sin tener que instrumentar el juego cada vez. Vite lo

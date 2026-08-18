@@ -1,4 +1,4 @@
-import { Container, Graphics } from 'pixi.js';
+import { Container, Graphics, Sprite, Texture } from 'pixi.js';
 
 /**
  * El fondo: dos formaciones de cristales y el cielo teñido hacia el que domina.
@@ -7,6 +7,13 @@ import { Container, Graphics } from 'pixi.js';
  * verde crece con el volumen comprador y la roja con el vendedor, y el color del
  * cielo se corre hacia el bando que va ganando. Es la única parte de la pantalla
  * que muestra el estado del mercado sin números.
+ *
+ * **Las hogueras son dibujadas, y los cristales son el respaldo.** La versión
+ * original dibujaba las dos formaciones con polígonos porque no había arte; hoy
+ * hay dos tiras de llamas cortadas de Kling y `useFlames` las mete en su lugar
+ * cuando terminan de cargar. Los polígonos se quedan escritos y no son código
+ * muerto: son lo que se ve mientras el arte viaja, y lo que se ve si no está.
+ * Cambiar el fondo no puede depender de que un archivo exista.
  *
  * **Los cristales son polígonos explícitos, no curvas.** La primera versión
  * dibujaba llamas con bezier y salían facetadas, porque Pixi decide cuántos
@@ -55,8 +62,23 @@ interface Shard {
   baseScale: number;
 }
 
+/**
+ * Una de las dos hogueras. Las hay de cristales y de llamas dibujadas, y el
+ * fondo no distingue: le pide el nodo y le pasa el reparto del volumen.
+ */
+interface Formation {
+  node: Container;
+  apply(share: number, intensity: number, unit: number, elapsed: number): void;
+}
+
+/** Cuántas llamas tiene una hoguera dibujada, y a cuántos cuadros por segundo arde. */
+const FLAMES = 5;
+const FLAME_FPS = 11;
+
 export interface Backdrop {
   view: Container;
+  /** Cambia los cristales por las llamas dibujadas. Se puede llamar tarde. */
+  useFlames(green: Texture[], red: Texture[]): void;
   /**
    * @param greenShare parte del volumen del comprador, 0 a 1
    * @param intensity  cuánta actividad hay en total, 0 a 1
@@ -112,7 +134,7 @@ function createShard(lit: number, dark: number): Graphics {
   return g;
 }
 
-function createFormation(lit: number, dark: number): { node: Container; shards: Shard[] } {
+function createFormation(lit: number, dark: number): Formation {
   const node = new Container();
   const shards: Shard[] = [];
   for (let i = 0; i < SHARDS; i++) {
@@ -132,34 +154,102 @@ function createFormation(lit: number, dark: number): { node: Container; shards: 
   }
   // El del medio al frente.
   node.children.sort((a, b) => Math.abs(b.x) - Math.abs(a.x));
-  return { node, shards };
+
+  return {
+    node,
+    apply(share, intensity, unit, elapsed): void {
+      // La formación del que domina es más alta, y la actividad total alimenta a
+      // las dos: mercado muerto, dos afloramientos chicos.
+      const tall = unit * (1.1 + share * 2.6) * (0.45 + intensity * 0.55);
+      node.scale.set(unit / SHARD_UNIT, tall / SHARD_UNIT);
+      node.alpha = 0.34 + share * 0.36;
+      for (const shard of shards) {
+        // Un pulso lento, no un parpadeo: son cristales, no fuego. Cada uno con
+        // su fase, porque latiendo juntos se verían como una sola forma
+        // respirando.
+        const pulse = 0.94 + 0.06 * Math.sin(elapsed * shard.speed + shard.phase);
+        shard.node.scale.set(1, shard.baseScale * pulse);
+      }
+    },
+  };
+}
+
+/**
+ * Una hoguera de llamas dibujadas.
+ *
+ * **Escala uniforme, al revés que los cristales.** Un prisma estirado sigue
+ * pareciendo un prisma; una llama estirada parece una llama mal dibujada, porque
+ * el ojo conoce la forma. Así que acá el volumen no estira: agranda. Una hoguera
+ * que crece entera es además lo que hace una hoguera de verdad cuando le tirás
+ * leña, así que el dato se lee igual sin deformar nada.
+ *
+ * Cada llama va por su cuadro y su fase. Con las cinco en el mismo cuadro la
+ * hoguera late como un cartel de neón en vez de arder.
+ */
+function createFlameFormation(frames: Texture[]): Formation {
+  const node = new Container();
+  const llamas: { sprite: Sprite; phase: number; speed: number; baseScale: number }[] = [];
+
+  for (let i = 0; i < FLAMES; i++) {
+    const offset = (i - (FLAMES - 1) / 2) / ((FLAMES - 1) / 2);
+    const sprite = new Sprite(frames[0]);
+    // Ancla en la base: la hoguera está apoyada en el piso de la pantalla, y es
+    // el punto que `hoja-fuego.py` alineó al cortar.
+    sprite.anchor.set(0.5, 1);
+    sprite.x = offset * 0.95 * SHARD_UNIT;
+    node.addChild(sprite);
+    llamas.push({
+      sprite,
+      phase: i * 2.3,
+      speed: 1 + i * 0.13,
+      baseScale: 0.5 + (1 - Math.abs(offset)) * 0.5,
+    });
+  }
+  // La del medio al frente, como el pico de los cristales.
+  node.children.sort((a, b) => Math.abs(b.x) - Math.abs(a.x));
+
+  // De las coordenadas de la tira a las del fondo: la llama dibujada mide lo que
+  // mida el cuadro y acá tiene que valer una unidad de cristal.
+  const aUnidad = SHARD_UNIT / frames[0].height;
+
+  return {
+    node,
+    apply(share, intensity, unit, elapsed): void {
+      const alto = unit * (0.95 + share * 1.75) * (0.5 + intensity * 0.5);
+      node.scale.set(alto / SHARD_UNIT);
+      // Más presente que los cristales: el fuego es opaco, no un mineral
+      // traslúcido. Igual no llega a 1 — sigue siendo fondo.
+      node.alpha = 0.62 + share * 0.28;
+      for (const llama of llamas) {
+        const cual = Math.floor(elapsed * FLAME_FPS * llama.speed + llama.phase);
+        // `%` de un negativo da negativo en JS, y `elapsed` es siempre positivo,
+        // pero la fase podría no serlo si alguien la toca: el `+ length` cuesta
+        // nada y saca el caso de raíz.
+        llama.sprite.texture = frames[(cual % frames.length + frames.length) % frames.length];
+        llama.sprite.scale.set(llama.baseScale * aUnidad);
+      }
+    },
+  };
 }
 
 export function createBackdrop(): Backdrop {
   const view = new Container();
-  const green = createFormation(GREEN_LIT, GREEN_DARK);
-  const red = createFormation(RED_LIT, RED_DARK);
+  let green = createFormation(GREEN_LIT, GREEN_DARK);
+  let red = createFormation(RED_LIT, RED_DARK);
   view.addChild(green.node, red.node);
-
-  const apply = (
-    formation: { node: Container; shards: Shard[] },
-    share: number, intensity: number, unit: number, elapsed: number,
-  ): void => {
-    // La formación del que domina es más alta, y la actividad total alimenta a
-    // las dos: mercado muerto, dos afloramientos chicos.
-    const tall = unit * (1.1 + share * 2.6) * (0.45 + intensity * 0.55);
-    formation.node.scale.set(unit / SHARD_UNIT, tall / SHARD_UNIT);
-    formation.node.alpha = 0.34 + share * 0.36;
-    for (const shard of formation.shards) {
-      // Un pulso lento, no un parpadeo: son cristales, no fuego. Cada uno con su
-      // fase, porque latiendo juntos se verían como una sola forma respirando.
-      const pulse = 0.94 + 0.06 * Math.sin(elapsed * shard.speed + shard.phase);
-      shard.node.scale.set(1, shard.baseScale * pulse);
-    }
-  };
 
   return {
     view,
+    useFlames(verdes, rojos): void {
+      if (verdes.length === 0 || rojos.length === 0) return;
+      const antes = [green, red];
+      green = createFlameFormation(verdes);
+      red = createFlameFormation(rojos);
+      view.addChild(green.node, red.node);
+      // Los cristales se destruyen recién después de colgar las llamas: si el
+      // fondo quedara vacío aunque sea un frame, se vería un parpadeo negro.
+      for (const vieja of antes) vieja.node.destroy({ children: true });
+    },
     update(greenShare, intensity, width, height, elapsed): void {
       // La unidad es la altura de pantalla: la formación escala con el viewport
       // en vez de quedar minúscula en un monitor grande.
@@ -168,8 +258,8 @@ export function createBackdrop(): Backdrop {
       red.node.x = width * 0.84;
       green.node.y = height;
       red.node.y = height;
-      apply(green, greenShare, intensity, unit, elapsed);
-      apply(red, 1 - greenShare, intensity, unit, elapsed);
+      green.apply(greenShare, intensity, unit, elapsed);
+      red.apply(1 - greenShare, intensity, unit, elapsed);
     },
     skyColor(greenShare): number {
       // Se tiñe desde el neutro hacia el lado que domina, y sólo a partir del
