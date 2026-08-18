@@ -69,7 +69,7 @@
 </header>
 
 <iframe id="marco" title="BorderBrawlers"
-        allow="autoplay" src="juego.html?source=mock&scenario=volatile&stage=lich"></iframe>
+        allow="autoplay" src="./index.html?source=mock&scenario=volatile&stage=lich"></iframe>
 
 <section class="consola">
   <div class="fila">
@@ -224,7 +224,7 @@
 
     if (modo.value === 'banco') {
       p.set('quien', quien.value);
-      marco.src = 'banco.html?' + p.toString();
+      marco.src = './demo.html?' + p.toString();
       punto.className = 'punto banco';
       leyenda.textContent = 'Banco · ' + quien.value;
       return;
@@ -237,7 +237,7 @@
     if (fuente.value === 'mock') p.set('scenario', ritmo.value);
     // Recargar el iframe es lo que reinicia la pelea: el juego lee sus opciones
     // una vez al arrancar, así que cambiarlas en caliente no tendría efecto.
-    marco.src = 'juego.html?' + p.toString();
+    marco.src = './index.html?' + p.toString();
 
     const vivo = fuente.value === 'binance-direct';
     const cuantos = plantilla.value + ' vs ' + plantilla.value;

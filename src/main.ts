@@ -55,6 +55,10 @@ const vps = params.get('vps') ?? '';
 // único que hace falta es que no se pueda escapar de la carpeta.
 const stageParam = params.get('stage');
 const stage = stageParam !== null && /^[a-z0-9-]+$/i.test(stageParam) ? stageParam : null;
+// Cuántos peleadores por bando. `?vs=1` es el mano a mano para mirar el motor
+// de pelea sin seis cuerpos encima; sin el parámetro es la pelea de siempre.
+const vsParam = Number(params.get('vs'));
+const lanes = Number.isFinite(vsParam) && vsParam > 0 ? vsParam : 3;
 
 const host = document.getElementById('root');
 if (host === null) throw new Error('#root no existe');
@@ -65,7 +69,7 @@ const client = new BinanceFeedClient({
   onStatus: (status) => hud.setStatus(status),
 });
 
-const match = createMatch();
+const match = createMatch(lanes);
 /** Lo escribe el bucle de render, lo muestrea el HUD. */
 const perf = { frameMs: 0 };
 
@@ -85,6 +89,13 @@ if (source === 'mock') {
 document.addEventListener('visibilitychange', () => client.clearTrades());
 
 const game = await startGame(host, match, client, (ms) => { perf.frameMs = ms; }, stage);
+
+// Enganche de desarrollo: deja mirar el renderer desde afuera —tamaño,
+// resolución, draw calls— sin tener que instrumentar el juego cada vez. Vite lo
+// saca del build de producción junto con la rama muerta.
+if (import.meta.env.DEV) {
+  (window as unknown as { __APP__: unknown }).__APP__ = game.app;
+}
 
 // Vite reemplaza el módulo en caliente; sin esto quedan dos canvas y dos
 // sockets vivos por cada guardado.

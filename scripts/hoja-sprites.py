@@ -4,7 +4,7 @@ Convierte los clips de Kling en la hoja de sprites de un personaje.
 
     python3 scripts/hoja-sprites.py ragnir \\
         run=arte-crudo/clips/ragnir-run.mp4:0.6:3.0 \\
-        jump=arte-crudo/poses/ragnir-salto.png
+        jump=arte-crudo/poses/ragnir-salto.png:5
 
 Cada argumento es `accion=origen`, y el origen puede ser de dos clases:
 
@@ -12,11 +12,11 @@ Cada argumento es `accion=origen`, y el origen puede ser de dos clases:
   tramo importa, porque el modelo no cicla sino que actúa: en un par de cuadros
   gira a vista frontal y ahí deja de servir como sprite lateral. El recorte se
   elige mirando la tira que este mismo script imprime.
-- **una hoja de poses**, una imagen con las figuras en fila sobre blanco. Se
-  separan por columnas vacías. Para el salto es lo que corresponde y no un
-  clip: pedido como video, el modelo lo mandó hacia el fondo en vez de hacia
-  arriba —el personaje se achicaba a un tercio— y en un juego de peleas un
-  salto son cinco dibujos, porque el arco lo pone la física.
+- **una hoja de poses**, una imagen con las figuras en fila sobre blanco, y
+  opcionalmente cuántas figuras tiene que haber: `hoja.png:5`. Para el salto es
+  lo que corresponde y no un clip: pedido como video, el modelo lo mandó hacia
+  el fondo en vez de hacia arriba —el personaje se achicaba a un tercio— y en un
+  juego de peleas un salto son cinco dibujos, porque el arco lo pone la física.
 
 Sale una sola imagen por personaje, `public/art/<slug>/hojas.png`, con todas las
 acciones una abajo de la otra, más `hojas.json` con los rectángulos. Una textura
@@ -61,6 +61,20 @@ MARGEN = 4
 TOLERANCIA = 46
 # Píxeles de contorno que se comen para matar el halo claro que deja el códec.
 COMER = 2
+
+
+def tinta_de(a: np.ndarray) -> np.ndarray:
+    """Qué píxeles son dibujo y no fondo, con el mismo criterio que `inundar`.
+
+    Un solo umbral para todo el script, y por canal. La versión anterior medía
+    la suma de los tres canales contra 730 —o sea un promedio de 243— y eso
+    rompe con los clips: el códec deja una neblina celeste alrededor del pelo
+    blanco de Dusk, de unos 242 planos, que pasa el umbral de la suma pero no el
+    de canal. Franjas enteras de fondo entraban como tinta, la regla de la línea
+    de piso las tomaba por piso y las blanqueaba, y el personaje aparecía
+    cortado en tiras a la altura de la cara.
+    """
+    return ~(a > 255 - TOLERANCIA).all(axis=2)
 
 
 def manchar(mask: np.ndarray, semillas: list[tuple[int, int]]) -> np.ndarray:
@@ -129,42 +143,159 @@ def inundar(cuadro: Image.Image) -> Image.Image:
     return salida
 
 
-def sin_borde(cuadro: Image.Image) -> Image.Image:
-    """Blanquea las columnas y filas oscuras de punta a punta.
+# Qué fracción del ancho tiene que cubrir una fila para ser una línea de piso y
+# no parte de un personaje, y cuánto puede medir de alto. Ninguna figura ocupa
+# la mitad del ancho de la hoja en una franja de menos del 1,5% del alto.
+REGLA_ANCHO = 0.5
+REGLA_ALTO = 0.015
 
-    Los clips de Kling vienen con una tira de 25 px pegada al borde derecho, de
-    alto completo. No es del personaje pero toca el borde de la imagen, así que
-    la inundación de `alfa.py` la toma como parte de la figura y después el
-    recorte por caja se lleva media hoja de aire.
+
+def sin_borde(cuadro: Image.Image, piso: bool = True) -> Image.Image:
+    """Blanquea las tiras del borde y la línea de piso dibujada.
+
+    Dos cosas que llegan con la imagen y no son el personaje:
+
+    - **La tira del borde**: los clips de Kling vienen con una de 25 px pegada al
+      borde derecho, de alto completo. Toca el borde de la imagen, así que la
+      inundación la toma como parte de la figura y el recorte por caja se lleva
+      media hoja de aire.
+    - **La línea de piso** (`piso`, sólo en las hojas de poses): el generador la
+      dibuja aunque se le pida que no, y es
+      peor, porque **toca los pies**. Fusionada con ellos deja de parecer una
+      línea —pasa a ser una mancha ancha Y alta— y ninguna regla de proporción
+      la reconoce; lo que se ve después es una figura de 2500 px de ancho que se
+      comió a las otras tres. Por eso se corta acá, antes de buscar manchas, y
+      por franja fina y ancha en vez de por fila completa: la línea no siempre
+      llega de punta a punta.
+
+      En los **clips** esa regla no corre. Un video no trae línea de piso —el
+      generador dibuja una en las hojas, no en los cuadros— y en cambio trae
+      neblina del códec, franjas de fondo apenas grises que la regla confunde
+      con el piso y blanquea: quedaba el personaje tachado con una raya a la
+      altura del pecho, un cuadro sí y otro no.
     """
     a = np.array(cuadro)
-    tinta = a.astype(int).sum(axis=2) < 730
-    columna = tinta.all(axis=0)
-    fila = tinta.all(axis=1)
-    if columna.any() or fila.any():
-        a = a.copy()
-        a[:, columna] = 255
-        a[fila, :] = 255
+    tinta = tinta_de(a.astype(np.int16))
+    alto, ancho = tinta.shape
+    a = a.copy()
+
+    a[:, tinta.all(axis=0)] = 255
+    a[tinta.all(axis=1), :] = 255
+
+    if not piso:
         return Image.fromarray(a)
-    return cuadro
+
+    # Las franjas finas que cruzan media hoja: se blanquean enteras.
+    llena = tinta.sum(axis=1) > ancho * REGLA_ANCHO
+    ini = None
+    for y in range(alto + 1):
+        if y < alto and llena[y]:
+            if ini is None:
+                ini = y
+        elif ini is not None:
+            if y - ini <= max(3, alto * REGLA_ALTO):
+                a[ini:y, :] = 255
+            ini = None
+    return Image.fromarray(a)
 
 
-def figuras_de_la_hoja(hoja: Path) -> list[Image.Image]:
-    """Separa las figuras de una hoja de poses, una por mancha conexa.
+def agrupar_por_centro(centros: list[float], cuantos: int,
+                       pesos: list[int]) -> set[int]:
+    """Reparte manchas en `cuantos` figuras y devuelve dónde cortar la fila.
 
-    Por manchas y no por columnas vacías: en la hoja del salto las poses se
-    superponen de costado —las garras de una entran en la columna de la
-    siguiente— y el corte por columnas devolvía dos figuras en vez de cinco.
-    Dos figuras que de verdad se tocan seguirían saliendo juntas, pero eso se ve
-    en el conteo que este script imprime y se arregla regenerando la hoja.
+    Cada figura se ancla en su mancha más grande —el torso— y todo lo demás cae
+    en el ancla que tiene más cerca. Las anclas se eligen por área de mayor a
+    menor, salteando las que caigan demasiado cerca de una ya elegida, así dos
+    pedazos de un mismo cuerpo no se llevan dos anclas.
+
+    Las dos formas evidentes fallan, y las dos fallaron acá:
+
+    - **Cortar por los huecos más grandes**: en la hoja de Kor los huecos más
+      anchos son los que separan un puño de su propio cuerpo, no los que separan
+      dos figuras. Sus puños y sus pies flotan despegados.
+    - **K-medias pesada por área**, que es lo que había: con las poses repartidas
+      desparejo —un salto tiene la figura del ápice corrida hacia arriba y las de
+      los costados más juntas— arrancaba con los centros repartidos parejo y
+      convergía torcida. En la hoja de salto de Kor dejó un cuadro con dos
+      cuerpos y otro con dos puños sueltos y ningún cuerpo.
+
+    El ancla no converge a nada: es la mancha grande, y la mancha grande es el
+    cuerpo. Por eso no depende de cómo estén repartidas las poses.
+    """
+    if cuantos <= 1:
+        return set()
+    lo, hi = min(centros), max(centros)
+    # Dos figuras no pueden estar más juntas que media separación pareja; los
+    # pedazos sueltos de una misma figura, sí.
+    sep = (hi - lo) / (cuantos * 2)
+    orden = sorted(range(len(centros)), key=lambda i: -pesos[i])
+    nucleos: list[int] = []
+    while True:
+        nucleos = []
+        for i in orden:
+            if all(abs(centros[i] - centros[j]) >= sep for j in nucleos):
+                nucleos.append(i)
+                if len(nucleos) == cuantos:
+                    break
+        if len(nucleos) == cuantos or sep <= 0:
+            break
+        sep /= 2
+
+    ancla = sorted(centros[i] for i in nucleos)
+    asignado = [min(range(len(ancla)), key=lambda j: abs(c - ancla[j]))
+                for c in centros]
+    # Los centros vienen ordenados y las anclas también, así que la asignación
+    # es monótona: se corta donde cambia de grupo.
+    return {i for i in range(len(centros) - 1) if asignado[i] != asignado[i + 1]}
+
+
+def figuras_de_la_hoja(hoja: Path, esperadas: int = 0) -> list[Image.Image]:
+    """Separa las figuras de una hoja de poses sobre blanco.
+
+    Se buscan las manchas conexas y después se agrupan en figuras cortando por
+    los huecos más grandes entre centros. Hacen falta los dos pasos:
+
+    - Sólo por columnas vacías no alcanza: en las hojas de golpe el puño
+      extendido de una figura se mete en la columna de la siguiente.
+    - Sólo por manchas tampoco: Kor es un gólem con los puños y los pies
+      FLOTANDO despegados del cuerpo, así que cada pose suya son cinco manchas
+      sueltas y saldrían como cinco figuras.
+
+    Cortar por los huecos grandes resuelve los dos casos, porque la distancia
+    entre dos figuras siempre es mayor que la distancia entre las partes de una.
+
+    **El etiquetado va a escala reducida.** Una hoja de Kling son cuatro
+    megapíxeles y el relleno por líneas es Python: a resolución completa tarda
+    minutos. A un tercio son nueve veces menos píxeles y la agrupación no
+    cambia, porque lo único que se decide acá es qué mancha va con cuál. El
+    recorte final sí sale de la imagen entera.
+
+    `esperadas` es cuántas figuras tiene que haber. No cambia el corte: sólo
+    grita si no dio, que es la diferencia entre enterarse acá o descubrirlo
+    mirando una hoja con el personaje partido al medio.
     """
     im = sin_borde(Image.open(hoja).convert('RGB'))
-    tinta = np.asarray(im).astype(int).sum(axis=2) < 730
+    tinta = tinta_de(np.asarray(im).astype(np.int16))
+
+    ESCALA = 3
+    chico = Image.fromarray(tinta.astype(np.uint8) * 255, 'L').resize(
+        (max(1, im.width // ESCALA), max(1, im.height // ESCALA)), Image.BOX)
+    # Umbral bajo: al encoger, una línea fina se diluye, y perderla partiría una
+    # figura en dos.
+    mask = np.asarray(chico) > 20
+
     manchas = []
-    pendiente = tinta.copy()
-    while pendiente.any():
-        ys, xs = np.nonzero(pendiente)
-        mancha = manchar(tinta, [(int(xs[0]), int(ys[0]))])
+    pendiente = mask.copy()
+    ancho_chico = mask.shape[1]
+    while True:
+        # `argmax` sobre el aplanado y no `nonzero`: nonzero materializa un
+        # arreglo con TODOS los índices encendidos en cada vuelta, y son
+        # millones.
+        plano = pendiente.reshape(-1)
+        i = int(plano.argmax())
+        if not plano[i]:
+            break
+        mancha = manchar(mask, [(i % ancho_chico, i // ancho_chico)])
         pendiente &= ~mancha
         manchas.append(mancha)
     if not manchas:
@@ -172,16 +303,65 @@ def figuras_de_la_hoja(hoja: Path) -> list[Image.Image]:
 
     # Las motas —una garra suelta, un resto de firma— se descartan por tamaño.
     pesos = [int(m.sum()) for m in manchas]
-    corte = max(pesos) * 0.05
-    figuras = [m for m, p in zip(manchas, pesos) if p >= corte]
-    # De izquierda a derecha, que es el orden en que se leen las poses.
-    figuras.sort(key=lambda m: float(np.nonzero(m.any(axis=0))[0].mean()))
+    corte = max(pesos) * 0.004
+    manchas = [m for m, w in zip(manchas, pesos) if w >= corte]
+
+    # Y las REGLAS: la línea de piso, fina y larguísima, que el generador dibuja
+    # aunque se le pida que no. Pega todas las figuras en una sola mancha y hay
+    # que sacarla antes de agrupar. Se reconoce por la proporción: ninguna parte
+    # de un personaje mide veinte veces más de ancho que de alto.
+    def es_regla(m):
+        filas = np.nonzero(m.any(axis=1))[0]
+        cols = np.nonzero(m.any(axis=0))[0]
+        return (cols[-1] - cols[0] + 1) > (filas[-1] - filas[0] + 1) * 20
+    manchas = [m for m in manchas if not es_regla(m)]
+    if not manchas:
+        raise SystemExit(f'{hoja}: sólo se encontraron líneas, ninguna figura')
+
+    centros = []
+    for m in manchas:
+        cols = np.nonzero(m.any(axis=0))[0]
+        centros.append(((int(cols[0]) + int(cols[-1])) / 2, m))
+    centros.sort(key=lambda c: c[0])
+
+    if esperadas > 0:
+        if len(centros) < esperadas:
+            raise SystemExit(
+                f'{hoja}: sólo se encontraron {len(centros)} manchas y se '
+                f'esperaban {esperadas} figuras. Mirá la hoja: seguro dos poses '
+                f'se tocan.')
+        cortes = agrupar_por_centro([c for c, _ in centros], esperadas,
+                                    [int(m.sum()) for _, m in centros])
+    else:
+        # Sin número esperado se cortan los huecos que pasen la mitad del mayor.
+        saltos = [centros[i + 1][0] - centros[i][0] for i in range(len(centros) - 1)]
+        umbral = max(saltos) * 0.5 if saltos else 0
+        cortes = {i for i, s in enumerate(saltos) if s >= umbral}
+
+    grupos, actual = [], centros[0][1]
+    for i in range(len(centros) - 1):
+        if i in cortes:
+            grupos.append(actual)
+            actual = centros[i + 1][1]
+        else:
+            actual = actual | centros[i + 1][1]
+    grupos.append(actual)
+
+    if esperadas and len(grupos) != esperadas:
+        raise SystemExit(
+            f'{hoja}: salieron {len(grupos)} figuras y se esperaban {esperadas}.')
 
     a = np.asarray(im)
     salida = []
-    for mancha in figuras:
+    for grupo in grupos:
+        # De vuelta a resolución completa. El engorde de dos píxeles cubre el
+        # borde que el achique se comió; lo que sobra no molesta porque después
+        # se corta contra la tinta de verdad.
+        gordo = Image.fromarray(grupo.astype(np.uint8) * 255, 'L').filter(
+            ImageFilter.MaxFilter(5)).resize((im.width, im.height), Image.NEAREST)
+        dentro = (np.asarray(gordo) > 0) & tinta
         tira = np.full_like(a, 255)
-        tira[mancha] = a[mancha]
+        tira[dentro] = a[dentro]
         salida.append(Image.fromarray(tira))
     return salida
 
@@ -197,7 +377,7 @@ def cuadros_del_clip(clip: Path, desde: float, hasta: float) -> list[Image.Image
         rutas = sorted(Path(tmp).glob('*.png'))
         if not rutas:
             raise SystemExit(f'{clip}: el tramo {desde}-{hasta} no dio cuadros')
-        return [sin_borde(Image.open(r).convert('RGB')) for r in rutas]
+        return [sin_borde(Image.open(r).convert('RGB'), piso=False) for r in rutas]
 
 
 def recortar(cuadro: Image.Image) -> tuple[Image.Image, tuple[float, float], float]:
@@ -268,8 +448,10 @@ def main() -> None:
             crudos = diezmar(crudos, CUADROS)
         else:
             # Una hoja de poses ya viene diezmada: cada figura es un cuadro
-            # clave y sacar uno rompe la acción.
-            crudos = figuras_de_la_hoja(origen)
+            # clave y sacar uno rompe la acción. El número que sigue a los dos
+            # puntos es cuántas figuras tiene que haber.
+            esperadas = int(partes[1]) if len(partes) > 1 and partes[1] else 0
+            crudos = figuras_de_la_hoja(origen, esperadas)
         piezas = [recortar(c) for c in crudos]
         if alto_crudo is None:
             # La mediana y no el máximo: un cuadro con el brazo en alto no puede

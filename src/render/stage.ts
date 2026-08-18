@@ -74,19 +74,7 @@ export async function stageNames(): Promise<string[]> {
  * no tirar la escena entera.
  */
 export async function loadStage(name: string): Promise<Texture | null> {
-  const url = `/escenarios/${name.toLowerCase()}/fondo.jpg`;
-  try {
-    if (assetEmbedded(url)) return await Assets.load<Texture>(assetUrl(url));
-    const response = await fetch(url, { method: 'HEAD' });
-    if (!response.ok) return null;
-    // El servidor de desarrollo de Vite responde el index.html con estado 200
-    // para cualquier ruta que no conoce, así que el estado solo no alcanza.
-    const type = response.headers.get('content-type') ?? '';
-    if (!type.startsWith('image/')) return null;
-    return await Assets.load<Texture>(url);
-  } catch {
-    return null;
-  }
+  return loadTexture(`/escenarios/${name.toLowerCase()}/fondo.jpg`);
 }
 
 /**
@@ -105,15 +93,27 @@ export interface StagePlatforms {
   lado: Texture;
 }
 
+/**
+ * Una textura de escenario, o `null` si no está.
+ *
+ * **Sin sondeo `HEAD` previo.** Antes se preguntaba con `HEAD` si el archivo
+ * existía y recién después se pedía con `Assets.load`, para distinguir un 404
+ * de verdad del `index.html` que Vite devuelve con estado 200 para cualquier
+ * ruta que no conoce. Dos pedidos a la MISMA url es justo lo que rompe: la
+ * respuesta al `HEAD` trae `Content-Length` y ningún cuerpo, el navegador
+ * archiva esa entrada de caché, y el `GET` que viene atrás sale abortado y su
+ * promesa **no se resuelve nunca**. `Assets.load` queda colgado, `startGame`
+ * nunca vuelve, el juego no engancha su tick y lo que se ve es el HUD vivo
+ * sobre una pantalla negra, con `0.0 ms` de frame. Fue exactamente lo que se vio
+ * en la página publicada, y lo que hacía que a veces anduviera y a veces no:
+ * dependía de qué hubiera en la caché.
+ *
+ * Un solo pedido, y el caso del `index.html` se resuelve igual: `Assets.load`
+ * no puede decodificar HTML como imagen y rechaza, que es lo mismo que un 404.
+ */
 async function loadTexture(url: string): Promise<Texture | null> {
   try {
-    if (assetEmbedded(url)) return await Assets.load<Texture>(assetUrl(url));
-    const response = await fetch(url, { method: 'HEAD' });
-    if (!response.ok) return null;
-    // Vite responde el index.html con 200 para rutas que no conoce.
-    const type = response.headers.get('content-type') ?? '';
-    if (!type.startsWith('image/')) return null;
-    return await Assets.load<Texture>(url);
+    return await Assets.load<Texture>(assetEmbedded(url) ? assetUrl(url) : url);
   } catch {
     return null;
   }

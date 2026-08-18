@@ -1,4 +1,4 @@
-import { Application, Container, Graphics, Sprite } from 'pixi.js';
+import { Application, Assets, Container, Graphics, Sprite } from 'pixi.js';
 import type { Texture } from 'pixi.js';
 import { AdvancedBloomFilter } from 'pixi-filters/advanced-bloom';
 import { ShockwaveFilter } from 'pixi-filters/shockwave';
@@ -162,6 +162,56 @@ export interface GameHandle {
   destroy(): void;
 }
 
+/**
+ * Espera una carga, pero no para siempre.
+ *
+ * Todo lo que el juego carga es OPCIONAL: sin fondo hay color plano, sin losas
+ * hay barras de color, sin arte hay muñeco vectorial, sin hoja hay muñeco
+ * articulado. Ninguna de esas ausencias es un error… **siempre que la carga
+ * TERMINE**. Una que no vuelve nunca sí es fatal, porque `startGame` no llega a
+ * enganchar su tick: queda el HUD vivo sobre una pantalla negra y el medidor de
+ * frame en `0.0 ms`. Es lo que se vio en la página publicada.
+ *
+ * Y pasa de verdad: el cargador de Pixi decodifica imágenes en un worker, y un
+ * pedido abortado —por caché envenenada, por red que se corta a mitad— deja la
+ * promesa colgada sin rechazar. Contra eso no alcanza con un `catch`.
+ *
+ * El límite es generoso a propósito: veinticinco segundos. No está para exigir
+ * velocidad —seis hojas de sprites son once megas, y por una conexión de
+ * teléfono eso tarda— sino para que una carga que no vuelve NUNCA no se lleve
+ * puesta la pelea. Lo que llegue más tarde llega tarde y no se usa.
+ */
+function sinColgarse<T>(carga: Promise<T>, queEs: string): Promise<T | null> {
+  return Promise.race([
+    carga.catch(() => null),
+    new Promise<null>((listo) => setTimeout(() => {
+      console.warn(`BorderBrawlers: ${queEs} tardó demasiado; se sigue sin eso.`);
+      listo(null);
+    }, 25000)),
+  ]);
+}
+
+/** Si ya se inicializó el cargador. Vite recarga el módulo, no la página. */
+let cargadorListo = false;
+
+/**
+ * Enciende el cargador de Pixi **sin detección de formatos**.
+ *
+ * Pixi lo arranca solo la primera vez que se le pide un archivo, y antes de
+ * bajar nada prueba si el navegador entiende webp y avif decodificando dos
+ * imágenes de muestra. Acá esa prueba no sirve para nada —el arte es PNG y JPG,
+ * no hay variantes que elegir— y sí puede colgarse: la decodificación va a un
+ * worker, y con la GPU emulada por software o la máquina ocupada esa promesa a
+ * veces no vuelve. Colgada la detección, **todo** `Assets.load` queda esperando
+ * y ni siquiera sale el pedido a la red: sin fondo, sin losas, sin personajes,
+ * y el juego sin enganchar su tick. Eso era la pantalla negra con el HUD vivo.
+ */
+async function arrancarCargador(): Promise<void> {
+  if (cargadorListo) return;
+  cargadorListo = true;
+  await Assets.init({ skipDetections: true });
+}
+
 export async function startGame(
   host: HTMLElement,
   match: Match,
@@ -177,7 +227,24 @@ export async function startGame(
     autoDensity: true,
     resolution: Math.min(window.devicePixelRatio || 1, 2),
   });
+  await arrancarCargador();
   host.appendChild(app.canvas);
+
+  /**
+   * `resizeTo` de Pixi mide el elemento **al arrancar** y después sólo vuelve a
+   * medir cuando la VENTANA dispara `resize`. Adentro de un iframe eso no pasa
+   * nunca: el iframe crece cuando su página se acomoda, la ventana no cambia de
+   * tamaño, y el renderer se queda con la medida que tenía el host antes de que
+   * hubiera canvas adentro. Se ve como el juego dibujado en un rincón —o como
+   * una pantalla negra, si el host todavía medía cero—, con el HUD, que es DOM,
+   * perfectamente ubicado. Fue exactamente lo que se vio en la página publicada.
+   *
+   * Un `ResizeObserver` sobre el host avisa de cualquier cambio de caja, el
+   * primer layout incluido, que es justo lo que falta.
+   */
+  const observador = new ResizeObserver(() => app.resize());
+  observador.observe(host);
+  app.resize();
 
   const backdrop = createBackdrop();
   // El fondo pintado va debajo de los cristales de volumen, que son el dato.
@@ -188,7 +255,8 @@ export async function startGame(
   // —onda de choque, hitstop, media docena volando—, así que el corte se
   // esconde ahí adentro en vez de parecer un parpadeo del fondo.
   const rotation = stageName === null ? await stageNames() : [stageName];
-  const stageTextures = (await Promise.all(rotation.map(loadStage)))
+  const stageTextures = (await sinColgarse(
+    Promise.all(rotation.map(loadStage)), 'el fondo del escenario') ?? [])
     .filter((texture): texture is Texture => texture !== null);
   let stageIndex = 0;
   const stage = stageTextures.length === 0 ? null : createStage(stageTextures[0]);
@@ -210,7 +278,9 @@ export async function startGame(
    * de entrada, y la mayoría de los escenarios todavía no tiene losas propias.
    * Con `?stage=` —que es el modo de mirar un escenario— coincide siempre.
    */
-  const platformArt = rotation.length === 0 ? null : await loadPlatforms(rotation[0]);
+  const platformArt = rotation.length === 0
+    ? null
+    : await sinColgarse(loadPlatforms(rotation[0]), 'las losas');
   const platforms = new Graphics();
   const platformSprites = platformArt === null ? null : buildStageSprites(platformArt);
   if (platformSprites === null) {
@@ -228,7 +298,9 @@ export async function startGame(
   // ahí no hay tiempo de ir a buscar una imagen. El que no lo tenga dibujado
   // todavía devuelve null y sale vectorial, en la misma pelea.
   const armatures = [...new Set(ROSTER.map((character) => character.armature))];
-  const loaded = await Promise.all(armatures.map((name) => loadArt(name)));
+  const loaded = await sinColgarse(
+    Promise.all(armatures.map((name) => loadArt(name))), 'el arte cortado')
+    ?? armatures.map(() => null);
   const artByArmature = new Map<string, FighterArt | null>(
     armatures.map((name, i) => [name, loaded[i]]),
   );
@@ -236,7 +308,9 @@ export async function startGame(
   // Y las hojas de sprites, con el mismo criterio: el que la tenga se dibuja
   // cuadro por cuadro, el que no sigue con el muñeco de piezas. Los dos en la
   // misma pelea.
-  const sheeted = await Promise.all(armatures.map((name) => loadSheets(name)));
+  const sheeted = await sinColgarse(
+    Promise.all(armatures.map((name) => loadSheets(name))), 'las hojas de sprites')
+    ?? armatures.map(() => null);
   const sheetsByArmature = new Map<string, FighterSheets | null>(
     armatures.map((name, i) => [name, sheeted[i]]),
   );
@@ -509,6 +583,7 @@ export async function startGame(
     app,
     destroy(): void {
       app.ticker.remove(tick);
+      observador.disconnect();
       backdrop.destroy();
       // El caché de `Assets` sobrevive al `Application`: sin esto, cada recarga
       // en caliente de Vite deja otra copia de las hojas en memoria de GPU.

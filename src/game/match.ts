@@ -268,12 +268,23 @@ export interface Match {
 
   /** Quién está creciendo por equipo, -1 si nadie. */
   growing: Int8Array;
+  /**
+   * Cuántos carriles de los tres usa cada bando. Es lo único que separa un 3v3
+   * de un 1v1: los slots de los carriles de más quedan libres para siempre, y
+   * todos los recorridos que ya saltean los slots vacíos —el turno del ultra,
+   * el cobro de energía, la búsqueda de objetivo— los ignoran sin cambiar nada.
+   *
+   * Existe para poder mirar el motor de pelea con dos peleadores en pantalla en
+   * vez de seis, que es donde se ve si un golpe pega, si el knockback empuja lo
+   * que tiene que empujar y si la cámara sigue a quien corresponde.
+   */
+  lanes: number;
   clock: number;
   /** Sacudón de cámara, decae solo. */
   shake: number;
 }
 
-export function createMatch(): Match {
+export function createMatch(lanes: number = FIGHTERS_PER_TEAM): Match {
   const m: Match = {
     skyline: createSkyline(PLATFORM_COUNT),
     state: createMatchState(),
@@ -306,6 +317,7 @@ export function createMatch(): Match {
     ultra: new Float32Array(2),
     ultraTurn: new Uint8Array(2),
     growing: Int8Array.from([-1, -1]),
+    lanes: Math.min(FIGHTERS_PER_TEAM, Math.max(1, Math.round(lanes))),
     clock: 0,
     shake: 0,
   };
@@ -711,7 +723,9 @@ function guardando(m: Match, i: number): boolean {
 
 function freeSlot(m: Match, team: number): number {
   const from = team === TEAM_GREEN ? 0 : FIGHTERS_PER_TEAM;
-  for (let i = from; i < from + FIGHTERS_PER_TEAM; i++) if (m.slot[i] === SLOT_FREE) return i;
+  // Hasta `m.lanes` y no hasta los tres: es acá, y sólo acá, donde se decide
+  // cuántos peleadores llega a tener un bando.
+  for (let i = from; i < from + m.lanes; i++) if (m.slot[i] === SLOT_FREE) return i;
   return -1;
 }
 
