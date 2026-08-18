@@ -29,13 +29,15 @@ function folderFor(armature: string): string {
   return `/art/${armature.toLowerCase()}`;
 }
 
+import { assetUrl } from './assetUrl';
+
 export async function loadArt(armature: string): Promise<FighterArt | null> {
   const folder = folderFor(armature);
   const url = `${folder}/${armature.toLowerCase()}.json`;
 
   let manifest: Manifest;
   try {
-    const response = await fetch(url);
+    const response = await fetch(assetUrl(url));
     // 404 es "todavía no hay arte", no una falla.
     if (!response.ok) return null;
     // Y tampoco alcanza con el 404: el servidor de desarrollo de Vite responde
@@ -65,7 +67,7 @@ export async function loadArt(armature: string): Promise<FighterArt | null> {
     const file = `${folder}/${spec.file}`;
     let texture: Texture;
     try {
-      texture = await Assets.load<Texture>(file);
+      texture = await Assets.load<Texture>(assetUrl(file));
     } catch {
       throw new Error(`${url} declara "${spec.file}" y no se pudo cargar ${file}`);
     }

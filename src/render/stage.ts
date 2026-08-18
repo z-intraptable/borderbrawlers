@@ -1,4 +1,5 @@
 import { Assets, Sprite, Texture } from 'pixi.js';
+import { assetEmbedded, assetUrl } from '../art/assetUrl';
 
 /**
  * El fondo pintado del escenario, si hay uno.
@@ -42,7 +43,7 @@ export interface Stage {
  */
 export async function stageNames(): Promise<string[]> {
   try {
-    const response = await fetch('/escenarios/lista.json');
+    const response = await fetch(assetUrl('/escenarios/lista.json'));
     if (!response.ok) return [];
     const type = response.headers.get('content-type') ?? '';
     if (!type.includes('json')) return [];
@@ -64,6 +65,7 @@ export async function stageNames(): Promise<string[]> {
 export async function loadStage(name: string): Promise<Texture | null> {
   const url = `/escenarios/${name.toLowerCase()}/fondo.jpg`;
   try {
+    if (assetEmbedded(url)) return await Assets.load<Texture>(assetUrl(url));
     const response = await fetch(url, { method: 'HEAD' });
     if (!response.ok) return null;
     // El servidor de desarrollo de Vite responde el index.html con estado 200
@@ -94,6 +96,7 @@ export interface StagePlatforms {
 
 async function loadTexture(url: string): Promise<Texture | null> {
   try {
+    if (assetEmbedded(url)) return await Assets.load<Texture>(assetUrl(url));
     const response = await fetch(url, { method: 'HEAD' });
     if (!response.ok) return null;
     // Vite responde el index.html con 200 para rutas que no conoce.
