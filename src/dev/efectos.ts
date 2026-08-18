@@ -120,7 +120,7 @@ const CASILLEROS: { titulo: string; tirar(x: number, y: number): void }[] = [
     titulo: 'polvo y estela',
     tirar: (x, y) => {
       dust(fx, x, y - 0.52, 1.2);
-      for (let n = 0; n < 6; n++) trail(fx, x - 0.4 + n * 0.16, y + n * 0.1, 0.3, RED);
+      for (let n = 0; n < 6; n++) trail(fx, x - 0.5 + n * 0.2, y + n * 0.12, 9, 5, 0.16, RED);
     },
   },
 ];

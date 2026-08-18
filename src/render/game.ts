@@ -191,8 +191,15 @@ const CAMERA_Y_LOW = 0.28;
 const PAN_LIMIT_X = STAGE_HALF_WIDTH * 0.3;
 const SHAKE_GAIN = 0.35;
 
-/** A partir de esta rapidez, el peleador deja estela. */
-const TRAIL_SPEED = 7;
+/**
+ * A partir de esta rapidez, el peleador deja estela.
+ *
+ * Subió de 7 a 12. A 7 la dejaba casi siempre —un salto normal ya pasa de 7— y
+ * la estela dejaba de decir "éste va volando" para ser un adorno permanente. A
+ * 12 sale sólo cuando lo mandaron a volar de verdad, que es cuando un rastro
+ * significa algo.
+ */
+const TRAIL_SPEED = 12;
 /**
  * A qué distancia del centro del cuerpo cae el impacto de un puño o una patada.
  *
@@ -533,6 +540,25 @@ export async function startGame(
    * La capa que brilla. Es hija de `world` para heredar la cámara, y lleva el
    * Bloom puesto encima.
    */
+  /**
+   * La marca de bando: una punta de flecha sobre la cabeza de cada peleador.
+   *
+   * **Reemplaza al aura.** La regla del proyecto es que el bando se lee en los
+   * poderes y no en la ropa, y hasta acá lo que lo decía era la estela: una
+   * bola de luz verde o roja pegada al cuerpo. Cumplía la regla y arruinaba el
+   * dibujo, que es de lo que el arte se ocupó seis personajes.
+   *
+   * Una punta ARRIBA de la cabeza dice lo mismo y no tapa nada. Es además lo
+   * que usa el género —Smash pone el indicador de jugador exactamente ahí—, y
+   * como está fuera de la silueta se lee igual con seis en pantalla, con el
+   * fondo claro o con el fondo oscuro.
+   *
+   * Va en su propia capa, encima de los cuerpos y **fuera del Bloom**: sobre la
+   * capa que brilla volvería a ser una mancha, que es justo lo que se sacó.
+   */
+  const marcas = new Graphics();
+  world.addChild(marcas);
+
   const glowFx = new Graphics();
   const glowLayer = new Container();
   glowLayer.addChild(glowFx);
@@ -632,6 +658,7 @@ export async function startGame(
     applyCamera(world, app, camera, match.shake);
     drawFighters(views, match, action, actionAge, dtPelea, elapsed, cobrarGolpe);
     drawFx(fx, plainFx, glowFx);
+    drawMarcas(marcas, match);
 
     /* --- fondo ------------------------------------------------------- */
     const { ancho: width, alto: height } = pantalla(app);
@@ -857,14 +884,55 @@ export async function startGame(
 
 /* ------------------------------------------------------------------ */
 
-/** Un punto de estela por frame en el que sale volando. */
+/** Alto de la punta de bando, y a cuánto de la cabeza flota. */
+const MARCA_ALTO = 0.26;
+const MARCA_AIRE = 0.3;
+
+/**
+ * La punta de bando sobre cada cabeza. Ver la capa `marcas`.
+ *
+ * Es un triángulo apuntando al peleador, con un borde oscuro para que se lea
+ * también sobre un fondo claro —los escenarios pintados van de un desierto
+ * blanco a una cripta negra, y un verde puro se pierde en el primero—.
+ */
+function drawMarcas(g: Graphics, match: Match): void {
+  g.clear();
+  for (let i = 0; i < match.slot.length; i++) {
+    if (match.slot[i] !== SLOT_ACTIVE) continue;
+    const escala = match.scale[i];
+    const x = match.x[i];
+    // Y de PANTALLA: la del mundo crece para arriba y la de Pixi para abajo.
+    const cima = -(match.y[i] + FIGHTER_HALF_HEIGHT * escala + MARCA_AIRE * escala);
+    const media = MARCA_ALTO * escala * 0.62;
+    const alto = MARCA_ALTO * escala;
+    g.moveTo(x, cima);
+    g.lineTo(x - media, cima - alto);
+    g.lineTo(x + media, cima - alto);
+    g.closePath();
+    g.fill({ color: match.team[i] === TEAM_GREEN ? GREEN : RED, alpha: 0.9 });
+    g.stroke({ width: 0.035, color: 0x0b0f19, alpha: 0.85 });
+  }
+}
+
+/**
+ * Un tramo de estela por cuadro en el que sale volando, DETRÁS del cuerpo.
+ *
+ * El desplazamiento hacia atrás es lo que hace que sea una estela y no un aura:
+ * emitida en el centro, la partícula queda encima del dibujo y lo tapa. Medio
+ * cuerpo atrás, queda donde el peleador ya no está, que es de donde viene.
+ */
 function emitTrails(match: Match, target: ReturnType<typeof createFx>): void {
   for (let i = 0; i < match.slot.length; i++) {
     if (match.slot[i] !== SLOT_ACTIVE) continue;
-    const speed = Math.hypot(match.vx[i], match.vy[i]);
+    const vx = match.vx[i];
+    const vy = match.vy[i];
+    const speed = Math.hypot(vx, vy);
     if (speed < TRAIL_SPEED) continue;
     const color = match.team[i] === TEAM_GREEN ? GREEN : RED;
-    trail(target, match.x[i], match.y[i], 0.3 * match.scale[i], color);
+    const atras = (FIGHTER_HALF_HEIGHT * match.scale[i]) / speed;
+    trail(target,
+      match.x[i] - vx * atras, match.y[i] - vy * atras,
+      vx, vy, 0.16 * match.scale[i], color);
   }
 }
 

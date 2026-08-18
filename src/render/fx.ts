@@ -276,9 +276,24 @@ export function wave(fx: Fx, x: number, y: number, radius: number, life: number,
   spawn(fx, FX_WAVE, x, y, 0, 0, radius, life, color);
 }
 
-/** Un punto de estela. Se emite por frame en el que sale volando. */
-export function trail(fx: Fx, x: number, y: number, size: number, color: number): void {
-  spawn(fx, FX_TRAIL, x, y, 0, 0, size, 0.22, color);
+/**
+ * Un tramo de estela, en el sentido en que va el cuerpo.
+ *
+ * **Antes era un círculo relleno en el centro del peleador, emitido todos los
+ * cuadros.** A sesenta por segundo y con 0,22 s de vida son trece círculos
+ * apilados exactamente en el mismo punto, sobre la capa que lleva Bloom: no se
+ * veía una estela, se veía **una bola de luz pegada al cuerpo** que tapaba el
+ * dibujo. Era lo que más ensuciaba la pantalla y lo más fácil de confundir con
+ * un efecto de poder.
+ *
+ * Una estela es un rastro: va DETRÁS y tiene la forma de por dónde se pasó. Se
+ * guarda la velocidad —la partícula no se mueve, `VUELA` la deja quieta— y se
+ * dibuja como un trazo orientado que se afina al apagarse.
+ */
+export function trail(
+  fx: Fx, x: number, y: number, vx: number, vy: number, size: number, color: number,
+): void {
+  spawn(fx, FX_TRAIL, x, y, vx, vy, size, 0.2, color);
 }
 
 export function updateFx(fx: Fx, dt: number): void {
@@ -427,10 +442,22 @@ export function drawFx(fx: Fx, plain: Graphics, glow: Graphics): void {
         glow.fill({ color, alpha: 0.45 + fade * 0.55 });
         break;
       }
-      case FX_TRAIL:
-        ovalo(glow, px, py, fx.size[i] * fade, fx.size[i] * fade);
-        glow.fill({ color, alpha: fade * 0.5 });
+      case FX_TRAIL: {
+        // Un trazo hacia atrás, largo según lo rápido que iba. Sin velocidad
+        // —no debería pasar— no se dibuja nada, que es mejor que un punto.
+        const rapidez = Math.hypot(fx.vx[i], fx.vy[i]);
+        if (rapidez < 1e-4) break;
+        const largo = Math.min(0.7, rapidez * 0.05);
+        glow.moveTo(px, py);
+        glow.lineTo(px - (fx.vx[i] / rapidez) * largo, py + (fx.vy[i] / rapidez) * largo);
+        glow.stroke({
+          width: fx.size[i] * fade,
+          color,
+          alpha: fade * 0.55,
+          cap: 'round',
+        });
         break;
+      }
       default: {
         const r = fx.size[i] * (1 + t * 1.6);
         ovalo(plain, px, py, r, r);
