@@ -25,12 +25,29 @@ import { join } from 'node:path';
 
 const RAIZ = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const PUBLIC = join(RAIZ, 'public');
-const SALIDA = join(RAIZ, 'shots', 'borderbrawlers.html');
+const SALIDA_JUEGO = join(RAIZ, 'shots', 'borderbrawlers.html');
+const SALIDA_BANCO = join(RAIZ, 'shots', 'banco.html');
 /** La misma página sin `<html>` propio: es lo que espera el publicador. */
-const FRAGMENTO = join(RAIZ, 'shots', 'borderbrawlers-artefacto.html');
+const FRAGMENTO_JUEGO = join(RAIZ, 'shots', 'borderbrawlers-artefacto.html');
+const FRAGMENTO_BANCO = join(RAIZ, 'shots', 'banco-artefacto.html');
 
 /** Qué escenario se lleva. Uno solo: cinco fondos son cinco veces el peso. */
 const ESCENARIO = process.argv[2] ?? 'lich';
+/**
+ * Qué página se empaqueta: la pelea o el banco de animación.
+ *
+ *     node scripts/artefacto.mjs lich juego   -> shots/borderbrawlers.html
+ *     node scripts/artefacto.mjs lich banco   -> shots/banco.html
+ *
+ * Son el mismo empaquetado con otro punto de entrada. El banco existe para
+ * mirar la animación de un personaje sin la pelea encima, y publicarlo cuesta
+ * una entrada más porque todo lo caro —el reescalado del arte y el bundle— ya
+ * estaba escrito.
+ */
+const MODO = process.argv[3] ?? 'juego';
+if (MODO !== 'juego' && MODO !== 'banco') {
+  throw new Error(`modo desconocido: ${MODO} (juego | banco)`);
+}
 /**
  * Alto de figura, en píxeles, con el que se embarca el arte.
  *
@@ -84,6 +101,29 @@ for carpeta in sorted((publico / 'art').iterdir()):
     poner(f'art/{carpeta.name}/{manifiestos[0].name}',
           json.dumps(m).encode(), 'application/json')
 
+    # --- y la hoja de sprites, si el personaje la tiene ---
+    hojas = carpeta / 'hojas.json'
+    if hojas.exists():
+        h = json.loads(hojas.read_text())
+        im = Image.open(carpeta / h['file']).convert('RGBA')
+        # La figura de pie mide unit * 104 px en la hoja, igual que en las
+        # piezas, así que el mismo criterio de reescalado vale para las dos.
+        f2 = min(1.0, alto_figura / (h['unit'] * 104))
+        if f2 < 1:
+            im = im.resize((max(1, round(im.width * f2)),
+                            max(1, round(im.height * f2))), Image.LANCZOS)
+            for animacion in h['animations'].values():
+                for cuadro in animacion['frames']:
+                    # El rectángulo se mueve con la imagen; el ancla no, porque
+                    # va en fracción del rectángulo y esa fracción no cambia.
+                    cuadro['rect'] = [round(v * f2) for v in cuadro['rect']]
+            h['unit'] = h['unit'] * f2
+            h['cell'] = [round(v * f2) for v in h['cell']]
+        buf = io.BytesIO(); im.save(buf, 'PNG', optimize=True)
+        poner(f'art/{carpeta.name}/{h["file"]}', buf.getvalue(), 'image/png')
+        poner(f'art/{carpeta.name}/hojas.json', json.dumps(h).encode(),
+              'application/json')
+
 # --- escenario: un solo fondo y sus dos losas ---
 carpeta = publico / 'escenarios' / escenario
 fondo = Image.open(carpeta / 'fondo.jpg').convert('RGB')
@@ -136,9 +176,12 @@ const mapa = JSON.parse(crudo);
 // El entry va DENTRO del repo, no en /tmp: esbuild resuelve `pixi.js` desde la
 // carpeta del archivo que importa, y desde /tmp no hay node_modules arriba.
 const entrada = join(RAIZ, '.artefacto-entrada.js');
+const punto = MODO === 'banco'
+  ? join(RAIZ, 'src', 'dev', 'demo.ts')
+  : join(RAIZ, 'src', 'main.ts');
 writeFileSync(entrada, [
   "import 'pixi.js/unsafe-eval';",
-  `import ${JSON.stringify(join(RAIZ, 'src', 'main.ts'))};`,
+  `import ${JSON.stringify(punto)};`,
 ].join('\n'));
 
 const bundle = join(tmp, 'bundle.js');
@@ -159,10 +202,14 @@ console.log(`  bundle ${(codigo.length / 1e6).toFixed(1)} MB`);
 
 // El juego lee sus opciones de la query string, y un archivo abierto de un doble
 // clic no tiene ninguna. Se las ponemos antes de que el bundle las lea.
+const query = MODO === 'banco'
+  ? `?quien=Ragnir&stage=${ESCENARIO}`
+  : `?source=mock&scenario=volatile&stage=${ESCENARIO}`;
+const marca = MODO === 'banco' ? 'quien=' : 'source=';
 const arranque = `
   window.__BB_ASSETS__ = ${JSON.stringify(mapa)};
-  if (!location.search.includes('source=')) {
-    history.replaceState(null, '', location.pathname + '?source=mock&scenario=volatile&stage=${ESCENARIO}');
+  if (!location.search.includes(${JSON.stringify(marca)})) {
+    history.replaceState(null, '', location.pathname + ${JSON.stringify(query)});
   }
 `;
 
@@ -182,7 +229,8 @@ html,body{margin:0;padding:0;height:100%;background:#0B0F19;overflow:hidden}
 #root{position:relative;width:100vw;height:100vh;background:#0B0F19}
 ${estilos}`;
 
-const cuerpo = `<title>BorderBrawlers</title>
+const titulo = MODO === 'banco' ? 'BorderBrawlers — banco' : 'BorderBrawlers';
+const cuerpo = `<title>${titulo}</title>
 <style>${estilo}</style>
 <div id="root"></div>
 <script>${arranque}</script>
@@ -200,6 +248,8 @@ ${cuerpo}</head>
 </html>
 `;
 
+const SALIDA = MODO === 'banco' ? SALIDA_BANCO : SALIDA_JUEGO;
+const FRAGMENTO = MODO === 'banco' ? FRAGMENTO_BANCO : FRAGMENTO_JUEGO;
 writeFileSync(SALIDA, html);
 writeFileSync(FRAGMENTO, cuerpo);
 console.log(`listo: ${SALIDA} — ${(html.length / 1e6).toFixed(1)} MB`);

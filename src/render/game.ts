@@ -35,6 +35,9 @@ import {
 import { lookFor } from '../art/looks';
 import { loadArt, unloadArt } from '../art/loadArt';
 import type { FighterArt } from '../art/loadArt';
+import { loadSheets, unloadSheets } from '../art/loadSheets';
+import type { FighterSheets } from '../art/loadSheets';
+import { createSpriteFighterView } from '../art/spriteFighter';
 import { ROSTER, characterFor } from '../game/roster';
 import { burst, createFx, drawFx, dust, ring, trail, updateFx } from './fx';
 import { createBackdrop } from './backdrop';
@@ -230,6 +233,14 @@ export async function startGame(
     armatures.map((name, i) => [name, loaded[i]]),
   );
 
+  // Y las hojas de sprites, con el mismo criterio: el que la tenga se dibuja
+  // cuadro por cuadro, el que no sigue con el muñeco de piezas. Los dos en la
+  // misma pelea.
+  const sheeted = await Promise.all(armatures.map((name) => loadSheets(name)));
+  const sheetsByArmature = new Map<string, FighterSheets | null>(
+    armatures.map((name, i) => [name, sheeted[i]]),
+  );
+
   /**
    * Un cuerpo articulado por personaje, no por slot.
    *
@@ -246,11 +257,14 @@ export async function startGame(
    */
   const viewByArmature = new Map<string, FighterView>();
   for (const character of ROSTER) {
-    const view = createFighterView(
-      lookFor(character.armature),
-      character.team === TEAM_GREEN ? GREEN : RED,
-      artByArmature.get(character.armature) ?? null,
-    );
+    const sheets = sheetsByArmature.get(character.armature) ?? null;
+    const view = sheets !== null
+      ? createSpriteFighterView(sheets)
+      : createFighterView(
+        lookFor(character.armature),
+        character.team === TEAM_GREEN ? GREEN : RED,
+        artByArmature.get(character.armature) ?? null,
+      );
     view.visible = false;
     world.addChild(view);
     viewByArmature.set(character.armature, view);
@@ -500,6 +514,9 @@ export async function startGame(
       // en caliente de Vite deja otra copia de las hojas en memoria de GPU.
       for (const art of artByArmature.values()) {
         if (art !== null) void unloadArt(art);
+      }
+      for (const sheets of sheetsByArmature.values()) {
+        if (sheets !== null) void unloadSheets(sheets);
       }
       // `destroy(true, …)` tira también el canvas y las texturas creadas por
       // los Graphics. Cuando entren los sprites del arte hay que sumar

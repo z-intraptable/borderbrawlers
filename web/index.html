@@ -39,6 +39,7 @@
     border:1px solid var(--borde);border-radius:7px;padding:9px 11px;
   }
   select:focus-visible,button:focus-visible{outline:2px solid var(--compra);outline-offset:2px}
+  select:disabled{opacity:.4}
   button{cursor:pointer;border-color:var(--compra);color:var(--compra);font-weight:700;letter-spacing:1px}
   button:hover{background:#0f2a1c}
 
@@ -49,6 +50,7 @@
   .punto{width:9px;height:9px;border-radius:50%;background:var(--tenue);flex:none}
   .punto.vivo{background:var(--compra);box-shadow:0 0 9px var(--compra)}
   .punto.sim{background:var(--oro);box-shadow:0 0 9px var(--oro)}
+  .punto.banco{background:#e2454f;box-shadow:0 0 9px #e2454f}
 
   .nota{
     max-width:1200px;margin:16px auto 0;padding:12px 0 0;border-top:1px solid var(--borde);
@@ -56,6 +58,7 @@
   }
   .nota b{color:var(--texto)}
   .nota code{background:var(--panel2);padding:1px 5px;border-radius:4px;color:var(--oro)}
+  .nota[hidden]{display:none}
 </style>
 </head>
 <body>
@@ -70,6 +73,14 @@
 
 <section class="consola">
   <div class="fila">
+    <div class="campo">
+      <label for="modo">Qué se ve</label>
+      <select id="modo">
+        <option value="juego">La pelea</option>
+        <option value="banco">Banco de animación</option>
+      </select>
+    </div>
+
     <div class="campo">
       <label for="fuente">Datos</label>
       <select id="fuente">
@@ -116,7 +127,7 @@
     <div class="estado"><span class="punto sim" id="punto"></span><span id="leyenda">Simulado</span></div>
   </div>
 
-  <p class="nota">
+  <p class="nota" id="notaJuego">
     <b>Binance en vivo no pide ninguna clave.</b> Los streams públicos de mercado
     —<code>@depth20@100ms</code> y <code>@aggTrade</code>— son abiertos: el navegador
     se conecta directo a <code>wss://data-stream.binance.vision</code> sin cuenta, sin API key
@@ -128,10 +139,24 @@
     ya te da. Si el punto queda en <b>reconnecting</b>, es que la red desde donde mirás
     bloquea el WebSocket de Binance; el modo simulado corre igual y no depende de nada.
   </p>
+
+  <p class="nota" id="notaBanco" hidden>
+    <b>El banco es un personaje solo, corriendo y saltando en el escenario.</b>
+    Existe para mirar la animación sin la pelea encima: en la pelea hay seis
+    peleadores, nueve losas que suben y bajan con la liquidez, chispas y una cámara
+    que persigue, y ahí no hay forma de saber si lo que se ve mal es la carrera o
+    todo lo demás.
+    <br><br>
+    Ragnir está dibujado <b>cuadro por cuadro</b>: doce cuadros de carrera sacados de
+    un clip y cinco poses de salto, con el arco del salto puesto por la física y no
+    por el dibujo. Los otros cinco personajes siguen con el muñeco de piezas
+    articuladas, y los dos conviven en la misma pelea.
+  </p>
 </section>
 
 <script>
   const marco = document.getElementById('marco');
+  const modo = document.getElementById('modo');
   const fuente = document.getElementById('fuente');
   const simbolo = document.getElementById('simbolo');
   const ritmo = document.getElementById('ritmo');
@@ -139,19 +164,37 @@
   const campoRitmo = document.getElementById('campoRitmo');
   const punto = document.getElementById('punto');
   const leyenda = document.getElementById('leyenda');
+  const notaJuego = document.getElementById('notaJuego');
+  const notaBanco = document.getElementById('notaBanco');
 
-  // El ritmo sólo existe en el feed simulado: en vivo lo pone el mercado.
+  // El banco no tiene feed: es un personaje y tres losas quietas. Los controles
+  // de mercado quedan a la vista pero apagados, para que se entienda que no
+  // desaparecieron sino que ahí no aplican.
   function refrescarVisibilidad() {
-    campoRitmo.style.visibility = fuente.value === 'mock' ? 'visible' : 'hidden';
+    const banco = modo.value === 'banco';
+    for (const control of [fuente, simbolo, ritmo]) control.disabled = banco;
+    campoRitmo.style.visibility =
+      !banco && fuente.value === 'mock' ? 'visible' : 'hidden';
+    notaJuego.hidden = banco;
+    notaBanco.hidden = !banco;
   }
 
   function aplicar() {
     const p = new URLSearchParams();
+    p.set('stage', 'lich');
+    if (calidad.value) p.set('quality', calidad.value);
+
+    if (modo.value === 'banco') {
+      p.set('quien', 'Ragnir');
+      marco.src = 'banco.html?' + p.toString();
+      punto.className = 'punto banco';
+      leyenda.textContent = 'Banco · Ragnir';
+      return;
+    }
+
     p.set('source', fuente.value);
     p.set('symbol', simbolo.value);
-    p.set('stage', 'lich');
     if (fuente.value === 'mock') p.set('scenario', ritmo.value);
-    if (calidad.value) p.set('quality', calidad.value);
     // Recargar el iframe es lo que reinicia la pelea: el juego lee sus opciones
     // una vez al arrancar, así que cambiarlas en caliente no tendría efecto.
     marco.src = 'juego.html?' + p.toString();
@@ -163,6 +206,7 @@
       : 'Simulado · ' + simbolo.value.toUpperCase();
   }
 
+  modo.addEventListener('change', () => { refrescarVisibilidad(); aplicar(); });
   fuente.addEventListener('change', refrescarVisibilidad);
   document.getElementById('aplicar').addEventListener('click', aplicar);
   refrescarVisibilidad();
