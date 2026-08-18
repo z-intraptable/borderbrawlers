@@ -20,6 +20,22 @@ export interface SheetFrame {
   anchorY: number;
 }
 
+/** Una animación: sus cuadros y a qué altura tiene los pies. */
+export interface SheetAnimation {
+  frames: SheetFrame[];
+  /**
+   * Unidades de rig del centroide a los pies, EN ESTA POSE.
+   *
+   * Es por animación y no una sola para el personaje porque el centroide de una
+   * silueta no cae a la misma altura en todas: el que corre tiene una pierna
+   * estirada, el que patea una levantada, el que está de pie las dos juntas.
+   * Medido sobre las seis hojas, la pose de pie queda hasta 11 unidades por
+   * encima de la de correr y la patada 8 por debajo — o sea un personaje que
+   * flota parado y se hunde en la losa cuando patea.
+   */
+  ground: number;
+}
+
 export interface FighterSheets {
   /** Cuántos píxeles de la hoja mide una unidad de rig. */
   unit: number;
@@ -29,7 +45,7 @@ export interface FighterSheets {
    * hundido o flotando.
    */
   ground: number;
-  animations: Map<string, SheetFrame[]>;
+  animations: Map<string, SheetAnimation>;
   /** La URL cargada, para poder devolverla después. */
   file: string;
 }
@@ -43,7 +59,7 @@ interface RawSheets {
   file: string;
   unit: number;
   ground: number;
-  animations: Record<string, { frames: RawFrame[] }>;
+  animations: Record<string, { frames: RawFrame[]; ground?: number }>;
 }
 
 function isRawSheets(value: unknown): value is RawSheets {
@@ -82,7 +98,7 @@ export async function loadSheets(armature: string): Promise<FighterSheets | null
   const file = `${folder}/${raw.file}`;
   const base: Texture = await Assets.load(assetUrl(file));
 
-  const animations = new Map<string, SheetFrame[]>();
+  const animations = new Map<string, SheetAnimation>();
   for (const [name, animation] of Object.entries(raw.animations)) {
     const frames: SheetFrame[] = [];
     for (const frame of animation.frames) {
@@ -99,7 +115,14 @@ export async function loadSheets(armature: string): Promise<FighterSheets | null
         anchorY: frame.anchor[1],
       });
     }
-    if (frames.length > 0) animations.set(name, frames);
+    // Sin `ground` propio —un manifiesto viejo— vale el del personaje, que es
+    // lo que había antes: se pierde la corrección, no se rompe nada.
+    if (frames.length > 0) {
+      animations.set(name, {
+        frames,
+        ground: typeof animation.ground === 'number' ? animation.ground : raw.ground,
+      });
+    }
   }
   if (animations.size === 0) throw new Error(`${url}: no trae ninguna animación`);
 

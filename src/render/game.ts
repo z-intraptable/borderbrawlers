@@ -545,6 +545,20 @@ export async function startGame(
   const golpeEquipo = new Uint8Array(match.slot.length);
 
   /**
+   * Lo que hace que el movimiento se vea blando, y que es de dibujo y no de
+   * simulación: la simulación puede cambiar de golpe, el dibujo no.
+   *
+   * `giro` arranca en 1 y no en 0 porque un peleador con el dibujo a escala
+   * cero es un peleador invisible.
+   */
+  const suave: Suavizado = {
+    giro: new Float32Array(match.slot.length).fill(1),
+    golpePiso: new Float32Array(match.slot.length),
+    volaba: new Uint8Array(match.slot.length),
+    vyPrevia: new Float32Array(match.slot.length),
+  };
+
+  /**
    * La capa que brilla. Es hija de `world` para heredar la cámara, y lleva el
    * Bloom puesto encima.
    */
@@ -656,7 +670,7 @@ export async function startGame(
     else placeStage(platformSprites, match);
     updateCamera(camera, match, dt, app.renderer.height / app.renderer.width);
     applyCamera(world, app, camera, match.shake);
-    drawFighters(views, match, action, actionAge, dtPelea, elapsed, cobrarGolpe);
+    drawFighters(views, match, action, actionAge, suave, dtPelea, elapsed, cobrarGolpe);
     drawFx(fx, plainFx, glowFx, inkFx);
 
     /* --- fondo ------------------------------------------------------- */
@@ -972,9 +986,41 @@ function drawStage(g: Graphics, match: Match): void {
   }
 }
 
+/**
+ * Estado de presentación que suaviza lo que la simulación decide de golpe.
+ *
+ * No vive en `Match` a propósito: son constantes de cómo SE VE el movimiento,
+ * y la simulación no tiene por qué saber cuánto tarda un dibujo en darse
+ * vuelta. Es el mismo criterio por el que `action` y `actionAge` están acá.
+ */
+interface Suavizado {
+  /** Hacia dónde mira el dibujo, de -1 a 1. Cruza el cero al darse vuelta. */
+  giro: Float32Array;
+  /** El aplastón que dejó el aterrizaje, apagándose solo. */
+  golpePiso: Float32Array;
+  /** Si venía por el aire, para pescar el instante en que toca el piso. */
+  volaba: Uint8Array;
+  /** La velocidad vertical del frame anterior: la de impacto. */
+  vyPrevia: Float32Array;
+}
+
+/**
+ * A qué velocidad se da vuelta el dibujo, en unidades de `facing` por segundo.
+ *
+ * `match.facing` salta de -1 a 1 en un frame y espejar el dibujo de golpe es
+ * exactamente el tirón que se ve como movimiento duro. A 9 por segundo la
+ * vuelta entera tarda 0,22 s: se lee como que el personaje gira, y sigue siendo
+ * lo bastante rápido como para no mentir sobre hacia dónde está pegando.
+ */
+const GIRO_POR_SEGUNDO = 9;
+/** Cuánto aplasta el aterrizaje más fuerte, y en cuánto se apaga. */
+const GOLPE_PISO = 0.16;
+const GOLPE_PISO_DECAE = 5.5;
+
 function drawFighters(
   views: FighterView[], match: Match,
   action: Uint8Array, actionAge: Float32Array,
+  suave: Suavizado,
   dt: number, elapsed: number,
   cobrarGolpe: (slot: number, x: number, y: number) => void,
 ): void {
@@ -982,8 +1028,11 @@ function drawFighters(
     const view = views[i];
     if (match.slot[i] !== SLOT_ACTIVE) {
       view.visible = false;
-      // Un slot que vuelve a entrar no puede heredar la patada del anterior.
+      // Un slot que vuelve a entrar no puede heredar la patada del anterior,
+      // ni darse vuelta desde donde quedó el que se fue.
       action[i] = ACT_NONE;
+      suave.giro[i] = match.facing[i];
+      suave.golpePiso[i] = 0;
       continue;
     }
     view.visible = true;
@@ -1014,12 +1063,37 @@ function drawFighters(
       action[i], progress, elapsed,
     );
 
+    // El dibujo persigue a la simulación a velocidad finita en vez de espejarse
+    // en un frame. Cruzar por el cero es como se da vuelta un personaje
+    // dibujado: se afina, pasa de perfil y sale del otro lado.
+    const paso = GIRO_POR_SEGUNDO * dt;
+    suave.giro[i] += Math.max(-paso, Math.min(paso, match.facing[i] - suave.giro[i]));
+
+    // Al tocar el piso la simulación pone `vy` en cero en el mismo frame, así
+    // que el aplastón de abajo se apagaría justo cuando tendría que verse. Este
+    // se dispara con la velocidad con la que LLEGÓ —la del frame anterior— y se
+    // apaga solo.
+    const enPiso = match.grounded[i] === 1;
+    if (enPiso && suave.volaba[i] === 1) {
+      suave.golpePiso[i] = Math.min(1, Math.abs(suave.vyPrevia[i]) / 12);
+    }
+    suave.volaba[i] = enPiso ? 0 : 1;
+    suave.vyPrevia[i] = match.vy[i];
+    suave.golpePiso[i] = Math.max(0, suave.golpePiso[i] - dt * GOLPE_PISO_DECAE);
+
     // Squash & stretch: se estira al subir y se aplasta al caer. Es lo que
     // separa un muñeco que se traslada de uno que se mueve.
-    const stretch = Math.max(-0.18, Math.min(0.18, match.vy[i] * 0.014));
+    const stretch = Math.max(-0.22, Math.min(0.18,
+      match.vy[i] * 0.014 - suave.golpePiso[i] * GOLPE_PISO));
     const scale = match.scale[i];
-    view.scale.x = scale * match.facing[i] * (1 - stretch);
+    view.scale.x = scale * suave.giro[i] * (1 - stretch);
     view.scale.y = scale * (1 + stretch);
+    // El contenedor está en el CENTRO del cuerpo, así que estirarlo o aplastarlo
+    // le despega los pies del piso: un personaje que aterriza se hundía y uno
+    // que salta se iba para arriba antes de despegar. Correr el centro medio
+    // aplastón deja los pies clavados, que es de donde sale la sensación de
+    // peso.
+    view.y = -match.y[i] - stretch * FIGHTER_HALF_HEIGHT * scale;
   }
 }
 

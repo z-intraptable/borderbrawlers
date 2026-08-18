@@ -1,5 +1,5 @@
 {
-  "_": "Hoja de sprites armada por scripts/hoja-sprites.py desde los clips de Kling. `anchor` es la fracción del cuadro donde cae el centroide de la silueta, que es el punto que la física mueve, y `ground` es cuántas unidades de rig hay de ese centroide a los pies.",
+  "_": "Hoja de sprites armada por scripts/hoja-sprites.py desde los clips de Kling. `anchor` es la fracción del cuadro donde cae el centroide de la silueta, que es el punto que la física mueve. `ground` es cuántas unidades de rig hay de ese centroide a los pies: el de arriba es el de la primera acción y queda de respaldo, y el de cada animación es el que vale, porque el centroide no cae a la misma altura parado que pateando. Lo escribe scripts/piso-por-accion.py.",
   "file": "hojas.png",
   "cell": [
     317,
@@ -154,7 +154,8 @@
             0.5099
           ]
         }
-      ]
+      ],
+      "ground": 52.025
     },
     "jump": {
       "frames": [
@@ -218,7 +219,8 @@
             0.5326
           ]
         }
-      ]
+      ],
+      "ground": 51.87
     },
     "punch": {
       "frames": [
@@ -246,7 +248,8 @@
             0.5271
           ]
         }
-      ]
+      ],
+      "ground": 52.258
     },
     "idle": {
       "frames": [
@@ -262,7 +265,8 @@
             0.5332
           ]
         }
-      ]
+      ],
+      "ground": 48.244
     },
     "kick": {
       "frames": [
@@ -290,7 +294,8 @@
             0.4439
           ]
         }
-      ]
+      ],
+      "ground": 56.348
     },
     "skill": {
       "frames": [
@@ -330,7 +335,8 @@
             0.5214
           ]
         }
-      ]
+      ],
+      "ground": 50.241
     },
     "super": {
       "frames": [
@@ -370,7 +376,8 @@
             0.5566
           ]
         }
-      ]
+      ],
+      "ground": 55.154
     },
     "hurt": {
       "frames": [
@@ -386,7 +393,8 @@
             0.4967
           ]
         }
-      ]
+      ],
+      "ground": 46.946
     },
     "fall": {
       "frames": [
@@ -402,7 +410,8 @@
             0.4825
           ]
         }
-      ]
+      ],
+      "ground": 41.543
     }
   }
 }

@@ -523,10 +523,23 @@ def main() -> None:
     # de su alto de colisión son 52 unidades; sin este número el sprite queda
     # hundido en la plataforma o flotando, porque el centroide de un bicho
     # cabezón no cae en el medio de la figura.
+    #
+    # **Se mide POR ACCIÓN.** El centroide de una silueta no cae a la misma
+    # altura en todas las poses: el que corre tiene una pierna estirada, el que
+    # patea una levantada, el que está de pie las dos juntas. Con un solo
+    # número para todo el personaje —que es como estaba— la pose de pie quedaba
+    # flotando hasta 11 unidades de rig y la patada hundida 8 en la plataforma.
+    #
+    # Por acción y no por CUADRO a propósito: adentro de una acción los cuadros
+    # tienen que conservar su movimiento relativo, y pegando cada cuadro al
+    # piso el salto se aplana justo cuando tendría que despegar.
+    pisos: dict[str, float] = {}
+    for nombre, piezas in acciones.items():
+        e = escalas[nombre]
+        pisos[nombre] = round(float(np.median(
+            [(img.height - centro[1]) * e / (ALTO / 104.0) for img, centro, _ in piezas])), 3)
     primera_nombre = next(iter(acciones))
-    escala_primera = escalas[primera_nombre]
-    suelo = float(np.median([(img.height - centro[1]) * escala_primera / (ALTO / 104.0)
-                             for img, centro, _ in acciones[primera_nombre]]))
+    suelo = pisos[primera_nombre]
 
     # Cada acción es una fila. El ancho de celda es el del cuadro más ancho de
     # todas las acciones, para que un solo número alcance para leer la hoja.
@@ -544,8 +557,11 @@ def main() -> None:
     manifiesto = {
         '_': ('Hoja de sprites armada por scripts/hoja-sprites.py desde los clips '
               'de Kling. `anchor` es la fracción del cuadro donde cae el centroide '
-              'de la silueta, que es el punto que la física mueve, y `ground` es '
-              'cuántas unidades de rig hay de ese centroide a los pies.'),
+              'de la silueta, que es el punto que la física mueve. `ground` es '
+              'cuántas unidades de rig hay de ese centroide a los pies: el de '
+              'arriba es el de la primera acción y queda de respaldo, y el de cada '
+              'animación es el que vale, porque el centroide no cae a la misma '
+              'altura parado que pateando.'),
         'file': 'hojas.png',
         'cell': [celda_w, celda_h],
         # Cuántos píxeles de hoja mide una unidad de rig. La figura de pie mide
@@ -569,7 +585,7 @@ def main() -> None:
                 'anchor': [round((MARGEN + centro[0] * escala) / (w + MARGEN * 2), 4),
                            round((MARGEN + centro[1] * escala) / (h + MARGEN * 2), 4)],
             })
-        manifiesto['animations'][nombre] = {'frames': cuadros}
+        manifiesto['animations'][nombre] = {'frames': cuadros, 'ground': pisos[nombre]}
 
     (carpeta / 'hojas.png').write_bytes(b'')
     hoja.save(carpeta / 'hojas.png', 'PNG', optimize=True)

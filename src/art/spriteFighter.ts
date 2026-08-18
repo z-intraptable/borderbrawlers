@@ -1,7 +1,7 @@
 import { Container, Sprite } from 'pixi.js';
 import { ACTION_HIT, ACT_KICK, ACT_NONE, ACT_PUNCH, ACT_SKILL, ACT_SUPER } from './fighter';
 import type { FighterView } from './fighter';
-import type { FighterSheets, SheetFrame } from './loadSheets';
+import type { FighterSheets, SheetAnimation } from './loadSheets';
 
 /**
  * El peleador dibujado cuadro por cuadro, con las hojas que salen de Kling.
@@ -39,6 +39,15 @@ const HALF = 52;
 const RUN_CYCLE = 1.6;
 /** Ciclos por segundo de la respiración, cuando está quieto. */
 const IDLE_HZ = 0.55;
+/**
+ * Cuánto se hincha el cuerpo al respirar, en fracción del alto.
+ *
+ * Existe porque **cinco de los seis tienen UN solo cuadro de `idle`**: sin esto
+ * el peleador quieto es literalmente una estatua, y eso es la mitad de lo que
+ * se ve como movimiento duro. Un 2% de alto es medio pixel en pantalla, pero es
+ * medio pixel que sube y baja, y alcanza para que el cuerpo se lea vivo.
+ */
+const RESPIRO = 0.02;
 
 /**
  * A qué animación va cada acción, en orden de preferencia. La primera que la
@@ -122,7 +131,8 @@ export function createSpriteFighterView(sheets: FighterSheets): FighterView {
    * cuerpo unos píxeles en cada cambio. Eso es exactamente el temblor que la
    * alineación del script existe para sacar.
    */
-  function show(frames: readonly SheetFrame[], index: number): void {
+  function show(animation: SheetAnimation, index: number): void {
+    const frames = animation.frames;
     const frame = frames[Math.max(0, Math.min(frames.length - 1, index))];
     if (frame === undefined) return;
     sprite.texture = frame.texture;
@@ -132,14 +142,37 @@ export function createSpriteFighterView(sheets: FighterSheets): FighterView {
     sprite.x = 0;
     // El centroide queda en el origen del rig; de ahí a los pies hay `ground`
     // unidades, y los pies tienen que caer a `HALF` del centro del cuerpo.
-    sprite.y = HALF - sheets.ground;
+    //
+    // El `ground` es **el de esta animación**, no uno solo para el personaje.
+    // Con uno solo —medido sobre la primera acción, que en la práctica es
+    // correr— la pose de pie quedaba flotando hasta 11 unidades y la patada
+    // hundida 8 en la losa. Es la diferencia entre un personaje apoyado y uno
+    // que levita.
+    sprite.y = HALF - animation.ground;
   }
 
   /** El cuadro de un ciclo que se repite, con el índice envuelto. */
-  function cycle(frames: readonly SheetFrame[], phase: number): void {
-    const n = frames.length;
+  function cycle(animation: SheetAnimation, phase: number): void {
+    const n = animation.frames.length;
     const i = Math.floor(phase * n) % n;
-    show(frames, i < 0 ? i + n : i);
+    show(animation, i < 0 ? i + n : i);
+  }
+
+  /**
+   * Hincha y desinfla el cuerpo, con los pies clavados.
+   *
+   * El ancla del sprite es el centroide, así que escalarlo en Y le mueve los
+   * pies: el personaje respirando se hundiría en la losa y saldría de ella. Los
+   * pies caen a `ground` unidades del ancla, así que compensar es escalar esa
+   * distancia con el mismo factor. El ancho va al revés que el alto porque un
+   * cuerpo que se estira se afina: es lo que hace que se lea como volumen y no
+   * como un zoom.
+   */
+  function respirar(animation: SheetAnimation, fase: number): void {
+    const aire = Math.sin(fase * Math.PI * 2) * RESPIRO;
+    sprite.scale.y = scale * (1 + aire);
+    sprite.scale.x = scale * (1 - aire * 0.5);
+    sprite.y = HALF - animation.ground * (1 + aire);
   }
 
   /** Cuánto se recorrió, para que la carrera avance con la distancia. */
@@ -161,7 +194,7 @@ export function createSpriteFighterView(sheets: FighterSheets): FighterView {
       // juego donde el knockback es la mecánica central se tiene que ver.
       const cual = !grounded && fallAnim !== null ? fallAnim : hurtAnim;
       if (cual !== null) {
-        show(cual, Math.floor(actionT * cual.length));
+        show(cual, Math.floor(actionT * cual.frames.length));
         return;
       }
     }
@@ -169,11 +202,11 @@ export function createSpriteFighterView(sheets: FighterSheets): FighterView {
     if (action !== ACT_NONE) {
       const names = FALLBACK[action] ?? [];
       for (const name of names) {
-        const frames = sheets.animations.get(name);
-        if (frames === undefined) continue;
+        const animation = sheets.animations.get(name);
+        if (animation === undefined) continue;
         // `actionT` ya viene normalizado de 0 a 1 por `game.ts`, así que la
         // acción no necesita reloj propio y no puede quedar desfasada del golpe.
-        show(frames, Math.floor(actionT * frames.length));
+        show(animation, Math.floor(actionT * animation.frames.length));
         sprite.x = (EMBESTIDA[action] ?? 0) * embestida(action, actionT);
         return;
       }
@@ -183,7 +216,7 @@ export function createSpriteFighterView(sheets: FighterSheets): FighterView {
       // El salto no cicla: se recorre según en qué parte del arco está. Subir es
       // la primera mitad de la hoja y caer la segunda, así que la velocidad
       // vertical elige el cuadro directamente.
-      const n = jump.length;
+      const n = jump.frames.length;
       const subiendo = Math.max(-1, Math.min(1, vy / 9));
       show(jump, Math.round((1 - subiendo) * 0.5 * (n - 1)));
       return;
@@ -195,6 +228,7 @@ export function createSpriteFighterView(sheets: FighterSheets): FighterView {
     }
 
     cycle(stand, elapsed * IDLE_HZ);
+    respirar(stand, elapsed * IDLE_HZ);
   };
 
   // Nadie la llama —está declarada en el contrato y verificado que `game.ts` no
