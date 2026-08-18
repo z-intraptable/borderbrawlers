@@ -1,5 +1,17 @@
 /* Smoke test de las reglas de la pelea. Lógica pura: sin three, sin física. */
 import {
+  COST_MELEE,
+  COST_SKILL,
+  COST_SUPER,
+  GROWTH_MAX_STAGE,
+  SUPER_RADIUS,
+  ULTRA_HOLD,
+  addCharge,
+  chargeFromTrade,
+  skillDamage,
+  skillRadius,
+  ultraGain,
+  ultraStage,
   BASE_KNOCKBACK,
   JUMP_COOLDOWN,
   MAX_KNOCKBACK,
@@ -236,6 +248,79 @@ console.log('\n== separación entre compañeros ==');
   // Dos compañeros encimados del mismo lado suman 1,8 sin acotar.
   const piled = separation(6, slots, teams, mk(0, -0.1, -0.2, 0, 0, 0), mk(0, 0, 0, 0, 0, 0), 0);
   check('varios encimados del mismo lado no pasan de 1', piled === 1, `${piled}`);
+}
+
+console.log('\n== la barra de fuerza ==');
+{
+  // La carga se normaliza por la MEDIANA, no por un tamaño absoluto: la escena
+  // tiene que leerse igual en BTC que en un par chico.
+  const medio = chargeFromTrade(100, 100);
+  check('un trade mediano carga lo mismo sea cual sea la escala',
+    Math.abs(chargeFromTrade(0.004, 0.004) - medio) < 1e-9);
+  check('el doble de la mediana carga el doble',
+    Math.abs(chargeFromTrade(200, 100) - medio * 2) < 1e-9);
+  check('hacen falta unos siete trades medianos para llenar una barra',
+    medio > 0.12 && medio < 0.16, `${medio}`);
+
+  // Sin techo, un solo trade monstruoso cargaría para diez descargas y la barra
+  // dejaría de decir nada.
+  const enorme = chargeFromTrade(100_000, 100);
+  check('un trade gigante no carga más que el techo', enorme <= 1.01, `${enorme}`);
+  check('una ballena llena casi una barra de un saque',
+    enorme > 0.9, `${enorme}`);
+
+  // Los primeros trades llegan sin mediana: suponer que son medianos es lo neutro.
+  check('sin mediana todavía carga como si fuera mediano',
+    chargeFromTrade(5, 0) === medio);
+  check('mediana negativa tampoco rompe', chargeFromTrade(5, -1) === medio);
+
+  check('la barra no pasa de llena', addCharge(0.9, 0.5) === 1);
+  check('ni baja de cero', addCharge(0.1, -0.5) === 0);
+
+  // Que el radio crezca con la carga es lo que hace que valga la pena esperar.
+  check('la especial llega más lejos cuanto más cargada',
+    skillRadius(1) > skillRadius(COST_SKILL), `${skillRadius(1)} > ${skillRadius(COST_SKILL)}`);
+  check('y pega más', skillDamage(1) > skillDamage(COST_SKILL));
+  check('dos especiales al mínimo hacen menos que una con la barra llena',
+    skillDamage(COST_SKILL) * 2 < skillDamage(1) * 1.6,
+    `${skillDamage(COST_SKILL) * 2} vs ${skillDamage(1)}`);
+  check('una especial con la barra llena no llega al radio del super',
+    skillRadius(1) < SUPER_RADIUS, `${skillRadius(1)} < ${SUPER_RADIUS}`);
+
+  check('los precios van de barato a caro', COST_MELEE < COST_SKILL && COST_SKILL < COST_SUPER);
+}
+
+console.log('\n== el ultra del equipo ==');
+{
+  // Mucho más lenta que la personal: un super cada diez segundos no es un super.
+  const paso = ultraGain(100, 100, 0.5);
+  check('la barra de equipo tarda decenas de trades en llenarse',
+    1 / paso > 40, `${1 / paso} trades`);
+  check('mucho más lenta que la personal', paso < chargeFromTrade(100, 100) / 5);
+
+  // El libro empuja pero no decide: sin esto el que va perdiendo el libro no
+  // llega nunca a su ultra y la pelea deja de tener vuelta.
+  const dominando = ultraGain(100, 100, 1);
+  const perdiendo = ultraGain(100, 100, 0);
+  check('dominar el libro carga más rápido', dominando > perdiendo);
+  // Con el libro entero en contra tiene que llegar igual, sólo que más tarde.
+  // Si tardara más del doble, el equipo que va perdiendo no vuelve nunca.
+  check('el que pierde el libro tarda menos del doble',
+    perdiendo * 2 > dominando, `${perdiendo} vs ${dominando}`);
+
+  // En pasos y no de corrido: se lee como un aviso, no como un zoom lento.
+  check('vacía no crece', ultraStage(0) === 0);
+  check('llena está en el paso máximo', ultraStage(1) === GROWTH_MAX_STAGE);
+  check('el paso en que se planta es el mismo en que se lo ve grande',
+    ultraStage(ULTRA_HOLD) === 2);
+  let previo = -1;
+  let sube = true;
+  for (let u = 0; u <= 1.0001; u += 0.01) {
+    const s = ultraStage(u);
+    if (s < previo) sube = false;
+    previo = s;
+  }
+  check('nunca decrece mientras se carga', sube);
 }
 
 console.log(failures === 0 ? '\nTODO OK\n' : `\n${failures} FALLOS\n`);

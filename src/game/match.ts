@@ -1,7 +1,9 @@
 import type { FeedStats, TradeRingBuffer } from '../net/feedCore';
 import type { MatchState, Skyline } from './fighters';
 import {
-  GROWTH_MAX_STAGE,
+  COST_MELEE,
+  COST_SKILL,
+  COST_SUPER,
   HIT_COOLDOWN,
   SLOT_ACTIVE,
   SLOT_FREE,
@@ -9,7 +11,9 @@ import {
   SUPER_RADIUS,
   TEAM_GREEN,
   TEAM_RED,
+  addCharge,
   bookShare,
+  chargeFromTrade,
   createMatchState,
   createSkyline,
   growthScale,
@@ -21,14 +25,18 @@ import {
   pickTarget,
   separation,
   shouldBrakeAtLedge,
-  shouldGrow,
+  skillDamage,
+  skillForce,
+  skillRadius,
   superForce,
+  ULTRA_HOLD,
+  ultraGain,
+  ultraStage,
   teamMomentum,
   wantsJump,
   weightFor,
 } from './fighters';
 import type { MoveResult } from './physics';
-import { rosterSize } from './roster';
 import { createMoveResult, step as physicsStep } from './physics';
 
 /**
@@ -39,6 +47,14 @@ import { createMoveResult, step as physicsStep } from './physics';
  * de render lo lee y lo dibuja. Es la separación que faltaba en la versión de
  * three.js, donde el pool mezclaba decisiones de juego con llamadas de física y
  * no se podía probar nada sin un browser.
+ *
+ * **En la pelea no queda ninguna decisión al azar.** Había un mulberry32 con
+ * semilla fija acá, y su único consumidor era el reloj que sacaba una especial
+ * cada 8 a 12 segundos. Al pasar los golpes a la barra de fuerza —que cargan las
+ * órdenes— ese reloj sobró, y con él la última fuente de azar: hoy todo lo que
+ * pasa en pantalla se puede seguir hasta un trade o una cifra del libro. El
+ * replay determinista del VPS, que era la razón de tener el PRNG, sale ahora de
+ * que no hay nada que sembrar.
  */
 
 export const FIGHTERS_PER_TEAM = 3;
@@ -107,22 +123,17 @@ const LANDING_FULL = 18;
 const SPAWN_Y = 8;
 const SPAWN_X = 5.5;
 const MAX_SPAWNS_PER_STEP = 4;
+/**
+ * Techo de trades leídos por paso. Es más alto que el de altas porque cargar es
+ * mucho más barato que dar de alta, y porque un trade que no carga a nadie es un
+ * dato del libro que se perdió. A 60 Hz son 1440 por segundo, muy por encima de
+ * cualquier ráfaga real.
+ */
+const MAX_TRADES_PER_STEP = 24;
 
 const BLAST = { minX: -15, maxX: 15, minY: -11, maxY: 26 };
 
-/**
- * Las habilidades comunes salen solas cada 8 a 12 segundos por peleador.
- *
- * No dependen del contacto ni de que el mercado haga nada: son el ritmo base de
- * la pelea, lo que hace que siempre esté pasando algo aunque el libro esté
- * quieto. El super, en cambio, sale al completar los tres pasos de gigantismo,
- * y ese sí lo maneja la liquidez.
- */
-const SKILL_MIN_INTERVAL = 8;
-const SKILL_MAX_INTERVAL = 12;
-/** Alcance de una habilidad especial. Bastante menos que el super. */
-const SKILL_RADIUS = 2.3;
-const SKILL_DAMAGE = 12;
+
 
 /* --- eventos para la capa de render ---------------------------------- */
 
@@ -196,13 +207,15 @@ export interface Match {
   slot: Uint8Array;
   team: Uint8Array;
   /**
-   * Índice del personaje de la plantilla que le tocó a este slot AHORA. Cambia
-   * cada vez que el slot se llena de nuevo: el que se cayó del escenario no
-   * vuelve, entra el que sigue en la plantilla.
+   * Índice del personaje de la plantilla que le tocó a este slot. Lo fija
+   * `createMatch` una sola vez y no cambia más: sin relevos, el que se cae del
+   * escenario reaparece él mismo acá.
+   *
+   * Sigue siendo un array por slot y no una constante a propósito, para que
+   * volver a agrandar la plantilla sea sumar entradas en `roster.ts` y devolverle
+   * a `activate` el reparto por ronda, sin tocar el resto de la simulación.
    */
   character: Uint8Array;
-  /** Por dónde va la ronda de la plantilla en cada bando. */
-  cursor: Uint8Array;
   x: Float64Array;
   y: Float64Array;
   vx: Float64Array;
@@ -220,18 +233,41 @@ export interface Match {
   stage: Uint8Array;
   scale: Float32Array;
   claims: Uint8Array;
-  /** Cuándo le toca la próxima habilidad común, en segundos del reloj. */
-  nextSkill: Float32Array;
+  /**
+   * La barra de fuerza, de 0 a 1. La cargan las órdenes agresoras del bando y la
+   * gastan TODOS los golpes: puño, patada, especial y super.
+   *
+   * Reemplazó a `nextSkill`, que era el reloj que sacaba una especial cada 8 a
+   * 12 segundos sin mirar el mercado. Ver el bloque "La barra de fuerza" en
+   * `fighters.ts` para por qué, y para qué se pierde a cambio.
+   */
+  energy: Float32Array;
   /** Cuál usó la última vez: se alternan. */
   lastSkill: Uint8Array;
   /** Golpe o patada: también se alternan, contacto a contacto. */
   lastBlow: Uint8Array;
-  /** Semilla del PRNG. La simulación no usa Math.random. */
-  seed: number;
+
+  /**
+   * A quién le toca cobrar el próximo trade de cada bando.
+   *
+   * El reparto es por turno y no en partes iguales a propósito: cargando a los
+   * tres a la vez las tres barras se llenan juntas y descargan juntas, que se ve
+   * como un pulso y no como una pelea. Por turno se escalonan solas, y además
+   * cada orden que entra va visiblemente a UN peleador.
+   */
+  chargeCursor: Int8Array;
+
+  /**
+   * La barra de ultra de cada equipo, de 0 a 1. La cargan las mismas órdenes que
+   * las personales, moduladas por la cuota del libro. Al llenarse le da el super
+   * al peleador al que le toca, y el turno pasa al siguiente.
+   */
+  ultra: Float32Array;
+  /** A qué carril del bando le toca el próximo ultra: 0, 1, 2 y vuelve. */
+  ultraTurn: Uint8Array;
 
   /** Quién está creciendo por equipo, -1 si nadie. */
   growing: Int8Array;
-  lastStep: Float32Array;
   clock: number;
   /** Sacudón de cámara, decae solo. */
   shake: number;
@@ -246,7 +282,6 @@ export function createMatch(): Match {
     slot: new Uint8Array(CAPACITY),
     team: new Uint8Array(CAPACITY),
     character: new Uint8Array(CAPACITY),
-    cursor: new Uint8Array(2),
     x: new Float64Array(CAPACITY),
     y: new Float64Array(CAPACITY),
     vx: new Float64Array(CAPACITY),
@@ -264,19 +299,20 @@ export function createMatch(): Match {
     stage: new Uint8Array(CAPACITY),
     scale: new Float32Array(CAPACITY).fill(1),
     claims: new Uint8Array(CAPACITY),
-    nextSkill: new Float32Array(CAPACITY),
+    energy: new Float32Array(CAPACITY),
     lastSkill: new Uint8Array(CAPACITY),
     lastBlow: new Uint8Array(CAPACITY),
-    seed: 0x5eed_1234,
+    chargeCursor: new Int8Array(2),
+    ultra: new Float32Array(2),
+    ultraTurn: new Uint8Array(2),
     growing: Int8Array.from([-1, -1]),
-    lastStep: new Float32Array(2),
     clock: 0,
     shake: 0,
   };
 
-  // Un slot no cambia de bando nunca, así que el bando se resuelve una sola
-  // vez. El PERSONAJE sí cambia: éstos son sólo los tres primeros de cada
-  // plantilla, y `activate` reparte el resto a medida que caen.
+  // Ni el bando ni el personaje de un slot cambian nunca: se resuelven una sola
+  // vez acá y valen para toda la sesión. Pelean siempre los mismos seis, y el
+  // que se cae del escenario reaparece él mismo en su slot.
   for (let i = 0; i < CAPACITY; i++) {
     m.team[i] = i < FIGHTERS_PER_TEAM ? TEAM_GREEN : TEAM_RED;
     m.character[i] = i % FIGHTERS_PER_TEAM;
@@ -296,31 +332,6 @@ export function createMatch(): Match {
 
 const move: MoveResult = createMoveResult();
 
-/**
- * mulberry32. La simulación no llama a `Math.random` en ningún lado: con una
- * semilla fija, la misma grabación reproducida dos veces da la misma pelea.
- * Eso es lo que hace que el replay del VPS sirva para comparar dos corridas, y
- * se perdería con un solo `Math.random` en el camino.
- */
-function nextRandom(m: Match): number {
-  m.seed = (m.seed + 0x6d2b79f5) >>> 0;
-  let t = m.seed;
-  t = Math.imul(t ^ (t >>> 15), t | 1);
-  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-}
-
-function scheduleSkill(m: Match, i: number, now: number): void {
-  m.nextSkill[i] = now + SKILL_MIN_INTERVAL
-    + nextRandom(m) * (SKILL_MAX_INTERVAL - SKILL_MIN_INTERVAL);
-}
-
-/**
- * Altura objetivo de cada plataforma desde el snapshot del libro.
- *
- * La central no se mueve: es el escenario principal y garantiza que siempre
- * haya dónde pelear aunque el mercado se seque.
- */
 export function updateStageFromBook(
   m: Match,
   bidQtys: Float64Array,
@@ -450,36 +461,56 @@ export function stepMatch(
     }
   }
 
-  /* --- habilidades comunes -------------------------------------------- */
+  /* --- especiales: se pagan con la barra ------------------------------- */
   for (let i = 0; i < CAPACITY; i++) {
     if (m.slot[i] !== SLOT_ACTIVE) continue;
-    if (now < m.nextSkill[i]) continue;
+    if (m.energy[i] < COST_SKILL) continue;
     if (now - m.hitstun[i] < HITSTUN) continue;
-    scheduleSkill(m, i, now);
+    // El elegido para el ultra se PLANTA cuando la barra del equipo pasa de
+    // `ULTRA_HOLD`: deja de gastar y junta para el super. Sin esto la especial
+    // le baja la barra a cero y cuando le toca el ultra no puede pagarlo.
+    //
+    // Se planta recién ahí y no desde el principio del ciclo a propósito: entre
+    // ultra y ultra pasa medio minuto largo, y un peleador que se lo pasa entero
+    // sin atacar es un peleador de menos en la pelea. El momento en que se
+    // planta es además el momento en que se lo ve crecer, así que se lee.
+    if (m.growing[m.team[i]] === i && m.ultra[m.team[i]] >= ULTRA_HOLD) continue;
+
+    // La especial gasta la barra ENTERA, no su precio. Es lo que hace que
+    // esperar valga la pena: dos especiales al mínimo hacen menos que una con la
+    // barra llena, así que el que aguanta pega más fuerte. Gastando sólo el
+    // precio, la barra se drenaría de a 0,45 y todas las especiales saldrían
+    // iguales — que es el goteo que este sistema vino a sacar.
+    const spent = m.energy[i];
+    m.energy[i] = 0;
+    const radius = skillRadius(spent);
+
     m.lastSkill[i] = m.lastSkill[i] === 0 ? 1 : 0;
     emit(m.events, EVENT_SKILL, m.x[i], m.y[i], m.lastSkill[i], m.team[i], i);
-    m.shake = Math.max(m.shake, 0.35);
+    m.shake = Math.max(m.shake, 0.2 + spent * 0.5);
 
     for (let j = 0; j < CAPACITY; j++) {
       if (j === i || m.slot[j] !== SLOT_ACTIVE || m.team[j] === m.team[i]) continue;
       const dx = m.x[j] - m.x[i];
       const dy = m.y[j] - m.y[i];
       const distance = Math.hypot(dx, dy);
-      if (distance > SKILL_RADIUS) continue;
+      if (distance > radius) continue;
       const nx = distance > 1e-6 ? dx / distance : 1;
       const ny = distance > 1e-6 ? dy / distance : 0;
-      const falloff = 0.55 + 0.45 * (1 - distance / SKILL_RADIUS);
+      const falloff = 0.55 + 0.45 * (1 - distance / radius);
       // Acá sí entra el knockback por daño acumulado: cuanto más viene
       // recibiendo el rival, más lejos lo manda esta misma habilidad. Es lo que
-      // hace que la pelea escale en vez de ser plana.
-      const force = knockback(m.damage[j], m.weight[j], m.weight[i]) * falloff;
+      // hace que la pelea escale en vez de ser plana. `skillForce` le suma la
+      // otra escala, la de cuánta orden había atrás del golpe.
+      const force = knockback(m.damage[j], m.weight[j], m.weight[i])
+        * falloff * skillForce(spent);
       m.vx[j] = nx * force * 1.15;
       m.vy[j] = ny * force * 0.3 + force * 0.5;
       m.grounded[j] = 0;
-      m.damage[j] += SKILL_DAMAGE;
+      m.damage[j] += skillDamage(spent);
       m.hitstun[j] = now;
       m.lastHit[j] = now;
-      emit(m.events, EVENT_HIT, m.x[j], m.y[j], 1.2, m.team[j], j);
+      emit(m.events, EVENT_HIT, m.x[j], m.y[j], 0.8 + spent * 0.9, m.team[j], j);
     }
   }
 
@@ -500,20 +531,39 @@ export function stepMatch(
       // trabajo de las especiales y del super. Es la regla de Smash, y es lo
       // que hace que el daño acumulado signifique algo: sin ella, cada roce
       // manda a volar y no hay nada que construir.
+      //
+      // El FORCEJEO —separarse— es gratis y pasa siempre: dos cuerpos no pueden
+      // ocupar el mismo lugar, y empujar no es pegar. Es además lo único que
+      // queda pasando cuando el libro está muerto y nadie tiene con qué golpear.
       m.vx[j] += nx * MELEE_NUDGE;
       m.vx[i] -= nx * MELEE_NUDGE;
       m.lastHit[i] = now; m.lastHit[j] = now;
-      m.hitstun[i] = now - HITSTUN + MELEE_STUN;
-      m.hitstun[j] = now - HITSTUN + MELEE_STUN;
-      m.damage[i] += hitDamage(m.weight[j]);
-      m.damage[j] += hitDamage(m.weight[i]);
+
+      // El GOLPE, en cambio, se paga, y cada uno por su cuenta. Antes el
+      // contacto disparaba un intercambio automático: los dos se pegaban
+      // siempre, hubiera pasado lo que hubiera pasado en el mercado. Ahora un
+      // peleador cargado le pega a uno vacío y el vacío sólo se lo come, porque
+      // el que no tiene órdenes atrás no tiene con qué pegar.
+      const golpeaI = m.energy[i] >= COST_MELEE && !guardando(m, i);
+      const golpeaJ = m.energy[j] >= COST_MELEE && !guardando(m, j);
+      if (!golpeaI && !golpeaJ) continue;
 
       // Cada uno tira su golpe, alternando puño y patada. El que recibe queda
       // en hurt, que lo resuelve la capa de render con el hitstun que ya existe.
-      m.lastBlow[i] = m.lastBlow[i] === 0 ? 1 : 0;
-      m.lastBlow[j] = m.lastBlow[j] === 0 ? 1 : 0;
-      emit(m.events, EVENT_MELEE, m.x[i], m.y[i], m.lastBlow[i], m.team[i], i);
-      emit(m.events, EVENT_MELEE, m.x[j], m.y[j], m.lastBlow[j], m.team[j], j);
+      if (golpeaI) {
+        m.energy[i] -= COST_MELEE;
+        m.damage[j] += hitDamage(m.weight[i]);
+        m.hitstun[j] = now - HITSTUN + MELEE_STUN;
+        m.lastBlow[i] = m.lastBlow[i] === 0 ? 1 : 0;
+        emit(m.events, EVENT_MELEE, m.x[i], m.y[i], m.lastBlow[i], m.team[i], i);
+      }
+      if (golpeaJ) {
+        m.energy[j] -= COST_MELEE;
+        m.damage[i] += hitDamage(m.weight[j]);
+        m.hitstun[i] = now - HITSTUN + MELEE_STUN;
+        m.lastBlow[j] = m.lastBlow[j] === 0 ? 1 : 0;
+        emit(m.events, EVENT_MELEE, m.x[j], m.y[j], m.lastBlow[j], m.team[j], j);
+      }
 
       const heavy = m.whale[i] === 1 || m.whale[j] === 1;
       emit(m.events, EVENT_HIT, m.x[i] + dx / 2, m.y[i] + dy / 2, heavy ? 1.6 : 1, m.team[i], -1);
@@ -534,44 +584,96 @@ export function stepMatch(
     m.shake = 1;
   }
 
-  /* --- gigantismo ----------------------------------------------------- */
+  /* --- el ultra: la barra del equipo ---------------------------------- */
   for (let team = 0; team < 2; team++) {
-    const share = bookShare(stats.bidVolume, stats.askVolume, team);
-    if (!shouldGrow(share, now - m.lastStep[team])) continue;
-    m.lastStep[team] = now;
-
-    let chosen = m.growing[team];
-    if (chosen < 0 || m.slot[chosen] !== SLOT_ACTIVE) {
-      chosen = firstActive(m, team);
-      m.growing[team] = chosen;
-      if (chosen >= 0) m.stage[chosen] = 0;
+    // A quién le toca. Si el elegido está caído le toca al siguiente vivo, pero
+    // el turno NO se pierde: el ciclo es de tres y se respeta, que es lo que
+    // hace que el ultra sea previsible en vez de una lotería.
+    const from = team === TEAM_GREEN ? 0 : FIGHTERS_PER_TEAM;
+    let chosen = -1;
+    for (let n = 0; n < FIGHTERS_PER_TEAM; n++) {
+      const i = from + (m.ultraTurn[team] + n) % FIGHTERS_PER_TEAM;
+      if (m.slot[i] === SLOT_ACTIVE) { chosen = i; break; }
     }
+
+    // El que dejó de ser el elegido vuelve a su tamaño. Sin esto un peleador que
+    // se cae mientras crecía reaparece gigante para siempre.
+    const antes = m.growing[team];
+    if (antes >= 0 && antes !== chosen) {
+      m.stage[antes] = 0;
+      m.scale[antes] = 1;
+    }
+    m.growing[team] = chosen;
     if (chosen < 0) continue;
 
-    if (m.stage[chosen] >= GROWTH_MAX_STAGE) {
-      unleash(m, chosen, now);
-      m.stage[chosen] = 0;
-      m.growing[team] = -1;
-    } else {
-      m.stage[chosen]++;
-      emit(m.events, EVENT_GROW, m.x[chosen], m.y[chosen], m.stage[chosen], team, chosen);
+    // El gigantismo es el DIBUJO de la barra del equipo: el elegido crece a
+    // medida que se carga, así se ve venir el ultra sin leer ningún número y se
+    // sabe de antemano a quién le toca.
+    const stage = ultraStage(m.ultra[team]);
+    if (stage > m.stage[chosen]) {
+      emit(m.events, EVENT_GROW, m.x[chosen], m.y[chosen], stage, team, chosen);
     }
-    m.scale[chosen] = growthScale(m.stage[chosen]);
+    m.stage[chosen] = stage;
+    m.scale[chosen] = growthScale(stage);
+
+    if (m.ultra[team] < 1) continue;
+    // La barra del equipo da el DERECHO a tirar el ultra; la personal lo paga.
+    // Como el elegido dejó de gastar al llegar a `ULTRA_HOLD`, para cuando la de
+    // equipo se llena la suya ya está arriba del mínimo casi siempre.
+    if (m.energy[chosen] < COST_SUPER) continue;
+
+    const spent = m.energy[chosen];
+    m.energy[chosen] = 0;
+    m.ultra[team] = 0;
+    m.ultraTurn[team] = (m.ultraTurn[team] + 1) % FIGHTERS_PER_TEAM;
+    unleash(m, chosen, now, spent);
+    m.stage[chosen] = 0;
+    m.scale[chosen] = 1;
   }
   for (let team = 0; team < 2; team++) {
     const chosen = m.growing[team];
     m.state.charge[team] = chosen >= 0 ? m.stage[chosen] : 0;
+    m.state.ultra[team] = m.ultra[team];
+    m.state.ultraTurn[team] = m.ultraTurn[team];
   }
 
-  /* --- altas desde la cola de trades ---------------------------------- */
+  /* --- la cola de trades: carga las barras y da de alta ---------------- */
+  const greenShare = bookShare(stats.bidVolume, stats.askVolume, TEAM_GREEN);
+  const redShare = bookShare(stats.bidVolume, stats.askVolume, TEAM_RED);
+  //
+  // Antes este bucle sacaba como mucho cuatro trades por paso y tiraba el resto:
+  // un trade que llegaba con los tres slots del bando ocupados no hacía
+  // absolutamente nada. Ahora TODO trade carga la barra de alguien, y el alta es
+  // lo secundario. Es lo que hace que el ritmo de golpes sea el del mercado: en
+  // una ráfaga de compras las barras verdes se llenan aunque no entre nadie
+  // nuevo, y el bando descarga.
   let spawned = 0;
-  while (spawned < MAX_SPAWNS_PER_STEP) {
+  let drained = 0;
+  while (drained < MAX_TRADES_PER_STEP) {
+    // Con el cupo de altas ya lleno y algún slot todavía esperando, se corta.
+    // Sacar un trade de la cola sólo para cargar se lo robaría al alta del paso
+    // siguiente, y un slot vacío es un peleador que falta en pantalla. Sin esta
+    // guarda, seis trades de arranque daban cuatro peleadores en vez de seis:
+    // el primer paso se llevaba los seis de la cola y sólo podía dar de alta a
+    // cuatro. Una vez que están los seis arriba no vuelve a activarse, que es el
+    // caso normal.
+    if (spawned >= MAX_SPAWNS_PER_STEP
+      && (freeSlot(m, TEAM_GREEN) >= 0 || freeSlot(m, TEAM_RED) >= 0)) break;
+
     const trade = trades.pop();
     if (trade === null) break;
-    spawned++;
+    drained++;
     const team = trade.side === 'buy' ? TEAM_GREEN : TEAM_RED;
+    charge(m, team, chargeFromTrade(trade.size, stats.tradeMedian));
+    m.ultra[team] = addCharge(
+      m.ultra[team],
+      ultraGain(trade.size, stats.tradeMedian, team === TEAM_GREEN ? greenShare : redShare),
+    );
+
+    if (spawned >= MAX_SPAWNS_PER_STEP) continue;
     const slot = freeSlot(m, team);
     if (slot < 0) continue;
+    spawned++;
     activate(m, slot, team, trade.size, trade.whale, stats.tradeMedian, now);
   }
   if (trades.count > CAPACITY * 6) trades.clear();
@@ -579,10 +681,32 @@ export function stepMatch(
   summarize(m);
 }
 
-function firstActive(m: Match, team: number): number {
+/**
+ * Le pasa la carga de un trade a UN peleador del bando, por turno.
+ *
+ * Salta a los slots vacíos —un caído no cobra— y avanza el cursor sólo cuando
+ * encontró a quién cobrarle, así con dos peleadores vivos se turnan entre esos
+ * dos y no se pierde una de cada tres órdenes.
+ */
+function charge(m: Match, team: number, amount: number): void {
   const from = team === TEAM_GREEN ? 0 : FIGHTERS_PER_TEAM;
-  for (let i = from; i < from + FIGHTERS_PER_TEAM; i++) if (m.slot[i] === SLOT_ACTIVE) return i;
-  return -1;
+  for (let n = 0; n < FIGHTERS_PER_TEAM; n++) {
+    const lane = (m.chargeCursor[team] + n) % FIGHTERS_PER_TEAM;
+    const i = from + lane;
+    if (m.slot[i] !== SLOT_ACTIVE) continue;
+    m.energy[i] = addCharge(m.energy[i], amount);
+    m.chargeCursor[team] = (lane + 1) % FIGHTERS_PER_TEAM;
+    return;
+  }
+}
+
+/**
+ * ¿Está guardando para el ultra? El elegido, con la barra del equipo pasada de
+ * `ULTRA_HOLD`, no gasta ni en puños: se planta y espera el remate.
+ */
+function guardando(m: Match, i: number): boolean {
+  const team = m.team[i];
+  return m.growing[team] === i && m.ultra[team] >= ULTRA_HOLD;
 }
 
 function freeSlot(m: Match, team: number): number {
@@ -591,37 +715,15 @@ function freeSlot(m: Match, team: number): number {
   return -1;
 }
 
-/**
- * El próximo personaje de la plantilla para ese bando.
- *
- * Va en ronda desde donde quedó el cursor, salteando a los que ya están en el
- * escenario: tres slots activos con el mismo personaje se verían como un error
- * de dibujo, no como una decisión. Si toda la plantilla estuviera en juego —no
- * puede pasar mientras haya más personajes que slots, pero la cuenta no se
- * apoya en eso— se queda con el que ya tenía.
- */
-function pickCharacter(m: Match, team: number, slot: number): number {
-  const size = rosterSize(team);
-  const from = team === TEAM_GREEN ? 0 : FIGHTERS_PER_TEAM;
-  for (let n = 0; n < size; n++) {
-    const candidate = (m.cursor[team] + n) % size;
-    let taken = false;
-    for (let i = from; i < from + FIGHTERS_PER_TEAM; i++) {
-      if (i === slot || m.slot[i] !== SLOT_ACTIVE) continue;
-      if (m.character[i] === candidate) { taken = true; break; }
-    }
-    if (taken) continue;
-    m.cursor[team] = (candidate + 1) % size;
-    return candidate;
-  }
-  return m.character[slot];
-}
 
 function activate(
   m: Match, slot: number, team: number,
   size: number, whale: boolean, median: number, now: number,
 ): void {
-  m.character[slot] = pickCharacter(m, team, slot);
+  // `m.character[slot]` NO se toca: lo fijó `createMatch` y no cambia nunca.
+  // Antes acá se llamaba a `pickCharacter`, que repartía el siguiente de la
+  // plantilla en ronda; sin relevos, reactivar un slot es devolverle al mismo
+  // peleador que se cayó.
   const weight = weightFor(size, median, whale);
   m.weight[slot] = weight;
   m.damage[slot] = 0;
@@ -634,7 +736,9 @@ function activate(
   m.stage[slot] = 0;
   m.scale[slot] = 1;
   m.lastSkill[slot] = 1;
-  scheduleSkill(m, slot, now);
+  // La barra arranca vacía: un peleador que acaba de entrar todavía no tiene
+  // órdenes atrás. Las primeras que lleguen de su lado se la cargan.
+  m.energy[slot] = 0;
 
   // Repartidos por carril: los tres apareciendo en el mismo punto caen uno
   // encima del otro y arrancan la pelea amontonados.
@@ -653,7 +757,10 @@ function activate(
  * sacar del escenario aunque el rival esté con 0% de daño, o el gigantismo es
  * sólo un personaje más grande.
  */
-function unleash(m: Match, self: number, now: number): void {
+function unleash(m: Match, self: number, now: number, spent: number): void {
+  // Lo que se gastó gradúa el remate: al mínimo pega poco más que el super de
+  // antes, con la barra llena pega un tercio más.
+  const power = 0.6 + spent * 0.7;
   emit(m.events, EVENT_SUPER, m.x[self], m.y[self], SUPER_RADIUS, m.team[self], self);
   m.shake = 1;
   for (let i = 0; i < CAPACITY; i++) {
@@ -662,13 +769,13 @@ function unleash(m: Match, self: number, now: number): void {
     const dy = m.y[i] - m.y[self];
     const distance = Math.hypot(dx, dy);
     if (distance > SUPER_RADIUS) continue;
-    const force = superForce(distance);
+    const force = superForce(distance) * power;
     const nx = distance > 1e-6 ? dx / distance : 1;
     const ny = distance > 1e-6 ? dy / distance : 0;
     m.vx[i] = nx * force * 1.3;
     m.vy[i] = ny * force * 0.4 + force * 0.55;
     m.grounded[i] = 0;
-    m.damage[i] += SUPER_DAMAGE;
+    m.damage[i] += SUPER_DAMAGE * power;
     m.hitstun[i] = now;
     m.lastHit[i] = now;
     emit(m.events, EVENT_HIT, m.x[i], m.y[i], 1.4, m.team[i], i);

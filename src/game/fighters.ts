@@ -402,6 +402,174 @@ export function superForce(distance: number): number {
 }
 
 /* ------------------------------------------------------------------ */
+/* La barra de fuerza                                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Cada peleador tiene UNA barra. Las órdenes agresoras de su lado la cargan y
+ * **todo lo que golpea la gasta**: el puño, la patada, la especial y el super.
+ *
+ * Antes los golpes no salían del mercado. El cuerpo a cuerpo pegaba en cada
+ * contacto que pasara el cooldown y las especiales salían de un temporizador
+ * aleatorio de 8 a 12 segundos —el código decía, textual, que "no dependen de
+ * que el mercado haga nada"—. El resultado era un goteo constante de golpes
+ * chicos: muchos, iguales entre sí, y ninguno significaba nada. Un espectador no
+ * podía mirar la pelea y sacar UNA sola conclusión sobre el libro.
+ *
+ * Con la barra, un golpe que se ve **es** un trade que pasó. El ritmo de la
+ * pelea es el ritmo del mercado: libro quieto, pelea de forcejeo; ráfaga de
+ * compras, el verde descarga. Y como cada uno tira siempre lo más caro que puede
+ * pagar, la potencia sube sola con el flujo en vez de estar pegada a una
+ * constante.
+ *
+ * **El precio a pagar, y es real**: con el libro muerto no hay golpes. El
+ * temporizador viejo existía justamente para que "siempre esté pasando algo
+ * aunque el libro esté quieto". Eso se pierde a propósito — un visualizador que
+ * inventa acción cuando no hay datos está mintiendo—, pero deja la pantalla
+ * quieta en un mercado sin volumen. Lo que sostiene la escena en ese caso es el
+ * forcejeo del cuerpo a cuerpo, que no cuesta energía y sólo separa.
+ */
+
+/** Puño o patada. Barato: es el relleno, no el evento. */
+export const COST_MELEE = 0.12;
+/** Especial. Sale cara para que se vea venir. */
+export const COST_SKILL = 0.45;
+/**
+ * Super. No es un precio fijo sino un MÍNIMO: el super gasta la barra entera y
+ * su potencia sale de cuánto había. Puesto como mínimo y no como barra llena
+ * para que un mercado flojo no deje al gigante congelado esperando para siempre.
+ */
+export const COST_SUPER = 0.6;
+
+/**
+ * Cuánto carga un trade del tamaño de la mediana. Con 0,14 hacen falta unos
+ * siete trades medianos para llenar una barra, que a razón de mercado normal
+ * —repartiendo por turno entre los tres del bando— da una descarga cada ocho a
+ * catorce segundos por peleador.
+ */
+const CHARGE_PER_MEDIAN = 0.14;
+/**
+ * Techo de lo que puede aportar UN trade, en múltiplos de la mediana.
+ *
+ * Está justo abajo del umbral de ballena —`size > mediana * 8`— para que una
+ * ballena llene casi una barra de un saque y se vea el golpe salir de ella. Sin
+ * techo, un solo trade monstruoso cargaría a un peleador para diez descargas y
+ * la barra dejaría de decir nada.
+ */
+const CHARGE_CAP = 7;
+
+/**
+ * Lo que suma a la barra un trade agresor.
+ *
+ * Se normaliza por la mediana móvil —la misma que decide quién es ballena— y no
+ * por un tamaño absoluto, porque un trade "grande" en BTC no se parece a uno
+ * grande en un par chico, y la escena tiene que leerse igual en los dos.
+ */
+export function chargeFromTrade(size: number, median: number): number {
+  // Sin mediana todavía —los primeros veinte trades— no hay con qué comparar, y
+  // suponer que todos son medianos es la suposición neutra.
+  if (!(median > 0)) return CHARGE_PER_MEDIAN;
+  const ratio = Math.min(size / median, CHARGE_CAP);
+  return ratio * CHARGE_PER_MEDIAN;
+}
+
+/** La barra no pasa de llena: una barra que se desborda deja de leerse. */
+export function addCharge(energy: number, delta: number): number {
+  const next = energy + delta;
+  return next > 1 ? 1 : next < 0 ? 0 : next;
+}
+
+/**
+ * Alcance de la especial según lo cargado que esté el que la tira.
+ *
+ * Que el radio crezca con la carga es lo que hace que valga la pena esperar: una
+ * especial al mínimo apenas llega al que tiene enfrente, una con la barra llena
+ * barre a los tres.
+ */
+export function skillRadius(energy: number): number {
+  return 1.4 + clamp01(energy) * 1.9;
+}
+
+/** Daño de una especial según lo que se gastó en ella. */
+export function skillDamage(spent: number): number {
+  return 6 + clamp01(spent) * 22;
+}
+
+/**
+ * Multiplicador de empujón de una especial. Al precio mínimo pega menos que el
+ * knockback normal, con la barra llena pega la mitad más.
+ */
+export function skillForce(spent: number): number {
+  return 0.5 + clamp01(spent);
+}
+
+function clamp01(v: number): number {
+  return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
+/* ------------------------------------------------------------------ */
+/* El ultra: la barra del equipo                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Arriba de las tres barras personales hay UNA por equipo. La cargan las mismas
+ * órdenes, y cuando se llena le da el **ultra** al peleador al que le toca: el
+ * primero, después el segundo, después el tercero, y vuelve a empezar.
+ *
+ * Es lo que le da sentido al gigantismo. Antes crecer salía de la cuota de
+ * liquidez del libro y el super se descargaba solo al tercer paso, así que el
+ * espectador veía a alguien inflarse sin saber por qué ni a quién le iba a tocar
+ * después. Ahora el ciclo es de tres y se anuncia: el elegido crece a medida que
+ * la barra del equipo se llena —el gigantismo ES el dibujo de la barra— y el
+ * turno pasa al siguiente en cuanto descarga.
+ *
+ * El libro no queda afuera: modula la velocidad de carga. El equipo que domina
+ * la liquidez carga más rápido, así que `bidVolume` y `askVolume` siguen
+ * decidiendo quién llega antes a su ultra.
+ */
+
+/**
+ * Cuánto carga la barra de equipo un trade del tamaño de la mediana. Mucho menos
+ * que la personal: hacen falta unos 55 trades para llenarla, que a ritmo de
+ * mercado normal es un ultra por equipo cada medio minuto largo. Un super que
+ * sale cada diez segundos deja de ser un super.
+ */
+const ULTRA_PER_MEDIAN = 0.018;
+
+/**
+ * A partir de acá el elegido deja de gastar en golpes y especiales: está
+ * guardando para el ultra. Coincide con el paso 2 de gigantismo, así que el
+ * momento en que se planta es el mismo en que se lo ve grande. Antes de eso
+ * pelea normal, porque un peleador que se pasa media pelea sin atacar es un
+ * peleador de menos.
+ */
+export const ULTRA_HOLD = 0.66;
+
+/** Lo que suma a la barra de equipo un trade agresor, según la cuota del libro. */
+export function ultraGain(size: number, median: number, share: number): number {
+  const base = median > 0 ? Math.min(size / median, CHARGE_CAP) : 1;
+  // El libro empuja, pero no decide. Con el libro entero en contra la carga va a
+  // 0,7x y con todo a favor a 1,3x: el que pierde el libro tarda menos del doble
+  // que el que lo domina, nunca más. Pasado ese punto el equipo que va perdiendo
+  // no llega nunca a su ultra y la pelea deja de tener vuelta — que es
+  // justamente lo que el ultra por turnos vino a garantizar.
+  return base * ULTRA_PER_MEDIAN * (0.7 + clamp01(share) * 0.6);
+}
+
+/**
+ * En qué paso de gigantismo va el elegido según la barra de su equipo.
+ *
+ * Discreto y no continuo: en pasos se lee como un aviso —"va por el segundo"— y
+ * de corrido se ve como un zoom lento que nadie registra.
+ */
+export function ultraStage(ultra: number): number {
+  if (ultra >= 0.99) return GROWTH_MAX_STAGE;
+  if (ultra >= ULTRA_HOLD) return 2;
+  if (ultra >= 0.33) return 1;
+  return 0;
+}
+
+/* ------------------------------------------------------------------ */
 /* Estado del combate para el HUD                                      */
 /* ------------------------------------------------------------------ */
 
@@ -418,6 +586,10 @@ export interface MatchState {
   kos: Uint32Array;
   /** Etapa de gigantismo en curso por equipo. 0 = nadie creciendo. */
   charge: Uint8Array;
+  /** La barra de ultra del equipo, de 0 a 1. */
+  ultra: Float32Array;
+  /** A qué carril del bando le toca el próximo ultra. */
+  ultraTurn: Uint8Array;
 }
 
 export function createMatchState(): MatchState {
@@ -427,5 +599,7 @@ export function createMatchState(): MatchState {
     alive: new Uint8Array(2),
     kos: new Uint32Array(2),
     charge: new Uint8Array(2),
+    ultra: new Float32Array(2),
+    ultraTurn: new Uint8Array(2),
   };
 }

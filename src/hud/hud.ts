@@ -102,9 +102,30 @@ export function mountHud(
       charge.append(pip);
     }
     row.append(lives, charge);
-    panel.append(head, damage, row);
+
+    /**
+     * La barra de ULTRA del equipo. Es una sola por bando y se llena con las
+     * órdenes agresoras de ese lado; al llenarse, el peleador al que le toca
+     * descarga el super y el turno pasa al siguiente.
+     *
+     * El texto de al lado dice de quién es el turno —"ULTRA 2/3"— porque el
+     * ciclo por turnos sólo sirve si se puede anticipar. Los tres cuadraditos de
+     * arriba siguen siendo el paso de gigantismo, que es la misma carga vista en
+     * el escenario: acá el número exacto, allá el tamaño del que va a pegar.
+     */
+    const ultraWrap = el('div', 'margin-top:8px;display:flex;align-items:center;gap:8px');
+    const ultraTag = el('span',
+      `color:${DIM};letter-spacing:2px;font-size:10px;white-space:nowrap`, 'ULTRA 1/3');
+    const ultraTrack = el('div',
+      'flex:1;height:7px;border-radius:4px;background:#263041;overflow:hidden');
+    const ultraFill = el('div',
+      `width:0%;height:100%;background:${GOLD};transition:width .12s linear`);
+    ultraTrack.append(ultraFill);
+    ultraWrap.append(ultraTag, ultraTrack);
+
+    panel.append(head, damage, row, ultraWrap);
     board.append(panel);
-    return { team, color, kos, damage, dots, pips };
+    return { team, color, kos, damage, dots, pips, ultraFill, ultraTag };
   });
 
   host.append(bar, board);
@@ -129,6 +150,13 @@ export function mountHud(
         pip.style.background = i < stage ? GOLD : '#263041';
         pip.style.boxShadow = i < stage ? `0 0 8px ${GOLD}` : 'none';
       });
+
+      const ultra = match.ultra[p.team];
+      p.ultraFill.style.width = `${Math.round(ultra * 100)}%`;
+      // Llena, brilla: es el aviso de que el super sale en cualquier momento.
+      p.ultraFill.style.boxShadow = ultra >= 1 ? `0 0 12px ${GOLD}` : 'none';
+      p.ultraTag.textContent = `ULTRA ${match.ultraTurn[p.team] + 1}/${FIGHTERS_PER_TEAM}`;
+      p.ultraTag.style.color = ultra >= 1 ? GOLD : DIM;
     }
   }, REFRESH_MS);
 

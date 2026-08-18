@@ -1,4 +1,4 @@
-import { Application, Container, Graphics } from 'pixi.js';
+import { Application, Container, Graphics, Sprite } from 'pixi.js';
 import type { Texture } from 'pixi.js';
 import { AdvancedBloomFilter } from 'pixi-filters/advanced-bloom';
 import { ShockwaveFilter } from 'pixi-filters/shockwave';
@@ -64,6 +64,22 @@ import type { StagePlatforms } from './stage';
 const GREEN = 0x00ff66;
 const RED = 0xff0055;
 const GOLD = 0xffd700;
+/**
+ * Grosor DIBUJADO de las losas: la central y las ocho laterales.
+ *
+ * Es sólo visual. La física trata las plataformas como una línea —`topY`, de
+ * una vía— y no mira el espesor, así que esto se puede mover libremente para
+ * que el dibujo cierre.
+ *
+ * Las laterales bajaron de 0,55 a 0,25 al mirar capturas de Brawlhalla, que es
+ * la referencia visual del proyecto: ahí las plataformas flotantes son TABLONES
+ * finos, no bloques. Con 0,55 la losa lateral daba una proporción de 1,4 —casi
+ * cuadrada—, que no se lee como plataforma de un juego de peleas. Con 0,25 da
+ * 2,5, que además es la proporción con la que salió el arte y evita estirarlo.
+ */
+const PLATFORM_THICK_CENTER = 0.9;
+const PLATFORM_THICK_SIDE = 0.25;
+
 const PLATFORM_TOP = 0xe8f1ff;
 const PLATFORM_FACE = 0x5a6d92;
 const PLATFORM_SHADE = 0x2b3552;
@@ -93,9 +109,37 @@ const HITSTOP_MAX = 0.14;
 
 /* --- cámara --------------------------------------------------------- */
 
-const MIN_HALF_WIDTH = 8;
-const MAX_HALF_WIDTH = STAGE_HALF_WIDTH + 5;
+/**
+ * Cuánto mundo entra en la pantalla, de ancho, en unidades.
+ *
+ * Estos dos números son lo que decide **el tamaño aparente del personaje**, que
+ * es la diferencia más grande contra Brawlhalla (ver
+ * docs/REFERENCIA-BRAWLHALLA.md). Ahí el personaje ocupa cerca del 19% del alto
+ * del cuadro; acá ocupaba el 5,5%.
+ *
+ * No es que el personaje sea chico respecto del escenario —la losa central mide
+ * 4,6 alturas de personaje contra las ~5,6 de la referencia, que está bien— sino
+ * que la cámara mostraba 28 unidades de ancho para un ring cuyo elemento
+ * principal mide 4,8. El zoom estaba encuadrando el mapa, no la pelea.
+ *
+ * Con el mínimo en 5,5 el alto visible es 6,2 y el peleador —1,04 de alto— entra
+ * al 17%. El mínimo se alcanza sólo cuando los seis están a menos de 5 unidades
+ * entre sí, que con el margen de +3 de `moveCamera` es "están peleando juntos".
+ *
+ * El máximo baja de 14 a 10 por lo mismo: 14 dejaba 5 unidades de aire muerto de
+ * cada lado del ring. Con 10 el ancho visible es 20 contra las 18 del escenario,
+ * así que el borde —que es donde se pierde la pelea— se sigue viendo entero.
+ */
+const MIN_HALF_WIDTH = 5.5;
+const MAX_HALF_WIDTH = STAGE_HALF_WIDTH + 1;
 const CAMERA_LAMBDA = 3.2;
+/**
+ * Hasta dónde puede subir y bajar la mirada de la cámara, como fracción del alto
+ * visible. Con 0,55 el piso del escenario queda a poco más de tres cuartos de
+ * pantalla: abajo del centro, arriba del marcador.
+ */
+const CAMERA_Y_HIGH = 0.55;
+const CAMERA_Y_LOW = 0.28;
 const PAN_LIMIT_X = STAGE_HALF_WIDTH * 0.3;
 const SHAKE_GAIN = 0.35;
 
@@ -211,6 +255,17 @@ export async function startGame(
     world.addChild(view);
     viewByArmature.set(character.armature, view);
   }
+
+  /**
+   * Las barras de fuerza, las seis en UN solo `Graphics` que se redibuja entero
+   * cada frame.
+   *
+   * Seis objetos separados serían seis draw calls contra el techo de 16 del
+   * proyecto, y no compran nada: las barras cambian todas juntas, todos los
+   * frames. Va después de los peleadores para que ninguna quede tapada.
+   */
+  const bars = new Graphics();
+  world.addChild(bars);
 
   /** El cuerpo que le toca a cada slot ahora mismo. */
   const views: FighterView[] = [];
@@ -330,9 +385,10 @@ export async function startGame(
 
     if (platformSprites === null) drawStage(platforms, match);
     else placeStage(platformSprites, match);
-    updateCamera(camera, match, dt);
+    updateCamera(camera, match, dt, app.renderer.height / app.renderer.width);
     applyCamera(world, app, camera, match.shake);
     drawFighters(views, match, action, actionAge, dt, elapsed);
+    drawBars(bars, match);
     drawFx(fx, plainFx, glowFx);
 
     /* --- fondo ------------------------------------------------------- */
@@ -504,7 +560,7 @@ function buildStageSprites(art: StagePlatforms): Sprite[] {
     sprite.anchor.set(0.5, 0);
     sprite.x = platformCenterX(i);
     sprite.width = platformHalfWidth(i) * 2;
-    sprite.height = (i === 0 ? 0.9 : 0.55) + 0.14;
+    sprite.height = (i === 0 ? PLATFORM_THICK_CENTER : PLATFORM_THICK_SIDE) + 0.14;
     sprites.push(sprite);
   }
   return sprites;
@@ -516,7 +572,7 @@ function drawStage(g: Graphics, match: Match): void {
     const cx = platformCenterX(i);
     const half = platformHalfWidth(i);
     const top = match.skyline.topY[i];
-    const thickness = i === 0 ? 0.9 : 0.55;
+    const thickness = i === 0 ? PLATFORM_THICK_CENTER : PLATFORM_THICK_SIDE;
 
     // Tres bandas sólidas: filo claro, cara media y sombra dura. Sin degradés
     // ni ruido — la ficha de estilo es vector plano.
@@ -580,7 +636,58 @@ function startAction(
   actionAge[slot] = 0;
 }
 
-function updateCamera(camera: Camera, match: Match, dt: number): void {
+/**
+ * `aspect` es alto/ancho de la ventana. Hace falta para acotar la altura de la
+ * cámara EN PROPORCIÓN a lo que se ve, no con un número fijo.
+ */
+/* --- las barras de fuerza -------------------------------------------- */
+
+/** Ancho y alto de una barra, en unidades de mundo. */
+const BAR_WIDTH = 0.95;
+const BAR_HEIGHT = 0.11;
+/** Cuánto sube la barra por encima de la cabeza. */
+const BAR_LIFT = 0.34;
+const BAR_BACK = 0x11161f;
+const BAR_GOLD = 0xffcc33;
+
+/**
+ * La barra de fuerza de cada peleador, arriba de la cabeza.
+ *
+ * Sin esto el sistema entero es invisible: se ve que alguien pega más fuerte que
+ * otro y no hay forma de saber por qué. La barra es lo que convierte "pegó
+ * fuerte" en "venía cargado", que es la lectura del libro que la pelea tiene que
+ * entregar.
+ *
+ * Al elegido para el ultra se le pinta el marco en dorado. Es cómo se sabe a
+ * quién le toca el super ANTES de que salga, que es la mitad de la gracia del
+ * ciclo por turnos: sin eso el super vuelve a ser una sorpresa.
+ */
+function drawBars(g: Graphics, match: Match): void {
+  g.clear();
+  for (let i = 0; i < match.slot.length; i++) {
+    if (match.slot[i] !== SLOT_ACTIVE) continue;
+    const scale = match.scale[i];
+    const x = match.x[i] - BAR_WIDTH / 2;
+    // `y` del mundo crece hacia arriba y el de la pantalla hacia abajo: la capa
+    // del mundo ya está invertida, así que acá se resta para subir.
+    const y = -(match.y[i] + FIGHTER_HALF_HEIGHT * scale + BAR_LIFT);
+    const elegido = match.growing[match.team[i]] === i;
+
+    g.rect(x, y, BAR_WIDTH, BAR_HEIGHT).fill({ color: BAR_BACK, alpha: 0.75 });
+    const fill = match.energy[i];
+    if (fill > 0) {
+      g.rect(x, y, BAR_WIDTH * fill, BAR_HEIGHT)
+        .fill(match.team[i] === TEAM_GREEN ? GREEN : RED);
+    }
+    g.rect(x, y, BAR_WIDTH, BAR_HEIGHT).stroke({
+      width: elegido ? 0.035 : 0.018,
+      color: elegido ? BAR_GOLD : 0x000000,
+      alpha: elegido ? 1 : 0.55,
+    });
+  }
+}
+
+function updateCamera(camera: Camera, match: Match, dt: number, aspect: number): void {
   let minX = Infinity;
   let maxX = -Infinity;
   let minY = Infinity;
@@ -610,7 +717,17 @@ function updateCamera(camera: Camera, match: Match, dt: number): void {
   targetX = Math.max(-PAN_LIMIT_X, Math.min(PAN_LIMIT_X, targetX));
   // El piso vive en y≈0 y el marcador ocupa la franja de abajo de la pantalla:
   // si la cámara mira muy alto, el escenario termina detrás del HUD.
-  targetY = Math.max(1.4, Math.min(4.5, targetY * 0.7 + 1));
+  //
+  // El límite es una FRACCIÓN del alto visible, no un número de unidades. Con el
+  // tope fijo en 4,5 que había antes, al cerrar el zoom para agrandar a los
+  // personajes las nueve losas se iban abajo de la pantalla: 4,5 era medio alto
+  // visible con la cámara vieja y es un alto entero con la nueva. Atado al alto
+  // visible, el piso queda a la misma altura de cuadro con cualquier zoom.
+  const halfHeight = camera.halfWidth * aspect;
+  targetY = Math.max(
+    CAMERA_Y_LOW * halfHeight,
+    Math.min(CAMERA_Y_HIGH * halfHeight, targetY * 0.7 + 1),
+  );
   targetHalf = Math.max(MIN_HALF_WIDTH, Math.min(MAX_HALF_WIDTH, targetHalf));
 
   const k = 1 - Math.exp(-CAMERA_LAMBDA * dt);
