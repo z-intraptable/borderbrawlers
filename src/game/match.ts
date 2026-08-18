@@ -107,14 +107,17 @@ export const HITSTUN = 0.34;
  * peleadores en contacto se paralizarían mutuamente y no pasaría nada más.
  */
 const MELEE_STUN = 0.12;
-/** Separación del cuerpo a cuerpo. Alcanza para no solaparse, no para lanzar. */
-const MELEE_NUDGE = 1.6;
 /**
- * Cada cuánto se forcejea. Es corto porque separarse no cuesta nada, pero no es
- * cero: aplicado todos los cuadros, `MELEE_NUDGE` a 60 Hz serían 96 u/s de
- * empujón y los peleadores saldrían disparados de cualquier contacto.
+ * Separación del cuerpo a cuerpo, en unidades por segundo POR SEGUNDO.
+ *
+ * Es una aceleración y no un impulso, y el cambio importa. Como impulso
+ * periódico —que es lo que era— empujaba de golpe cada tantos cuadros; mientras
+ * la velocidad del piso se reasignaba entera cada paso eso se disimulaba, pero
+ * ahora la velocidad se acelera hacia su objetivo y un impulso se queda pegado.
+ * Dos cuerpos en contacto quedaban temblando al ritmo del empujón. Una fuerza
+ * continua hace el mismo trabajo —no dejar que se solapen— y no tiembla.
  */
-const PUSH_COOLDOWN = 0.1;
+const MELEE_NUDGE = 7;
 /**
  * Cada cuánto puede tirar una especial UN peleador.
  *
@@ -137,6 +140,53 @@ const CONTACT = 0.85;
  * siga saltando: si fuera mayor se quedarían mirándose sin llegar a pegarse.
  */
 const ENGAGE_RANGE = 0.78;
+/**
+ * A qué distancia se vuelve a SALIR de combate.
+ *
+ * Que entrar y salir tengan umbrales distintos —histéresis— no es un lujo: con
+ * un umbral solo, un peleador parado justo en 0,78 alterna entre "cerrar
+ * distancia" y "pelear acá" en cuadros consecutivos, y son dos velocidades
+ * distintas. El resultado era un peleador vibrando en el lugar, y como el
+ * dibujo se espejea según el signo de la velocidad, además parpadeaba mirando
+ * a un lado y al otro. Es el ruido que se veía en los movimientos.
+ */
+const DISENGAGE_RANGE = 1.35;
+/**
+ * Cuánto puede cambiar la velocidad horizontal por segundo.
+ *
+ * Antes en el piso no había aceleración: `vx` se reasignaba entera al valor
+ * deseado, así que un cambio de objetivo daba vuelta al peleador en UN cuadro.
+ * Acotarla a 34 u/s² le da 0,21 s para pasar de correr a un lado a correr al
+ * otro: se sigue sintiendo un juego de peleas y ya no es un parpadeo.
+ */
+const GROUND_ACCEL = 34;
+/**
+ * Velocidad mínima para darse vuelta, y cuánto tiene que pasar entre una vuelta
+ * y la siguiente. El que está peleando ni siquiera mira su velocidad: mira a su
+ * rival, que es lo que hace un peleador.
+ */
+const TURN_SPEED = 1.2;
+const TURN_COOLDOWN = 0.4;
+/**
+ * Cuánto tiene que estar corrido el rival para que valga la pena darse vuelta.
+ *
+ * Sin esto, dos peleadores forcejeando alrededor del mismo punto se cruzan de
+ * lado constantemente —`dx` cambia de signo— y los dos se espejan cada vez. Con
+ * un tercio de cuerpo de zona muerta, cruzarse deja de contar como estar del
+ * otro lado.
+ */
+const FACE_DEADZONE = 0.32;
+/**
+ * Cuánto más cerca tiene que estar otro rival para robarle el objetivo al que
+ * ya se venía persiguiendo. 0,75 es "un cuarto más cerca".
+ *
+ * `pickTarget` elegía de cero en cada paso, y con dos rivales a distancia
+ * parecida la elección alternaba entre uno y otro sesenta veces por segundo. Si
+ * estaban a los costados, el peleador se daba vuelta con cada cambio: es la
+ * mitad de las vueltas que se veían. Un objetivo se suelta cuando se cae del
+ * escenario o cuando otro está bastante más cerca, no cuando empata.
+ */
+const TARGET_SWITCH = 0.75;
 /** Cuánto manda la separación cuando ya no hay que cerrar distancia. */
 const SPACING_GAIN = 0.55;
 /** Polvo mínimo de un aterrizaje, y a qué velocidad de caída se satura. */
@@ -257,13 +307,17 @@ export interface Match {
    * consecuencia visible: dos peleadores sin barra se tocaban, el forcejeo
    * ponía el reloj en cero, y cuando al cuarto de segundo les llegaba la carga
    * del libro **el golpe no salía** porque el reloj del forcejeo todavía corría.
-   * O sea: el que no podía pegar le bloqueaba el golpe al que sí podía. Por eso
-   * ahora el empujón tiene su propio reloj, `lastPush`, y éste sólo se toca
-   * cuando alguien pegó.
+   * O sea: el que no podía pegar le bloqueaba el golpe al que sí podía. El
+   * forcejeo ya no tiene reloj —es una fuerza continua— y éste sólo se toca
+   * cuando alguien pegó de verdad.
    */
   lastHit: Float32Array;
-  /** Cuándo fue el último forcejeo. Reloj aparte del de los golpes. */
-  lastPush: Float32Array;
+  /** A quién viene persiguiendo, o -1. Ver `TARGET_SWITCH`. */
+  target: Int8Array;
+  /** 1 si ya está a distancia de pelea. Ver `DISENGAGE_RANGE`. */
+  engaged: Uint8Array;
+  /** Cuándo se dio vuelta por última vez. Ver `TURN_COOLDOWN`. */
+  lastTurn: Float32Array;
   /** Cuándo tiró su última especial. Ver `SKILL_COOLDOWN`. */
   lastSkillAt: Float32Array;
   hitstun: Float32Array;
@@ -343,7 +397,9 @@ export function createMatch(lanes: number = FIGHTERS_PER_TEAM): Match {
     jumps: new Uint8Array(CAPACITY),
     lastJump: new Float32Array(CAPACITY),
     lastHit: new Float32Array(CAPACITY),
-    lastPush: new Float32Array(CAPACITY),
+    target: new Int8Array(CAPACITY).fill(-1),
+    engaged: new Uint8Array(CAPACITY),
+    lastTurn: new Float32Array(CAPACITY),
     lastSkillAt: new Float32Array(CAPACITY),
     hitstun: new Float32Array(CAPACITY),
     whale: new Uint8Array(CAPACITY),
@@ -452,7 +508,18 @@ export function stepMatch(
 
     const inHitstun = now - m.hitstun[i] < HITSTUN;
     if (!inHitstun) {
-      const target = pickTarget(CAPACITY, m.slot, m.team, m.x, m.y, m.claims, i);
+      const previo = m.target[i];
+      const sigueVivo = previo >= 0 && m.slot[previo] === SLOT_ACTIVE
+        && m.team[previo] !== m.team[i];
+      let target = pickTarget(CAPACITY, m.slot, m.team, m.x, m.y, m.claims, i);
+      if (sigueVivo && target !== previo) {
+        const dPrevio = Math.hypot(m.x[previo] - m.x[i], m.y[previo] - m.y[i]);
+        const dNuevo = target >= 0
+          ? Math.hypot(m.x[target] - m.x[i], m.y[target] - m.y[i])
+          : Infinity;
+        if (dNuevo > dPrevio * TARGET_SWITCH) target = previo;
+      }
+      m.target[i] = target;
       if (target >= 0) m.claims[target]++;
       const dx = target >= 0 ? m.x[target] - m.x[i] : -m.x[i];
       const dy = target >= 0 ? m.y[target] - m.y[i] : 0;
@@ -470,13 +537,37 @@ export function stepMatch(
       // resultado era los seis apilados en el mismo punto del escenario. Con
       // una distancia de guardia, el que ya llegó cede el paso al compañero y
       // la pelea se reparte a lo ancho.
-      const closing = Math.abs(dx) > ENGAGE_RANGE;
+      // Con histéresis: se entra a combate a `ENGAGE_RANGE` y no se sale hasta
+      // `DISENGAGE_RANGE`. Con un umbral solo esto es un control de todo o nada
+      // y el peleador oscila alrededor de la frontera.
+      const rango = m.engaged[i] === 1 ? DISENGAGE_RANGE : ENGAGE_RANGE;
+      const closing = Math.abs(dx) > rango;
+      m.engaged[i] = closing ? 0 : 1;
       const desired = brake ? 0
         : closing ? (dir + spread * 0.5) * RUN_SPEED * boost
           : spread * RUN_SPEED * SPACING_GAIN;
 
-      m.vx[i] = grounded ? desired : m.vx[i] + (desired - m.vx[i]) * AIR_CONTROL;
-      if (Math.abs(m.vx[i]) > 0.4) m.facing[i] = m.vx[i] >= 0 ? 1 : -1;
+      if (grounded) {
+        // Acelera hacia lo que quiere, no salta a ello. Ver `GROUND_ACCEL`.
+        const limite = GROUND_ACCEL * dt;
+        m.vx[i] += Math.max(-limite, Math.min(limite, desired - m.vx[i]));
+      } else {
+        m.vx[i] += (desired - m.vx[i]) * AIR_CONTROL;
+      }
+
+      // **A quién mira.** El que está peleando mira a su rival y punto: en el
+      // forcejeo la velocidad cambia de signo constantemente y el dibujo se
+      // espejea con ella, así que atarle la mirada a `vx` lo dejaba parpadeando.
+      // El que está yendo hacia algún lado sí mira hacia donde va, pero con una
+      // zona muerta y un tiempo mínimo entre vueltas.
+      const mira = m.engaged[i] === 1 && target >= 0
+        ? (Math.abs(dx) > FACE_DEADZONE ? dir : m.facing[i])
+        : Math.abs(m.vx[i]) > TURN_SPEED ? (m.vx[i] >= 0 ? 1 : -1)
+          : m.facing[i];
+      if (mira !== m.facing[i] && now - m.lastTurn[i] >= TURN_COOLDOWN) {
+        m.facing[i] = mira;
+        m.lastTurn[i] = now;
+      }
 
       const jump = wantsJump({ grounded, dy, dx, groundAhead, sinceJump: now - m.lastJump[i] });
       // Recuperación: cayéndose por debajo del escenario gasta el salto extra.
@@ -597,17 +688,13 @@ export function stepMatch(
       // que hace que el daño acumulado signifique algo: sin ella, cada roce
       // manda a volar y no hay nada que construir.
       //
-      // El FORCEJEO —separarse— es gratis: dos cuerpos no pueden ocupar el
-      // mismo lugar, y empujar no es pegar. Es además lo único que queda
-      // pasando cuando el libro está muerto y nadie tiene con qué golpear. Va
-      // con su propio reloj, más rápido que el de los golpes, para que la
-      // separación se sienta continua sin gastarle el turno a nadie.
-      if (now - m.lastPush[i] >= PUSH_COOLDOWN && now - m.lastPush[j] >= PUSH_COOLDOWN) {
-        m.vx[j] += nx * MELEE_NUDGE;
-        m.vx[i] -= nx * MELEE_NUDGE;
-        m.lastPush[i] = now;
-        m.lastPush[j] = now;
-      }
+      // El FORCEJEO —separarse— es gratis y pasa todos los cuadros: dos cuerpos
+      // no pueden ocupar el mismo lugar, y empujar no es pegar. Es además lo
+      // único que queda pasando cuando el libro está muerto y nadie tiene con
+      // qué golpear.
+      const empuje = nx * MELEE_NUDGE * dt;
+      m.vx[j] += empuje;
+      m.vx[i] -= empuje;
 
       if (now - m.lastHit[i] < HIT_COOLDOWN || now - m.lastHit[j] < HIT_COOLDOWN) continue;
 
@@ -627,15 +714,11 @@ export function stepMatch(
 
       // Cada uno tira su golpe, alternando puño y patada. El que recibe queda
       // en hurt, que lo resuelve la capa de render con el hitstun que ya existe.
-      // El peleador se DA VUELTA hacia el que golpea: pegar de espaldas era la
-      // otra cosa que se veía mal, porque `facing` sólo lo escribía la carrera y
-      // en el forcejeo los dos van casi quietos.
       if (golpeaI) {
         m.energy[i] -= COST_MELEE;
         m.damage[j] += hitDamage(m.weight[i]);
         m.hitstun[j] = now - HITSTUN + MELEE_STUN;
         m.lastBlow[i] = m.lastBlow[i] === 0 ? 1 : 0;
-        m.facing[i] = dx >= 0 ? 1 : -1;
         emit(m.events, EVENT_MELEE, m.x[i], m.y[i], m.lastBlow[i], m.team[i], i);
       }
       if (golpeaJ) {
@@ -643,7 +726,6 @@ export function stepMatch(
         m.damage[i] += hitDamage(m.weight[j]);
         m.hitstun[i] = now - HITSTUN + MELEE_STUN;
         m.lastBlow[j] = m.lastBlow[j] === 0 ? 1 : 0;
-        m.facing[j] = dx >= 0 ? -1 : 1;
         emit(m.events, EVENT_MELEE, m.x[j], m.y[j], m.lastBlow[j], m.team[j], j);
       }
 

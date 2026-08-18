@@ -97,6 +97,42 @@ document.addEventListener('visibilitychange', () => client.clearTrades());
 
 const game = await startGame(host, match, client, (ms) => { perf.frameMs = ms; }, stage, ritmo);
 
+/**
+ * `?medir` — la regla, para cuando el juego se ve corrido en un teléfono.
+ *
+ * El encuadre roto —el juego dibujado en una franja y media pantalla muerta— no
+ * se reproduce en ningún navegador de escritorio ni en un headless: depende de
+ * cómo el navegador del teléfono resuelve el alto de la página con sus barras
+ * apareciendo y desapareciendo. Y en un teléfono no hay consola donde mirar.
+ *
+ * Así que los números se dibujan en pantalla. Una captura de esto dice en un
+ * segundo si el problema es la caja de la página, la del canvas o ninguna de
+ * las dos, que es lo que de otro modo se adivina.
+ */
+if (params.has('medir')) {
+  const regla = document.createElement('pre');
+  regla.style.cssText = 'position:fixed;left:0;top:0;z-index:9999;margin:0;padding:6px 8px;'
+    + 'font:12px ui-monospace,monospace;color:#0f6;background:rgba(0,0,0,.82);'
+    + 'white-space:pre;pointer-events:none;line-height:1.35';
+  document.body.appendChild(regla);
+  const refrescar = (): void => {
+    const lienzo = game.app.canvas;
+    const caja = lienzo.getBoundingClientRect();
+    const vv = window.visualViewport;
+    regla.textContent = [
+      `ventana   ${window.innerWidth} x ${window.innerHeight}`,
+      `visual    ${vv ? `${Math.round(vv.width)} x ${Math.round(vv.height)}` : '(no hay)'}`,
+      `root      ${host.clientWidth} x ${host.clientHeight}`,
+      `canvas    ${Math.round(caja.width)} x ${Math.round(caja.height)} en ${Math.round(caja.x)},${Math.round(caja.y)}`,
+      `buffer    ${lienzo.width} x ${lienzo.height}`,
+      `renderer  ${game.app.renderer.width} x ${game.app.renderer.height} @${game.app.renderer.resolution}x`,
+      `dpr       ${window.devicePixelRatio}`,
+    ].join('\n');
+  };
+  refrescar();
+  window.setInterval(refrescar, 500);
+}
+
 // Enganche de desarrollo: deja mirar el renderer desde afuera —tamaño,
 // resolución, draw calls— sin tener que instrumentar el juego cada vez. Vite lo
 // saca del build de producción junto con la rama muerta.

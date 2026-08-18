@@ -14,7 +14,18 @@
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230B0F19'/%3E%3Crect x='2' y='4' width='5' height='8' fill='%2300FF66'/%3E%3Crect x='9' y='4' width='5' height='8' fill='%23FF0055'/%3E%3C/svg%3E"
     />
     <style>
+      /*
+        `100dvh` y no `100%`. El alto en porcentaje se resuelve contra el bloque
+        contenedor inicial, y en los navegadores de teléfono —sobre todo los que
+        van adentro de otra app, con su propia barra arriba y abajo— ese bloque
+        no es lo que se ve: la página termina midiendo de más o de menos y el
+        juego queda dibujado en una franja con el resto muerto. `dvh` es la
+        unidad que sigue al viewport de verdad mientras las barras aparecen y
+        desaparecen. El `100%` queda primero como respaldo para los navegadores
+        que no la conozcan: el que sí la conoce pisa la línea de arriba.
+      */
       html, body, #root { height: 100%; margin: 0; background: #0B0F19; }
+      html, body, #root { height: 100dvh; }
       body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #e6edf3; }
     </style>
   </head>

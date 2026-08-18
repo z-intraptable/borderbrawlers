@@ -279,12 +279,17 @@ export async function startGame(
    * primer layout incluido, que es justo lo que falta.
    */
   function encuadrar(): void {
-    const ancho = host.clientWidth;
-    const alto = host.clientHeight;
+    // Se mide la CAJA, no `clientWidth`. `getBoundingClientRect` da fracciones,
+    // que es lo que hay cuando el viewport de un teléfono no cae en un número
+    // entero de píxeles CSS; `clientWidth` las redondea y la diferencia se
+    // acumula en una franja muerta al costado.
+    const caja = host.getBoundingClientRect();
+    const ancho = Math.round(caja.width);
+    const alto = Math.round(caja.height);
     if (ancho <= 0 || alto <= 0) return;
-    // `renderer.width` viene en píxeles FÍSICOS y `clientWidth` en píxeles CSS:
-    // en una pantalla retina son el doble. Comparar sin dividir por la
-    // resolución da siempre distinto y se redimensiona en todos los cuadros.
+    // `renderer.width` viene en píxeles FÍSICOS y la caja en píxeles CSS: en una
+    // pantalla retina son el doble. Comparar sin dividir por la resolución da
+    // siempre distinto y se redimensiona en todos los cuadros.
     if (app.renderer.width / app.renderer.resolution === ancho
       && app.renderer.height / app.renderer.resolution === alto) return;
     app.renderer.resize(ancho, alto);
@@ -293,6 +298,37 @@ export async function startGame(
   const observador = new ResizeObserver(encuadrar);
   observador.observe(host);
   encuadrar();
+
+  /**
+   * Tres avisos más, porque en un teléfono el `ResizeObserver` no alcanza.
+   *
+   * El caso que se vio en la página publicada: el juego dibujado en una franja
+   * arriba y media pantalla muerta abajo. Pasa cuando la caja del host cambia
+   * SIN que el observador lo note o antes de que haya nada que observar —el
+   * navegador esconde su barra al primer desplazamiento, se gira el teléfono, o
+   * la página se restaura del caché de atrás—.
+   *
+   * - `visualViewport` es lo único que sigue a la barra del navegador
+   *   apareciendo y desapareciendo; ni `resize` de la ventana ni el observador
+   *   se enteran de eso en iOS.
+   * - `orientationchange` llega ANTES de que el navegador acomode la caja, así
+   *   que hay que volver a medir un poco después, no en el momento.
+   * - `pageshow` cubre volver con el botón de atrás desde el caché.
+   *
+   * Son todos listeners pasivos y `encuadrar` sale enseguida si nada cambió, o
+   * sea que el costo de tenerlos de más es cero. El costo de que falte uno es
+   * la mitad de la pantalla.
+   */
+  const revisar = (): void => {
+    encuadrar();
+    for (const espera of [50, 250, 600]) window.setTimeout(encuadrar, espera);
+  };
+  window.addEventListener('resize', revisar, { passive: true });
+  window.addEventListener('orientationchange', revisar, { passive: true });
+  window.addEventListener('pageshow', revisar, { passive: true });
+  window.visualViewport?.addEventListener('resize', revisar, { passive: true });
+  window.visualViewport?.addEventListener('scroll', encuadrar, { passive: true });
+  revisar();
 
   const backdrop = createBackdrop();
   // El fondo pintado va debajo de los cristales de volumen, que son el dato.
@@ -780,6 +816,11 @@ export async function startGame(
     destroy(): void {
       app.ticker.remove(tick);
       observador.disconnect();
+      window.removeEventListener('resize', revisar);
+      window.removeEventListener('orientationchange', revisar);
+      window.removeEventListener('pageshow', revisar);
+      window.visualViewport?.removeEventListener('resize', revisar);
+      window.visualViewport?.removeEventListener('scroll', encuadrar);
       backdrop.destroy();
       // El caché de `Assets` sobrevive al `Application`: sin esto, cada recarga
       // en caliente de Vite deja otra copia de las hojas en memoria de GPU.
