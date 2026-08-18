@@ -15,6 +15,9 @@ import { Container, Graphics, Sprite, Texture } from 'pixi.js';
  * muerto: son lo que se ve mientras el arte viaja, y lo que se ve si no está.
  * Cambiar el fondo no puede depender de que un archivo exista.
  *
+ * **Los cuadros de la tira son variantes, no una animación.** Ver
+ * `createFlameFormation`: es la corrección más importante de este archivo.
+ *
  * **Los cristales son polígonos explícitos, no curvas.** La primera versión
  * dibujaba llamas con bezier y salían facetadas, porque Pixi decide cuántos
  * tramos tiene una curva en el espacio LOCAL —cuando la construye— y no vuelve a
@@ -71,9 +74,14 @@ interface Formation {
   apply(share: number, intensity: number, unit: number, elapsed: number): void;
 }
 
-/** Cuántas llamas tiene una hoguera dibujada, y a cuántos cuadros por segundo arde. */
+/** Cuántas llamas tiene una hoguera dibujada. */
 const FLAMES = 5;
-const FLAME_FPS = 11;
+/**
+ * Cuánto se abre la hoguera respecto de una llama. Menor que 1 a propósito: las
+ * llamas tienen que SOLAPARSE. Separadas se ven cinco velas, encimadas se ve una
+ * fogata, que es lo que son.
+ */
+const FLAME_SPREAD = 0.62;
 
 export interface Backdrop {
   view: Container;
@@ -186,23 +194,64 @@ function createFormation(lit: number, dark: number): Formation {
  * Cada llama va por su cuadro y su fase. Con las cinco en el mismo cuadro la
  * hoguera late como un cartel de neón en vez de arder.
  */
+/**
+ * Una hoguera dibujada: cinco llamas encimadas que arden.
+ *
+ * **Acá NO hay flipbook, y esa es toda la corrección.** La versión anterior
+ * pasaba los cinco cuadros de la tira a once por segundo, como una animación
+ * cuadro a cuadro. Pero los cinco cuadros no son una animación: son cinco
+ * dibujos sueltos que un generador hizo por separado, cada uno con su alto, su
+ * ancho y su silueta. Pasarlos en fila no hace que la llama ondule — hace que
+ * la llama SALTE, porque entre cuadro y cuadro cambia de tamaño y de forma sin
+ * ninguna continuidad. Es exactamente lo que se veía mal, y no se arregla
+ * generando más cuadros: un generador de imágenes vuelve a dar dibujos sueltos.
+ *
+ * Lo que sí es una animación es una transformación continua. Así que cada llama
+ * se queda **fija en un dibujo** —el suyo, distinto del de sus vecinas, que es
+ * de donde sale la variedad— y lo que se mueve son sus números:
+ *
+ * - **respira**: se estira a lo alto y se afina a lo ancho, conservando el bulto.
+ *   Dos senos de frecuencias que no son múltiplos, así el ciclo no se repite a
+ *   ojo. Con un seno solo se le ve el compás enseguida.
+ * - **se inclina**: `skew.x` con el ancla en la base mueve la punta y deja el pie
+ *   clavado, que es como se dobla una llama de verdad.
+ * - **chisporrotea**: el `tint` late entre blanco y un gris apenas más oscuro.
+ *   El tinte es por vértice, así que no rompe el batch: las cinco llamas siguen
+ *   siendo un solo draw call.
+ *
+ * Ninguna de las tres cambia de textura, y por eso no hay salto posible.
+ */
 function createFlameFormation(frames: Texture[]): Formation {
   const node = new Container();
-  const llamas: { sprite: Sprite; phase: number; speed: number; baseScale: number }[] = [];
+  interface Llama {
+    sprite: Sprite;
+    phase: number;
+    speed: number;
+    baseScale: number;
+    /** Cuánto se dobla ésta. Las de afuera se doblan más: tienen menos masa. */
+    lean: number;
+  }
+  const llamas: Llama[] = [];
 
   for (let i = 0; i < FLAMES; i++) {
     const offset = (i - (FLAMES - 1) / 2) / ((FLAMES - 1) / 2);
-    const sprite = new Sprite(frames[0]);
+    // Cada llama se queda con SU dibujo. Con cinco cuadros y cinco llamas es uno
+    // cada una; con menos cuadros se repiten, que es peor pero no rompe.
+    const sprite = new Sprite(frames[i % frames.length]);
     // Ancla en la base: la hoguera está apoyada en el piso de la pantalla, y es
     // el punto que `hoja-fuego.py` alineó al cortar.
     sprite.anchor.set(0.5, 1);
-    sprite.x = offset * 0.95 * SHARD_UNIT;
+    sprite.x = offset * FLAME_SPREAD * SHARD_UNIT;
     node.addChild(sprite);
     llamas.push({
       sprite,
-      phase: i * 2.3,
-      speed: 1 + i * 0.13,
-      baseScale: 0.5 + (1 - Math.abs(offset)) * 0.5,
+      // Las fases no son múltiplos entre sí para que no lleguen nunca todas al
+      // mismo punto del ciclo: cinco llamas latiendo juntas se leen como una
+      // sola cosa parpadeando.
+      phase: i * 1.87,
+      speed: 0.85 + i * 0.11,
+      baseScale: 0.55 + (1 - Math.abs(offset)) * 0.45,
+      lean: 0.05 + Math.abs(offset) * 0.055,
     });
   }
   // La del medio al frente, como el pico de los cristales.
@@ -220,13 +269,20 @@ function createFlameFormation(frames: Texture[]): Formation {
       // Más presente que los cristales: el fuego es opaco, no un mineral
       // traslúcido. Igual no llega a 1 — sigue siendo fondo.
       node.alpha = 0.62 + share * 0.28;
+      // Con el mercado despierto el fuego arde más rápido, no sólo más grande.
+      const ritmo = 0.7 + intensity * 0.8;
       for (const llama of llamas) {
-        const cual = Math.floor(elapsed * FLAME_FPS * llama.speed + llama.phase);
-        // `%` de un negativo da negativo en JS, y `elapsed` es siempre positivo,
-        // pero la fase podría no serlo si alguien la toca: el `+ length` cuesta
-        // nada y saca el caso de raíz.
-        llama.sprite.texture = frames[(cual % frames.length + frames.length) % frames.length];
-        llama.sprite.scale.set(llama.baseScale * aUnidad);
+        const w = elapsed * ritmo * llama.speed + llama.phase;
+        const sube = 1 + Math.sin(w * 3.1) * 0.09 + Math.sin(w * 5.3 + 1.3) * 0.045;
+        // Se afina lo que se estira: una llama no engorda cuando crece.
+        const angosta = 1 - (sube - 1) * 0.8;
+        const escala = llama.baseScale * aUnidad;
+        llama.sprite.scale.set(escala * angosta, escala * sube);
+        llama.sprite.skew.x = Math.sin(w * 2.2) * llama.lean
+          + Math.sin(w * 3.9 + 0.7) * llama.lean * 0.4;
+        const brasa = 0.88 + Math.sin(w * 6.7 + 2.1) * 0.12;
+        const nivel = Math.round(brasa * 255);
+        llama.sprite.tint = (nivel << 16) | (nivel << 8) | nivel;
       }
     },
   };

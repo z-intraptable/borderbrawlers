@@ -109,6 +109,28 @@ export const HITSTUN = 0.34;
 const MELEE_STUN = 0.12;
 /** Separación del cuerpo a cuerpo. Alcanza para no solaparse, no para lanzar. */
 const MELEE_NUDGE = 1.6;
+/**
+ * Cada cuánto se forcejea. Es corto porque separarse no cuesta nada, pero no es
+ * cero: aplicado todos los cuadros, `MELEE_NUDGE` a 60 Hz serían 96 u/s de
+ * empujón y los peleadores saldrían disparados de cualquier contacto.
+ */
+const PUSH_COOLDOWN = 0.1;
+/**
+ * Cada cuánto puede tirar una especial UN peleador.
+ *
+ * No existía, y su ausencia rompía el diseño que el propio código declara dos
+ * bloques más abajo: *"la especial gasta la barra ENTERA… el que aguanta pega
+ * más fuerte"*. Sin reloj nadie aguantaba nunca. La condición de disparo es
+ * `energy >= COST_SKILL`, o sea 0,45, así que la barra se descargaba **exacta**
+ * en 0,45 apenas la cruzaba: todas las especiales salían idénticas, la más
+ * floja posible, y salían todo el tiempo. Ése era el goteo que se veía en
+ * pantalla como ruido, y de paso dejaba al cuerpo a cuerpo sin barra —el puño
+ * cuesta 0,12 y la especial se llevaba todo antes.
+ *
+ * Con dos segundos y medio de por medio la barra llega arriba, la especial pega
+ * como corresponde, y entre una y otra lo que se ve es la pelea.
+ */
+const SKILL_COOLDOWN = 2.5;
 const CONTACT = 0.85;
 /**
  * Distancia de guardia. Apenas menor que `CONTACT` para que el cuerpo a cuerpo
@@ -227,7 +249,23 @@ export interface Match {
   stocks: Uint8Array;
   jumps: Uint8Array;
   lastJump: Float32Array;
+  /**
+   * Cuándo recibió el último GOLPE de verdad. Gobierna la cadencia del cuerpo a
+   * cuerpo: mientras no pase `HIT_COOLDOWN` nadie le vuelve a pegar.
+   *
+   * No lo escribe el forcejeo. Antes sí, y era un error de lógica con
+   * consecuencia visible: dos peleadores sin barra se tocaban, el forcejeo
+   * ponía el reloj en cero, y cuando al cuarto de segundo les llegaba la carga
+   * del libro **el golpe no salía** porque el reloj del forcejeo todavía corría.
+   * O sea: el que no podía pegar le bloqueaba el golpe al que sí podía. Por eso
+   * ahora el empujón tiene su propio reloj, `lastPush`, y éste sólo se toca
+   * cuando alguien pegó.
+   */
   lastHit: Float32Array;
+  /** Cuándo fue el último forcejeo. Reloj aparte del de los golpes. */
+  lastPush: Float32Array;
+  /** Cuándo tiró su última especial. Ver `SKILL_COOLDOWN`. */
+  lastSkillAt: Float32Array;
   hitstun: Float32Array;
   whale: Uint8Array;
   stage: Uint8Array;
@@ -305,6 +343,8 @@ export function createMatch(lanes: number = FIGHTERS_PER_TEAM): Match {
     jumps: new Uint8Array(CAPACITY),
     lastJump: new Float32Array(CAPACITY),
     lastHit: new Float32Array(CAPACITY),
+    lastPush: new Float32Array(CAPACITY),
+    lastSkillAt: new Float32Array(CAPACITY),
     hitstun: new Float32Array(CAPACITY),
     whale: new Uint8Array(CAPACITY),
     stage: new Uint8Array(CAPACITY),
@@ -478,6 +518,7 @@ export function stepMatch(
     if (m.slot[i] !== SLOT_ACTIVE) continue;
     if (m.energy[i] < COST_SKILL) continue;
     if (now - m.hitstun[i] < HITSTUN) continue;
+    if (now - m.lastSkillAt[i] < SKILL_COOLDOWN) continue;
     // El elegido para el ultra se PLANTA cuando la barra del equipo pasa de
     // `ULTRA_HOLD`: deja de gastar y junta para el super. Sin esto la especial
     // le baja la barra a cero y cuando le toca el ultra no puede pagarlo.
@@ -494,9 +535,22 @@ export function stepMatch(
     // precio, la barra se drenaría de a 0,45 y todas las especiales saldrían
     // iguales — que es el goteo que este sistema vino a sacar.
     const spent = m.energy[i];
-    m.energy[i] = 0;
     const radius = skillRadius(spent);
 
+    // No se descarga al vacío. Antes la especial salía por tener barra, hubiera
+    // o no alguien a quien pegarle: el peleador tiraba el poder al aire, se
+    // quedaba en cero y volvía al cuerpo a cuerpo sin nada. Se veía como
+    // fuegos artificiales sueltos en un rincón de la pantalla, que es
+    // exactamente el ruido que no aporta nada.
+    let alcanza = false;
+    for (let j = 0; j < CAPACITY && !alcanza; j++) {
+      if (j === i || m.slot[j] !== SLOT_ACTIVE || m.team[j] === m.team[i]) continue;
+      alcanza = Math.hypot(m.x[j] - m.x[i], m.y[j] - m.y[i]) <= radius;
+    }
+    if (!alcanza) continue;
+
+    m.energy[i] = 0;
+    m.lastSkillAt[i] = now;
     m.lastSkill[i] = m.lastSkill[i] === 0 ? 1 : 0;
     emit(m.events, EVENT_SKILL, m.x[i], m.y[i], m.lastSkill[i], m.team[i], i);
     m.shake = Math.max(m.shake, 0.2 + spent * 0.5);
@@ -535,7 +589,6 @@ export function stepMatch(
       const dy = m.y[j] - m.y[i];
       const distance = Math.hypot(dx, dy);
       if (distance > CONTACT) continue;
-      if (now - m.lastHit[i] < HIT_COOLDOWN || now - m.lastHit[j] < HIT_COOLDOWN) continue;
 
       const nx = distance > 1e-6 ? dx / distance : 1;
 
@@ -544,12 +597,19 @@ export function stepMatch(
       // que hace que el daño acumulado signifique algo: sin ella, cada roce
       // manda a volar y no hay nada que construir.
       //
-      // El FORCEJEO —separarse— es gratis y pasa siempre: dos cuerpos no pueden
-      // ocupar el mismo lugar, y empujar no es pegar. Es además lo único que
-      // queda pasando cuando el libro está muerto y nadie tiene con qué golpear.
-      m.vx[j] += nx * MELEE_NUDGE;
-      m.vx[i] -= nx * MELEE_NUDGE;
-      m.lastHit[i] = now; m.lastHit[j] = now;
+      // El FORCEJEO —separarse— es gratis: dos cuerpos no pueden ocupar el
+      // mismo lugar, y empujar no es pegar. Es además lo único que queda
+      // pasando cuando el libro está muerto y nadie tiene con qué golpear. Va
+      // con su propio reloj, más rápido que el de los golpes, para que la
+      // separación se sienta continua sin gastarle el turno a nadie.
+      if (now - m.lastPush[i] >= PUSH_COOLDOWN && now - m.lastPush[j] >= PUSH_COOLDOWN) {
+        m.vx[j] += nx * MELEE_NUDGE;
+        m.vx[i] -= nx * MELEE_NUDGE;
+        m.lastPush[i] = now;
+        m.lastPush[j] = now;
+      }
+
+      if (now - m.lastHit[i] < HIT_COOLDOWN || now - m.lastHit[j] < HIT_COOLDOWN) continue;
 
       // El GOLPE, en cambio, se paga, y cada uno por su cuenta. Antes el
       // contacto disparaba un intercambio automático: los dos se pegaban
@@ -560,13 +620,22 @@ export function stepMatch(
       const golpeaJ = m.energy[j] >= COST_MELEE && !guardando(m, j);
       if (!golpeaI && !golpeaJ) continue;
 
+      // Recién acá se gasta el turno: el reloj del cuerpo a cuerpo lo mueve un
+      // golpe que existió, no un roce.
+      m.lastHit[i] = now;
+      m.lastHit[j] = now;
+
       // Cada uno tira su golpe, alternando puño y patada. El que recibe queda
       // en hurt, que lo resuelve la capa de render con el hitstun que ya existe.
+      // El peleador se DA VUELTA hacia el que golpea: pegar de espaldas era la
+      // otra cosa que se veía mal, porque `facing` sólo lo escribía la carrera y
+      // en el forcejeo los dos van casi quietos.
       if (golpeaI) {
         m.energy[i] -= COST_MELEE;
         m.damage[j] += hitDamage(m.weight[i]);
         m.hitstun[j] = now - HITSTUN + MELEE_STUN;
         m.lastBlow[i] = m.lastBlow[i] === 0 ? 1 : 0;
+        m.facing[i] = dx >= 0 ? 1 : -1;
         emit(m.events, EVENT_MELEE, m.x[i], m.y[i], m.lastBlow[i], m.team[i], i);
       }
       if (golpeaJ) {
@@ -574,11 +643,13 @@ export function stepMatch(
         m.damage[i] += hitDamage(m.weight[j]);
         m.hitstun[i] = now - HITSTUN + MELEE_STUN;
         m.lastBlow[j] = m.lastBlow[j] === 0 ? 1 : 0;
+        m.facing[j] = dx >= 0 ? -1 : 1;
         emit(m.events, EVENT_MELEE, m.x[j], m.y[j], m.lastBlow[j], m.team[j], j);
       }
 
-      const heavy = m.whale[i] === 1 || m.whale[j] === 1;
-      emit(m.events, EVENT_HIT, m.x[i] + dx / 2, m.y[i] + dy / 2, heavy ? 1.6 : 1, m.team[i], -1);
+      // El temblor lo pone el que pegó, no el par. Con `m.team[i]` fijo, un
+      // golpe que tiraba sólo J salía con el color del bando de I.
+      const heavy = (golpeaI && m.whale[i] === 1) || (golpeaJ && m.whale[j] === 1);
       m.shake = Math.max(m.shake, heavy ? 1 : 0.45);
     }
   }

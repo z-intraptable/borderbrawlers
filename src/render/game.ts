@@ -40,7 +40,10 @@ import { loadSheets, unloadSheets } from '../art/loadSheets';
 import type { FighterSheets } from '../art/loadSheets';
 import { createSpriteFighterView } from '../art/spriteFighter';
 import { ROSTER, characterFor } from '../game/roster';
-import { burst, createFx, drawFx, dust, ring, trail, updateFx } from './fx';
+import {
+  burst, createFx, drawFx, dust, flash, impact, ring, shards, slash, trail,
+  updateFx, wave,
+} from './fx';
 import { createBackdrop } from './backdrop';
 import { createStage, loadFlames, loadPlatforms, loadStage, stageNames, stageTint } from './stage';
 import type { StagePlatforms } from './stage';
@@ -105,8 +108,14 @@ const FIXED_DT = 1 / 60;
  * chispas no vayan al doble que los cuerpos. La cámara NO: sigue amortiguando
  * en tiempo real, porque una cámara a media velocidad se siente pesada aunque
  * lo que persigue vaya lento.
+ *
+ * **Por qué 0,72 y no 0,5 ni 1.** A velocidad entera no se llegaba a ver quién
+ * pegaba a quién. A la mitad sí se ve, pero el super pasa a durar un segundo y
+ * medio y la pelea se arrastra. 0,72 es el punto donde una acción de tres
+ * dibujos —0,45 s de habilidad— dura 0,63 s: alcanza para leer los tres cuadros
+ * y no alcanza para aburrir. Se prueba otro con `?ritmo=`.
  */
-const RITMO = 0.5;
+const RITMO = 0.72;
 /** Tope de pasos por frame: tras un hipo, se pierde tiempo antes que congelar. */
 const MAX_STEPS = 5;
 
@@ -166,6 +175,14 @@ const SHAKE_GAIN = 0.35;
 
 /** A partir de esta rapidez, el peleador deja estela. */
 const TRAIL_SPEED = 7;
+/**
+ * A qué distancia del centro del cuerpo cae el impacto de un puño o una patada.
+ *
+ * El personaje mide 0,6 de ancho, así que el golpe conecta apenas afuera de su
+ * silueta: puesto en el centro, el destello le queda pintado encima del pecho y
+ * parece que se golpeó a sí mismo.
+ */
+const PUNO_ALCANCE = 0.52;
 /** Duración de la onda de choque del super, en segundos. */
 const SHOCKWAVE_TIME = 0.85;
 
@@ -404,8 +421,15 @@ export async function startGame(
    * proyecto, y no compran nada: las barras cambian todas juntas, todos los
    * frames. Va después de los peleadores para que ninguna quede tapada.
    */
-  const bars = new Graphics();
-  world.addChild(bars);
+  // La barra de energía de cada peleador ya NO se dibuja. La energía sigue
+  // gobernando todo —quién puede pegar, cuándo sale una especial, a quién le
+  // toca el ultra—, pero seis barritas siguiendo a seis cuerpos que saltan eran
+  // seis cosas más moviéndose en una pantalla que ya tiene nueve losas subiendo
+  // y bajando. Lo que la barra decía se lee igual en el HUD, que está quieto.
+  //
+  // `drawBars` queda escrita a propósito: volver a mostrarlas es una línea, y
+  // borrarla obligaría a reescribir el encuadre y el marco dorado del elegido.
+  void drawBars;
 
   /** El cuerpo que le toca a cada slot ahora mismo. */
   const views: FighterView[] = [];
@@ -538,12 +562,22 @@ export async function startGame(
     // durante el hitstop tiene que aparecer con el peleador que le tocó igual.
     relieve(match);
 
+    // Un slot que se cayó del escenario no puede dejar un golpe agendado. El
+    // golpe se cobra cuando la ANIMACIÓN llega a su cuadro de impacto, y a un
+    // peleador que desaparece a mitad de super no le llega nunca: el apunte
+    // quedaba ahí, el slot se volvía a llenar, y el primer puño del que entraba
+    // cruzaba el umbral y cobraba el super del muerto —fogonazo, hitstop y
+    // cambio de escenario incluidos—. `drawFighters` ya borra la acción de un
+    // slot inactivo por la misma razón; esto es la otra mitad.
+    for (let i = 0; i < golpeKind.length; i++) {
+      if (match.slot[i] !== SLOT_ACTIVE) golpeKind[i] = 0;
+    }
+
     if (platformSprites === null) drawStage(platforms, match);
     else placeStage(platformSprites, match);
     updateCamera(camera, match, dt, app.renderer.height / app.renderer.width);
     applyCamera(world, app, camera, match.shake);
     drawFighters(views, match, action, actionAge, dtPelea, elapsed, cobrarGolpe);
-    drawBars(bars, match);
     drawFx(fx, plainFx, glowFx);
 
     /* --- fondo ------------------------------------------------------- */
@@ -578,8 +612,22 @@ export async function startGame(
     onFrame(performance.now() - started);
   };
 
+  /**
+   * Agenda un golpe: arranca la animación ahora y deja anotado el impacto para
+   * cobrarlo en el cuadro en que conecta.
+   *
+   * **Un golpe chico no pisa a uno grande.** Las cinco acciones están numeradas
+   * de menor a mayor —puño, patada, especial, super— y un golpe sólo interrumpe
+   * a otro de igual o menor rango. Sin esta guarda, un peleador que estaba
+   * soltando el super y entraba en contacto cuerpo a cuerpo a mitad de la
+   * animación quedaba tirando un puño, y el impacto del super, que ya estaba
+   * anotado, no se cobraba nunca: el ultra desaparecía sin explotar. La
+   * simulación igual reparte el daño —eso lo hizo `stepMatch` en su momento—,
+   * así que era un super invisible, de los peores de encontrar.
+   */
   function agendar(slot: number, kind: number, magnitude: number, team: number): void {
     if (slot < 0 || slot >= action.length) return;
+    if (golpeKind[slot] !== 0 && kind < golpeKind[slot]) return;
     startAction(action, actionAge, slot, kind);
     golpeKind[slot] = kind;
     golpeMagnitud[slot] = magnitude;
@@ -599,16 +647,49 @@ export async function startGame(
     golpeKind[slot] = 0;
     const magnitude = golpeMagnitud[slot];
     const teamColor = golpeEquipo[slot] === TEAM_GREEN ? GREEN : RED;
+    // Hacia dónde mira el que pega. Es lo que orienta el tajo y manda las
+    // chispas para adelante en vez de en círculo.
+    const hacia = match.facing[slot] >= 0 ? 1 : -1;
 
-    if (kind === ACT_SKILL) {
-      ring(fx, x, y, 2.3, 0.42, teamColor);
-      burst(fx, x, y, 8, 5, 0.1, 0.4, teamColor);
+    if (kind === ACT_PUNCH || kind === ACT_KICK) {
+      // El puño y la patada NO llevan anillo. Un anillo es una onda que se
+      // expande, y el cuerpo a cuerpo pasa tres veces por segundo: seis
+      // peleadores dejaban dieciocho anillos por segundo creciendo encima del
+      // escenario, y eso era la mitad del ruido. Lo que sí lleva es un impacto
+      // corto y direccional, que dura 0,17 s y se apaga antes del siguiente.
+      const alto = kind === ACT_PUNCH ? 0.16 : -0.1;
+      impact(fx, x + hacia * PUNO_ALCANCE, y + alto,
+        hacia > 0 ? 0 : Math.PI, kind === ACT_KICK ? 0.9 : 0.7, teamColor);
       return;
     }
 
+    if (kind === ACT_SKILL) {
+      // La especial: una descarga que revienta en el lugar. Anillo —acá sí,
+      // porque es una onda de verdad y sale cada dos segundos y medio—, un
+      // fogonazo blanco al centro y un tajo ancho en la dirección en que la
+      // tiró. `magnitude` es 0 o 1: cuál de las dos le tocó, así que las dos
+      // se ven distintas.
+      const variante = magnitude >= 0.5;
+      flash(fx, x, y, 0.62, 0.16, 0xffffff);
+      ring(fx, x, y, variante ? 2.6 : 2.1, 0.44, teamColor);
+      if (variante) {
+        slash(fx, x + hacia * 0.5, y, hacia > 0 ? 0 : Math.PI, 1.7, 0.24, teamColor);
+        burst(fx, x, y, 10, 6.5, 0.1, 0.42, teamColor);
+      } else {
+        shards(fx, x, y, 7, 5.5, teamColor);
+        burst(fx, x, y, 8, 5, 0.09, 0.38, 0xffffff);
+      }
+      return;
+    }
+
+    // El super. Es el único momento en que vale gastar todo: onda de choque
+    // contra el piso, esquirlas doradas, dos anillos y un fogonazo. Sale una vez
+    // cada medio minuto largo, así que acá el exceso es el punto.
+    flash(fx, x, y, 1.05, 0.2, 0xffffff);
+    wave(fx, x, y - FIGHTER_HALF_HEIGHT, magnitude * 1.6, 0.55, GOLD);
     ring(fx, x, y, magnitude, 0.6, GOLD);
-    ring(fx, x, y, magnitude * 0.6, 0.45, 0xffffff);
-    burst(fx, x, y, 14, 11, 0.2, 0.7, GOLD);
+    shards(fx, x, y, 14, 9, GOLD);
+    burst(fx, x, y, 14, 11, 0.16, 0.7, GOLD);
     hitstop = Math.max(hitstop, HITSTOP_SUPER);
     shockwaveTime = 0;
     shockwaveX = x;
@@ -635,27 +716,46 @@ export async function startGame(
       const teamColor = m.events.team[e] === TEAM_GREEN ? GREEN : RED;
 
       switch (kind) {
-        case EVENT_HIT:
-          burst(target, x, y, 6 + Math.round(magnitude * 5), 6 * magnitude, 0.12, 0.34, 0xfff0c0);
+        case EVENT_HIT: {
+          const slot = m.events.slot[e];
           // Sólo los impactos fuertes —los de una especial o el super— frenan
           // el tiempo. El cuerpo a cuerpo pasa decenas de veces por segundo y
           // congelar en cada roce dejaría la pelea a media velocidad.
           if (magnitude >= 1.2) stop = Math.max(stop, HITSTOP_SKILL);
+          // Con `slot` negativo el evento es del PAR que forcejea, y su golpe ya
+          // lo dibuja `cobrarGolpe` cuando el puño llega. Dibujarlo otra vez acá
+          // era pintar dos veces el mismo golpe, además de pintarlo antes de
+          // tiempo: éste llega al empezar la animación y el otro al conectar.
+          if (slot < 0) break;
+          // El que la recibe: sale despedido, y la dirección del impacto es la
+          // del envión que acaba de recibir. Es lo que hace que las chispas
+          // acompañen al cuerpo en vez de contradecirlo.
+          const dir = Math.atan2(m.vy[slot], m.vx[slot]);
+          impact(target, x, y, dir, 0.7 + magnitude * 0.5, 0xfff0c0);
           break;
+        }
         case EVENT_MELEE:
-          // La magnitud es cuál de los dos golpes toca: se alternan.
-          startAction(action, actionAge, m.events.slot[e],
-            magnitude === 0 ? ACT_PUNCH : ACT_KICK);
+          // La magnitud es cuál de los dos golpes toca: se alternan. Se AGENDA,
+          // igual que la especial y el super: la animación arranca ahora y el
+          // impacto se cobra en el cuadro en que el puño llega. Antes las
+          // chispas salían acá, o sea en el cuadro en que el brazo recién
+          // empezaba a moverse, y por eso el golpe no se sentía conectar.
+          agendar(m.events.slot[e], magnitude === 0 ? ACT_PUNCH : ACT_KICK,
+            magnitude, m.events.team[e]);
           break;
         case EVENT_SKILL:
         case EVENT_SUPER:
           // Ni anillo ni chispas todavía: el personaje recién está cargando. Se
-          // agenda y lo cobra `agendarGolpe` en el cuadro en que suelta.
+          // agenda y lo cobra `cobrarGolpe` en el cuadro en que suelta.
           agendar(m.events.slot[e], kind === EVENT_SUPER ? ACT_SUPER : ACT_SKILL,
             magnitude, m.events.team[e]);
           break;
         case EVENT_KO:
-          burst(target, x, y, 14, 9, 0.22, 0.8, 0xffffff);
+          // Se va de pantalla: fogonazo grande, esquirlas del color del que lo
+          // sacó y un anillo. Es el único efecto que conviene que tape.
+          flash(target, x, y, 0.95, 0.22, 0xffffff);
+          shards(target, x, y, 10, 8, teamColor);
+          burst(target, x, y, 14, 9, 0.16, 0.8, 0xffffff);
           ring(target, x, y, 2.6, 0.55, teamColor);
           stop = Math.max(stop, HITSTOP_KO);
           break;

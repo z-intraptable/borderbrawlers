@@ -1,10 +1,10 @@
 {
-  "_": "Tira de llamas cortada por scripts/hoja-fuego.py. El ancla es la base del cuadro, no su centro: la hoguera está clavada al piso.",
+  "_": "Sale de fuego-verde.png con scripts/fuego-recolor.py: mismo dibujo, rampa de fuego y espejado. Las dos hogueras tienen que ser hermanas.",
   "file": "fuego-rojo.png",
   "cell": [
-    107,
+    196,
     392
   ],
-  "frames": 6,
+  "frames": 5,
   "base": 4
 }

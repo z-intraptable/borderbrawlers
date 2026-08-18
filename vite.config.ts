@@ -11,6 +11,8 @@ import { resolve } from 'node:path';
  *   porque cambiar de modo es recargar el juego con otros parámetros, y hacerlo
  *   a mano en la barra de direcciones no es una demo.
  * - `demo.html` es el banco de animación: un peleador solo corriendo y saltando.
+ * - `efectos.html` es el banco de impactos y hogueras, que duran menos de un
+ *   segundo y en la pelea salen seis a la vez: acá se los congela de a uno.
  *
  * Antes esto se publicaba como tres HTML con TODO el arte embebido en `data:`,
  * que es lo que arma `scripts/artefacto.mjs`. Servía para mandar un archivo
@@ -29,6 +31,7 @@ export default defineConfig({
         juego: resolve(__dirname, 'index.html'),
         consola: resolve(__dirname, 'consola.html'),
         banco: resolve(__dirname, 'demo.html'),
+        efectos: resolve(__dirname, 'efectos.html'),
       },
     },
   },

@@ -52,7 +52,15 @@ await page.goto(`http://localhost:5199/?source=mock&scenario=${scenario}${stage}
 
 for (let i = 1; i <= seconds; i++) {
   await page.waitForTimeout(1000);
-  await page.screenshot({ path: `${OUT}/${scenario}-${String(i).padStart(2, '0')}.png` });
+  // Plazo largo y animaciones congeladas: acá el WebGL lo emula SwiftShader y
+  // un cuadro con Bloom tarda cientos de milisegundos, así que el lienzo nunca
+  // se queda quieto y el plazo de 30 s por defecto se agota antes de sacar la
+  // foto. No es que la página esté rota: es que rinde a seis cuadros por segundo.
+  await page.screenshot({
+    path: `${OUT}/${scenario}-${String(i).padStart(2, '0')}.png`,
+    timeout: 120000,
+    animations: 'disabled',
+  });
 }
 
 // Lo que el juego cree de sí mismo, leído del canvas ya corriendo.

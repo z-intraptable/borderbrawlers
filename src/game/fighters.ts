@@ -275,7 +275,18 @@ export const DAMAGE_SCALE = 0.022;
 export const MAX_KNOCKBACK = 9.5;
 /** Daño que suma un empujón, escalado por el peso del que pega. */
 export const HIT_DAMAGE = 6;
-export const HIT_COOLDOWN = 0.35;
+/**
+ * Cada cuánto puede entrar un golpe cuerpo a cuerpo, en segundos de SIMULACIÓN.
+ *
+ * Bajó de 0,35 a 0,25 al entrar `RITMO`. La pelea corre a 0,72 de velocidad para
+ * que se vean los cuadros de la animación, y eso estira también la cadencia:
+ * 0,35 de simulación son 0,49 de reloj de pared, casi medio segundo entre golpe
+ * y golpe. Se veía cada movimiento y no se veía una pelea. `0,35 × 0,72 = 0,25`
+ * devuelve la cadencia original —un golpe cada 0,35 s de reloj— con las
+ * animaciones a la velocidad en que se leen. Si alguna vez `RITMO` vuelve a 1,
+ * esto vuelve a 0,35.
+ */
+export const HIT_COOLDOWN = 0.25;
 
 /**
  * La regla que hace que una pelea escale: el empujón crece con el daño que ya

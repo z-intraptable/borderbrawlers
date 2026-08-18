@@ -1,19 +1,29 @@
 import type { Graphics } from 'pixi.js';
 
 /**
- * Efectos: chispas, polvo, estelas y anillos.
+ * Efectos: destellos, chispas, tajos, anillos, esquirlas, polvo y estelas.
  *
- * Un pool de tamaño fijo en arrays tipados, igual que los peleadores. La versión
- * anterior dibujaba un círculo que se agrandaba y se desvanecía en el lugar del
- * golpe; se veía como una mancha, no como un impacto. Lo que hace que un golpe
- * se sienta es que la materia salga despedida y caiga, así que estas partículas
- * tienen velocidad propia y gravedad.
+ * Un pool de tamaño fijo en arrays tipados, igual que los peleadores.
+ *
+ * **Por qué se reescribió.** La versión anterior dibujaba TODO con círculos —la
+ * chispa, la estela, el polvo, el anillo— y por eso un golpe se veía como una
+ * mancha de puntos y no como un impacto. El problema no era la cantidad de
+ * partículas sino su forma: un punto no tiene dirección, y un golpe es
+ * direccional. Acá cada tipo tiene la forma que le corresponde y, sobre todo,
+ * **el golpe sabe hacia dónde va**:
+ *
+ * - la **chispa** se dibuja como una raya en el sentido de su velocidad, que es
+ *   lo que hace que se lea como algo saliendo despedido y no como confeti;
+ * - el **destello** es una estrella de cuatro puntas que dura un suspiro, la
+ *   forma que el dibujo animado usa desde siempre para decir "acá pegó";
+ * - el **tajo** es una medialuna orientada, que dice de dónde vino el golpe;
+ * - el **anillo** se achata contra el piso cuando es una onda de choque, porque
+ *   una onda que se expande en el suelo no es un círculo visto de frente.
  *
  * **Cero asignaciones**: ni en `emit`, ni en `update`, ni en `draw`. Todo lo que
  * hace falta ya está reservado y el pool descarta la partícula más vieja cuando
- * se llena. Es el mismo criterio que el resto del proyecto — el documento que
- * revisamos hacía `matrix.apply({x, y})` por hueso y por frame, que asigna dos
- * objetos cada vez, y eso es exactamente lo que acá no puede pasar.
+ * se llena. Por eso el dibujo usa `moveTo`/`lineTo` y no `poly([...])`: el
+ * segundo pide un arreglo nuevo por partícula y por cuadro.
  *
  * Las coordenadas son de MUNDO y con la Y del juego (arriba positivo). La
  * conversión al eje de Pixi se hace en `draw`, en un solo lugar.
@@ -23,13 +33,29 @@ export const FX_SPARK = 0;
 export const FX_DUST = 1;
 export const FX_RING = 2;
 export const FX_TRAIL = 3;
+/** El fogonazo del impacto: una estrella que aparece y se va en un suspiro. */
+export const FX_FLASH = 4;
+/** La medialuna del golpe, orientada según de dónde vino. */
+export const FX_SLASH = 5;
+/** Esquirla: un triángulo que gira y cae. Es la materia que salta del impacto. */
+export const FX_SHARD = 6;
+/** Onda de choque: anillo achatado contra el piso. */
+export const FX_WAVE = 7;
 
-const CAPACITY = 320;
+const CAPACITY = 420;
+
+/** Puntas del fogonazo. Seis llena; con cuatro quedaba una estrella de lente. */
+const PUNTAS = 6;
 
 /** Gravedad de las partículas. Menos que la de los personajes: flotan un poco. */
 const FX_GRAVITY = -16;
-/** Rozamiento por segundo. El polvo se frena, las chispas casi no. */
-const DRAG = { [FX_SPARK]: 1.6, [FX_DUST]: 4.5, [FX_RING]: 0, [FX_TRAIL]: 3 } as const;
+/**
+ * Rozamiento por segundo, por tipo. El polvo se frena enseguida, la chispa casi
+ * no, y la esquirla queda en el medio porque pesa.
+ */
+const DRAG: readonly number[] = [1.6, 4.5, 0, 3, 0, 0, 1.1, 0];
+/** Cuáles se mueven solas. Los demás se quedan donde nacieron. */
+const VUELA: readonly boolean[] = [true, true, false, false, false, false, true, false];
 
 export interface Fx {
   kind: Uint8Array;
@@ -40,8 +66,56 @@ export interface Fx {
   age: Float32Array;
   life: Float32Array;
   size: Float32Array;
+  /** Orientación en radianes: hacia dónde apunta el tajo, cómo cae la esquirla. */
+  angle: Float32Array;
+  /** Vueltas por segundo de la esquirla. Cero en todo lo demás. */
+  spin: Float32Array;
   color: Uint32Array;
   head: number;
+}
+
+/* --- arcos a mano ----------------------------------------------------- */
+
+/**
+ * **Por qué acá no se usa `circle`, `ellipse` ni `arc` de Pixi.**
+ *
+ * Pixi decide en cuántos tramos parte una curva cuando la construye, en el
+ * espacio LOCAL, y no la vuelve a mirar al escalar. Esta capa dibuja en
+ * unidades de MUNDO —un anillo de una habilidad tiene radio 2,3— y después la
+ * cámara la agranda unas sesenta veces. Así que Pixi subdivide un círculo de
+ * dos unidades como si midiera dos píxeles: salían hexágonos. Es el mismo
+ * problema que ya está anotado en `backdrop.ts` para los cristales, y la misma
+ * solución: la geometría se declara, no se deduce.
+ *
+ * El número de tramos sale del radio en unidades de mundo por un factor que
+ * supone la escala típica de la cámara. No hace falta que sea exacto: entre 18
+ * y 72 lados ningún anillo se ve poligonal, y setenta y dos `lineTo` por
+ * partícula grande es ruido al lado de lo que cuesta el Bloom.
+ */
+function tramos(radio: number): number {
+  return Math.max(18, Math.min(72, Math.round(Math.abs(radio) * 34)));
+}
+
+/** Un arco como polilínea. `mover` arranca un camino nuevo; si no, lo continúa. */
+function arco(
+  g: Graphics, cx: number, cy: number, rx: number, ry: number,
+  desde: number, hasta: number, mover: boolean,
+): void {
+  const n = tramos(Math.max(rx, ry));
+  const paso = (hasta - desde) / n;
+  for (let k = 0; k <= n; k++) {
+    const a = desde + paso * k;
+    const qx = cx + Math.cos(a) * rx;
+    const qy = cy + Math.sin(a) * ry;
+    if (k === 0 && mover) g.moveTo(qx, qy);
+    else g.lineTo(qx, qy);
+  }
+}
+
+/** Un óvalo cerrado. Con `rx === ry` es un círculo. */
+function ovalo(g: Graphics, cx: number, cy: number, rx: number, ry: number): void {
+  arco(g, cx, cy, rx, ry, 0, Math.PI * 2, true);
+  g.closePath();
 }
 
 export function createFx(): Fx {
@@ -54,6 +128,8 @@ export function createFx(): Fx {
     age: new Float32Array(CAPACITY),
     life: new Float32Array(CAPACITY),
     size: new Float32Array(CAPACITY),
+    angle: new Float32Array(CAPACITY),
+    spin: new Float32Array(CAPACITY),
     color: new Uint32Array(CAPACITY),
     head: 0,
   };
@@ -66,22 +142,74 @@ export function createFx(): Fx {
 function spawn(
   fx: Fx, kind: number, x: number, y: number,
   vx: number, vy: number, size: number, life: number, color: number,
+  angle: number = 0, spin: number = 0,
 ): void {
   const i = fx.head;
-  fx.head = (fx.head + 1) % CAPACITY;
+  fx.head = (i + 1) % CAPACITY;
   fx.kind[i] = kind;
-  fx.x[i] = x; fx.y[i] = y;
-  fx.vx[i] = vx; fx.vy[i] = vy;
-  fx.age[i] = 0; fx.life[i] = life;
-  fx.size[i] = size; fx.color[i] = color;
+  fx.x[i] = x;
+  fx.y[i] = y;
+  fx.vx[i] = vx;
+  fx.vy[i] = vy;
+  fx.age[i] = 0;
+  fx.life[i] = life;
+  fx.size[i] = size;
+  fx.angle[i] = angle;
+  fx.spin[i] = spin;
+  fx.color[i] = color;
 }
 
 /**
- * Estallido de chispas en todas direcciones.
+ * El impacto completo de un golpe cuerpo a cuerpo.
  *
- * El ángulo se reparte en abanico con una desviación chica en vez de sortearse
- * libre: un sorteo uniforme deja huecos y grumos visibles con pocas partículas,
- * y acá son entre 6 y 14.
+ * Una sola llamada porque las tres piezas —fogonazo, tajo y chispas— son *un*
+ * golpe y tienen que salir juntas y con la misma dirección. Repartirlas en tres
+ * llamadas fue lo que dejó la versión anterior con chispas radiales que no
+ * decían nada: cada quien elegía su ángulo por su cuenta.
+ *
+ * `dir` es hacia dónde viaja el golpe, en radianes.
+ */
+export function impact(
+  fx: Fx, x: number, y: number, dir: number, strength: number, color: number,
+): void {
+  const s = Math.max(0.4, strength);
+  flash(fx, x, y, 0.55 * s, 0.13, 0xffffff);
+  slash(fx, x, y, dir, 0.9 * s, 0.17, color);
+  // Las chispas salen en abanico HACIA ADELANTE, no en círculo: un golpe manda
+  // la materia para el lado en que pegó.
+  const count = 5 + Math.round(s * 4);
+  for (let n = 0; n < count; n++) {
+    const spread = (Math.random() - 0.5) * 1.5;
+    const angle = dir + spread;
+    const speed = (3.4 + Math.random() * 4.6) * s;
+    spawn(
+      fx, FX_SPARK, x, y,
+      Math.cos(angle) * speed,
+      Math.sin(angle) * speed + 1.6,
+      0.05 + Math.random() * 0.06,
+      0.18 + Math.random() * 0.16,
+      color,
+    );
+  }
+}
+
+/** El fogonazo solo: una estrella blanca que dura un suspiro. */
+export function flash(
+  fx: Fx, x: number, y: number, size: number, life: number, color: number,
+): void {
+  spawn(fx, FX_FLASH, x, y, 0, 0, size, life, color, Math.random() * Math.PI);
+}
+
+/** La medialuna del golpe. `dir` es hacia dónde va el golpe. */
+export function slash(
+  fx: Fx, x: number, y: number, dir: number, size: number, life: number, color: number,
+): void {
+  spawn(fx, FX_SLASH, x, y, 0, 0, size, life, color, dir);
+}
+
+/**
+ * Chispas en círculo. Queda para lo que NO tiene dirección —una descarga que
+ * revienta en el lugar—; para un golpe va `impact`, que las manda hacia adelante.
  */
 export function burst(
   fx: Fx, x: number, y: number,
@@ -102,6 +230,26 @@ export function burst(
   }
 }
 
+/** Esquirlas: triángulos que giran y caen. Es lo que revienta en un super. */
+export function shards(
+  fx: Fx, x: number, y: number, count: number, speed: number, color: number,
+): void {
+  for (let n = 0; n < count; n++) {
+    const angle = (n / count) * Math.PI * 2 + Math.random() * 0.6;
+    const magnitude = speed * (0.5 + Math.random() * 0.7);
+    spawn(
+      fx, FX_SHARD, x, y,
+      Math.cos(angle) * magnitude,
+      Math.abs(Math.sin(angle)) * magnitude + speed * 0.5,
+      0.12 + Math.random() * 0.13,
+      0.55 + Math.random() * 0.45,
+      color,
+      Math.random() * Math.PI * 2,
+      (Math.random() - 0.5) * 9,
+    );
+  }
+}
+
 /** Polvo al aterrizar: sale para los costados y casi no sube. */
 export function dust(fx: Fx, x: number, y: number, strength: number): void {
   const count = 4 + Math.round(strength * 3);
@@ -118,9 +266,14 @@ export function dust(fx: Fx, x: number, y: number, strength: number): void {
   }
 }
 
-/** Anillo que se expande. Es el cuerpo de una habilidad o del super. */
+/** Anillo que se expande. Es el cuerpo de una habilidad. */
 export function ring(fx: Fx, x: number, y: number, radius: number, life: number, color: number): void {
   spawn(fx, FX_RING, x, y, 0, 0, radius, life, color);
+}
+
+/** Onda de choque contra el piso: el anillo del super, achatado. */
+export function wave(fx: Fx, x: number, y: number, radius: number, life: number, color: number): void {
+  spawn(fx, FX_WAVE, x, y, 0, 0, radius, life, color);
 }
 
 /** Un punto de estela. Se emite por frame en el que sale volando. */
@@ -133,9 +286,10 @@ export function updateFx(fx: Fx, dt: number): void {
     if (fx.age[i] >= fx.life[i]) continue;
     fx.age[i] += dt;
     const kind = fx.kind[i];
-    if (kind === FX_RING || kind === FX_TRAIL) continue;
+    if (!VUELA[kind]) continue;
+    fx.angle[i] += fx.spin[i] * dt;
     fx.vy[i] += FX_GRAVITY * dt;
-    const drag = 1 - Math.min(1, DRAG[kind as 0 | 1] * dt);
+    const drag = 1 - Math.min(1, DRAG[kind] * dt);
     fx.vx[i] *= drag;
     fx.vy[i] *= drag;
     fx.x[i] += fx.vx[i] * dt;
@@ -160,29 +314,129 @@ export function drawFx(fx: Fx, plain: Graphics, glow: Graphics): void {
     const fade = (1 - t) * (1 - t);
     const px = fx.x[i];
     const py = -fx.y[i];
+    const color = fx.color[i];
 
     switch (fx.kind[i]) {
       case FX_RING: {
         // El anillo nace chico y termina en `size`; el grosor se afina al
         // expandirse, que es lo que lo hace leer como una onda y no como un
-        // círculo que crece.
+        // círculo que crece. Un segundo anillo más chico y más brillante
+        // adentro le da espesor sin costar otra partícula.
         const radius = fx.size[i] * (0.15 + t * 0.95);
-        glow.circle(px, py, radius)
-          .stroke({ width: 0.22 * fade + 0.03, color: fx.color[i], alpha: fade });
+        ovalo(glow, px, py, radius, radius);
+        glow.stroke({ width: 0.2 * fade + 0.03, color, alpha: fade });
+        ovalo(glow, px, py, radius * 0.55, radius * 0.55);
+        glow.stroke({ width: 0.07 * fade + 0.012, color: 0xffffff, alpha: fade * 0.26 });
         break;
       }
-      case FX_SPARK:
-        glow.circle(px, py, fx.size[i] * (1 - t * 0.55))
-          .fill({ color: fx.color[i], alpha: 0.35 + fade * 0.65 });
+      case FX_WAVE: {
+        // Achatada a un tercio: la onda del super corre por el PISO, y un
+        // círculo perfecto la haría ver de frente, flotando en el aire.
+        const radius = fx.size[i] * (0.1 + t * 1.05);
+        ovalo(glow, px, py, radius, radius * 0.32);
+        glow.stroke({ width: 0.26 * fade + 0.04, color, alpha: fade });
         break;
+      }
+      case FX_FLASH: {
+        // Un fogonazo de seis puntas con cuerpo.
+        //
+        // La primera versión eran dos rombos cruzados de cuatro puntas muy
+        // finas —`ancho = radio × 0,18`— y con el Bloom encima salía una
+        // estrella de purpurina: cuatro rayos larguísimos y nada en el medio.
+        // Un golpe no es un destello de lente, es una mancha que revienta. Seis
+        // puntas y un radio corto que no baja de 0,44 dejan una silueta llena,
+        // que es lo que el dibujo animado usa para decir "acá pegó".
+        const brote = t < 0.25 ? t / 0.25 : 1;
+        const r = fx.size[i] * (0.5 + brote * 0.6) * (1 - t * 0.3);
+        const corto = r * 0.56;
+        const a = fx.angle[i];
+        for (let k = 0; k < PUNTAS * 2; k++) {
+          const ang = a + (k * Math.PI) / PUNTAS;
+          // Las puntas largas se alternan entre enteras y al 80%: una estrella
+          // perfectamente regular se lee como un ícono, no como un impacto.
+          const rad = k % 2 === 1 ? corto : (k % 4 === 0 ? r : r * 0.78);
+          const qx = px + Math.cos(ang) * rad;
+          const qy = py + Math.sin(ang) * rad;
+          if (k === 0) glow.moveTo(qx, qy);
+          else glow.lineTo(qx, qy);
+        }
+        glow.closePath();
+        glow.fill({ color, alpha: 0.4 + fade * 0.6 });
+        break;
+      }
+      case FX_SLASH: {
+        // Medialuna: dos arcos concéntricos cerrados. Es el rastro del brazo que
+        // pasó, así que **abraza el golpe**: el centro del arco va detrás del
+        // punto de impacto y la panza de la medialuna cae encima de él.
+        //
+        // Antes el arco se centraba EN el impacto y perpendicular a la
+        // dirección, y quedaba una sonrisa colgada abajo del destello, separada
+        // de él y sin relación con hacia dónde iba el golpe. Un tajo que no
+        // toca lo que corta no es un tajo.
+        const r = fx.size[i] * (0.45 + t * 1.1);
+        // Lineal y no cuadrático: ver el `alpha` de abajo.
+        const grosor = fx.size[i] * 0.4 * (1 - t);
+        // Ojo: el eje Y de Pixi apunta al revés que el del juego, así que el
+        // ángulo del golpe se refleja antes de dibujar. Sin esto el tajo sale
+        // espejado en vertical y contradice al puño que lo produjo.
+        const medio = -fx.angle[i];
+        const abre = 1.15 - t * 0.5;
+        const cx = px - Math.cos(medio) * r * 0.7;
+        const cy = py - Math.sin(medio) * r * 0.7;
+        // El `moveTo` NO es decorativo. `arc` une con una recta desde el punto
+        // en que quedó el camino, y el camino de este `Graphics` viene de la
+        // partícula anterior: sin esto, cada tajo salía con una cuña de
+        // quinientos píxeles apuntando a donde había terminado la chispa de
+        // antes. Se veía como un rayo de luz cruzando media pantalla y no había
+        // nada en el código del tajo que lo explicara.
+        arco(glow, cx, cy, r, r, medio - abre, medio + abre, true);
+        const interior = Math.max(0.01, r - grosor);
+        arco(glow, cx, cy, interior, interior, medio + abre, medio - abre, false);
+        glow.closePath();
+        // `fade` es cuadrático y dejaba el tajo al 18% a media vida, o sea
+        // invisible justo en los cuadros en que el brazo pasa. Lineal se ve
+        // todo el barrido, que es lo único que este efecto tiene para contar.
+        glow.fill({ color, alpha: (1 - t) * 0.9 });
+        break;
+      }
+      case FX_SPARK: {
+        // Una RAYA en el sentido de la velocidad, no un punto. El largo sale de
+        // cuán rápido va, así que una chispa lenta es casi un punto y una
+        // rápida es un trazo: sale gratis y es lo que da sensación de fuerza.
+        const largo = Math.min(0.8, Math.hypot(fx.vx[i], fx.vy[i]) * 0.055);
+        const inv = largo > 1e-4 ? largo / Math.hypot(fx.vx[i], fx.vy[i]) : 0;
+        glow.moveTo(px, py);
+        glow.lineTo(px - fx.vx[i] * inv, py + fx.vy[i] * inv);
+        glow.stroke({
+          width: fx.size[i] * (1 - t * 0.6),
+          color,
+          alpha: 0.4 + fade * 0.6,
+          cap: 'round',
+        });
+        break;
+      }
+      case FX_SHARD: {
+        // Triángulo girando. Es lo que hace que un super se sienta como algo que
+        // ROMPIÓ, en vez de una luz que se prende.
+        const r = fx.size[i] * (0.6 + fade * 0.6);
+        const a = fx.angle[i];
+        glow.moveTo(px + Math.cos(a) * r, py + Math.sin(a) * r);
+        glow.lineTo(px + Math.cos(a + 2.4) * r * 0.75, py + Math.sin(a + 2.4) * r * 0.75);
+        glow.lineTo(px + Math.cos(a - 2.4) * r * 0.75, py + Math.sin(a - 2.4) * r * 0.75);
+        glow.closePath();
+        glow.fill({ color, alpha: 0.45 + fade * 0.55 });
+        break;
+      }
       case FX_TRAIL:
-        glow.circle(px, py, fx.size[i] * fade)
-          .fill({ color: fx.color[i], alpha: fade * 0.5 });
+        ovalo(glow, px, py, fx.size[i] * fade, fx.size[i] * fade);
+        glow.fill({ color, alpha: fade * 0.5 });
         break;
-      default:
-        plain.circle(px, py, fx.size[i] * (1 + t * 1.6))
-          .fill({ color: fx.color[i], alpha: fade * 0.45 });
+      default: {
+        const r = fx.size[i] * (1 + t * 1.6);
+        ovalo(plain, px, py, r, r);
+        plain.fill({ color, alpha: fade * 0.45 });
         break;
+      }
     }
   }
 }
