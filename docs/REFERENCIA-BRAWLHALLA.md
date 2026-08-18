@@ -60,9 +60,27 @@ alto visible con la cámara vieja y un alto entero con la nueva. Ahora el tope e
 una FRACCIÓN del alto visible (`CAMERA_Y_HIGH` / `CAMERA_Y_LOW`), así que el
 piso queda a la misma altura de cuadro con cualquier zoom.
 
-Queda un 2% contra la referencia y sale de cerrar más el zoom mínimo. No se
-cerró más porque el fondo pintado es un JPG de 2048 px: abajo de `halfWidth` 5,5
-se empieza a ver ampliado.
+#### Corrección del 18/08/2026: el objetivo no es un número, es un rango
+
+El ~19% de arriba salió de las cinco capturas, y las cinco eran de combate
+pegado. Mirando un gameplay entero en movimiento —"Brawlhalla - Gameplay
+(PC/UHD)", youtube.com/watch?v=yguECG8fXbo— **la cámara de Brawlhalla se abre y
+se cierra igual que la nuestra**, y el tamaño del personaje se mueve con ella:
+
+| Situación | Brawlhalla | Nosotros |
+|---|---|---|
+| Cuatro desparramados por el mapa | ~8% | 9,2% |
+| 1v1 a media distancia | ~13% | — |
+| Combate pegado | ~19% | 16,8% |
+
+O sea que el objetivo **ya está cumplido**, y no falta un 2% como decía este
+documento antes de mirarlo en movimiento. Cerrar más el zoom mínimo lo pasaría
+de largo.
+
+Lo que sí sigue distinto es de dónde sale el rango: Brawlhalla lo mueve
+siguiendo a los jugadores por un mapa mucho más chico en relación al personaje.
+Medir sobre capturas fijas fue el error — una captura es siempre el momento que
+alguien eligió guardar, y nadie guarda el momento en que no pasa nada.
 
 ### 2. Las plataformas son tablones, no bloques
 
@@ -152,7 +170,7 @@ book de Binance, y eso impone dos límites que la referencia no tiene:
 
 | # | Objetivo | Estado |
 |---|---|---|
-| 1 | Tamaño del personaje a ~19% del cuadro | **hecho** — 16,8% con el zoom cerrado |
+| 1 | Tamaño del personaje, del 8% al 19% según el zoom | **hecho** — 9,2% a 16,8%, el rango correcto |
 | 2 | Plataformas como tablones | **hecho** — laterales a 0,25 |
 | 3 | Contorno negro + subir `DIM` | pendiente |
 | 4 | Paleta saturada complementaria | pendiente (mismo cambio que 3) |

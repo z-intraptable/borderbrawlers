@@ -16,44 +16,45 @@
     "head": {
       "file": "head.png",
       "pivot": [
-        0.4991,
-        1.0
+        0.49623052631578946,
+        0.942080378250591
       ]
     },
     "torso": {
       "file": "torso.png",
       "pivot": [
         0.5,
-        0.0
+        0.055150884495317375
       ]
     },
     "armUpper": {
       "file": "armupper.png",
       "pivot": [
-        0.5027,
-        0.0
+        0.5017232081911264,
+        0.06751592356687898
       ]
     },
     "armLower": {
       "file": "armlower.png",
       "pivot": [
-        0.5019,
-        0.0
+        0.501345179063361,
+        0.06455542021924482
       ]
     },
     "legUpper": {
       "file": "legupper.png",
       "pivot": [
-        0.4982,
-        0.0
+        0.498706100795756,
+        0.08412698412698413
       ]
     },
     "legLower": {
       "file": "leglower.png",
       "pivot": [
-        0.5015,
-        0.0
+        0.5011293706293706,
+        0.06105990783410138
       ]
     }
-  }
+  },
+  "_contorno": "Piezas con contorno horneado de 1.9 unidades de rig (53 px acá), por scripts/contorno.py. Volver a pasar cortar.py lo borra: primero cortar, después contornear."
 }

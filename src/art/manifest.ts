@@ -39,9 +39,23 @@ export interface PartSpec {
  * cadera, el codo y la rodilla en la imagen, y las escribe acá en unidades del
  * rig. Sin este bloque se usan las constantes vectoriales, que es lo correcto
  * para un personaje sin arte.
+ *
+ * `armLower` y `legLower` entraron tarde y por un defecto concreto. `cortar.py`
+ * siempre las escribió, pero esta lista tenía sólo siete claves y las
+ * DESCARTABA en silencio, así que no había forma de decir cuánto mide un
+ * antebrazo: el sprite se colgaba a distancia `armUpper` y se dibujaba con el
+ * largo que tuviera en píxeles.
+ *
+ * El síntoma se vio en pantalla antes que en el código. El generador devolvió
+ * las dos piezas del brazo de Ragnir casi iguales —32,6 y 33,1 unidades, o sea
+ * dos brazos enteros— y encadenadas daban un brazo de 65,7 sobre una figura de
+ * 104: el 63% del alto del cuerpo, contra el 44% de un brazo de verdad. Le
+ * llegaba abajo de la rodilla. Con las nueve claves, `scripts/proporcion.py`
+ * puede normalizar la cadena y esto se mide en vez de heredarse.
  */
 export const RIG_KEYS = [
-  'shoulderX', 'shoulderY', 'hipX', 'hipY', 'headY', 'armUpper', 'legUpper',
+  'shoulderX', 'shoulderY', 'hipX', 'hipY', 'headY',
+  'armUpper', 'armLower', 'legUpper', 'legLower',
 ] as const;
 
 export type RigKey = (typeof RIG_KEYS)[number];

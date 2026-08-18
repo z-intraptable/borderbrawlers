@@ -233,16 +233,46 @@ export function createFighterView(
   // Orden de dibujo: lo de atrás primero. En una figura de tres cuartos el
   // brazo y la pierna de atrás tienen que quedar detrás del torso, o el cuerpo
   // se ve plano y las extremidades parecen pegadas por delante.
+  /**
+   * El TORSO ES EL PADRE de los brazos y de la cabeza.
+   *
+   * Durante mucho tiempo no lo fue: era un `Graphics` hermano de ellos, y todas
+   * las poses escribían `torso.rotation` sin que nadie la heredara. El cuerpo
+   * no podía inclinarse llevándose los brazos y la cabeza — se inclinaba solo,
+   * y los miembros quedaban flotando en su sitio.
+   *
+   * Ese desacople es lo que obligaba a que las amplitudes fueran diminutas: con
+   * la inclinación del puñetazo en 0,30 radianes ya se empezaba a notar que los
+   * hombros no acompañaban, así que nunca se pudo pasar de ahí. Un rig en el
+   * que el torso no es un hueso no es un rig; es seis dibujos rotando sueltos, y
+   * se ve exactamente así.
+   *
+   * Las piernas NO cuelgan del torso: nacen de la pelvis, y una pelvis que se
+   * mueve con el pecho hace caminar como un títere. Siguen colgando de `body`.
+   */
   const backArm = chain(-shoulderX, shoulderY, armUpper);
   const backLeg = chain(-hipX, hipY, legUpper);
+  const torso = new Container();
   const torsoG = new Graphics();
+  torso.addChild(torsoG);
   const frontLeg = chain(hipX, hipY, legUpper);
   const frontArm = chain(shoulderX, shoulderY, armUpper);
   const head = new Container();
   const headG = new Graphics();
   head.addChild(headG);
   head.y = headY;
-  body.addChild(backArm.upper, backLeg.upper, torsoG, frontLeg.upper, frontArm.upper, head);
+
+  // El orden de `addChild` ES el orden de dibujo: Pixi no ordena por z. Lo de
+  // atrás primero, para que en una figura de tres cuartos el brazo y la pierna
+  // traseros queden detrás del cuerpo.
+  //
+  // Los brazos y la cabeza entran al torso; las piernas, al cuerpo. Como el
+  // torso se dibuja después de la pierna trasera y antes de la delantera, sus
+  // hijos —los dos brazos y la cabeza— quedan todos por delante del torso. El
+  // brazo de atrás se sigue leyendo como de atrás por su tinte más oscuro, que
+  // ya era el recurso para distinguirlos.
+  torso.addChild(backArm.upper, frontArm.upper, head);
+  body.addChild(backLeg.upper, torso, frontLeg.upper);
 
   // La pelota va en el puño de atrás, así que es hija del brazo y lo acompaña
   // en toda la animación sin una línea de código extra.
@@ -356,7 +386,7 @@ export function createFighterView(
     if (hurt) {
       // Doblado hacia atrás, brazos sueltos: la pose de recibir es la que más
       // rápido comunica que el golpe entró.
-      torsoG.rotation = -0.32;
+      torso.rotation = -0.32;
       head.rotation = -0.34;
       head.y = headY + 3;
       set(backArm, 2.5, 0.5);
@@ -381,7 +411,7 @@ export function createFighterView(
       // más barata que hay, y con rodilla se lee todavía mejor — el que sube
       // lleva las piernas plegadas contra el cuerpo.
       const rising = vy > 0;
-      torsoG.rotation = rising ? 0.1 : -0.08;
+      torso.rotation = rising ? 0.1 : -0.08;
       head.rotation = rising ? 0.08 : -0.1;
       head.y = headY;
       set(backArm, rising ? -2.3 : -1.5, rising ? 0.5 : 0.9);
@@ -398,7 +428,7 @@ export function createFighterView(
       const cycle = elapsed * (3.2 + speed * 1.5);
       const swing = Math.sin(cycle);
       const lean = Math.min(0.22, speed * 0.045);
-      torsoG.rotation = lean;
+      torso.rotation = lean;
       head.rotation = lean * 0.5;
 
       // La rodilla se dobla en la fase de RECOBRO —cuando la pierna vuelve
@@ -421,7 +451,7 @@ export function createFighterView(
 
     // Quieto: respira. Un personaje perfectamente inmóvil se lee como un error.
     const breath = Math.sin(elapsed * 1.9);
-    torsoG.rotation = 0;
+    torso.rotation = 0;
     head.rotation = breath * 0.04;
     head.y = headY - breath * 1.2;
     set(backArm, 0.16 + breath * 0.06, 0.3);
@@ -455,7 +485,7 @@ export function createFighterView(
       case ACT_PUNCH:
         // El codo se pliega en la carga y se estira al soltar. El brazo de
         // atrás va para el otro lado como contrapeso.
-        torsoG.rotation = impulse * 0.3;
+        torso.rotation = impulse * 0.3;
         head.rotation = impulse * 0.12;
         set(frontArm, -1.72 * impulse, windup * 2.2);
         // El codo SUMA sobre el hombro, porque es su hijo. Con 0,95 arriba y
@@ -468,7 +498,7 @@ export function createFighterView(
         body.y = BODY_Y;
         break;
       case ACT_KICK:
-        torsoG.rotation = -impulse * 0.42;
+        torso.rotation = -impulse * 0.42;
         head.rotation = -impulse * 0.2;
         // Misma idea con la rodilla: se recoge y se estira al impactar.
         set(frontLeg, -1.5 * impulse, windup * 1.9);
@@ -480,7 +510,7 @@ export function createFighterView(
       case ACT_SKILL:
         // Las dos manos al frente: es la pose que sostiene cualquiera de las dos
         // especiales sin comprometerse con ninguna en particular.
-        torsoG.rotation = impulse * 0.16;
+        torso.rotation = impulse * 0.16;
         head.rotation = -impulse * 0.1;
         set(frontArm, -1.45 * impulse, windup * 1.4 + 0.2);
         set(backArm, -1.2 * impulse, windup * 1.4 + 0.25);
@@ -491,7 +521,7 @@ export function createFighterView(
       default:
         // Super: brazos al cielo y cuerpo estirado. Codos y rodillas casi
         // rectos, que es lo que da la silueta abierta.
-        torsoG.rotation = -impulse * 0.2;
+        torso.rotation = -impulse * 0.2;
         head.rotation = -impulse * 0.3;
         set(frontArm, 3.0 * impulse, windup * 1.6);
         set(backArm, -3.0 * impulse, windup * 1.6);

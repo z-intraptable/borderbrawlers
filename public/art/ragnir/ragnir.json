@@ -2,8 +2,8 @@
   "armature": "Ragnir",
   "unit": 24.51,
   "rig": {
-    "armUpper": 32.599,
-    "armLower": 33.129,
+    "armUpper": 14.28,
+    "armLower": 19.047,
     "legUpper": 19.91,
     "legLower": 33.415,
     "shoulderX": 11.098,
@@ -16,44 +16,47 @@
     "head": {
       "file": "head.png",
       "pivot": [
-        0.5009,
-        1.0
+        0.5007671899529043,
+        0.9113207547169812
       ]
     },
     "torso": {
       "file": "torso.png",
       "pivot": [
-        0.501,
-        0.0
+        0.5008365217391304,
+        0.052222222222222225
       ]
     },
     "armUpper": {
       "file": "armupper.png",
       "pivot": [
-        0.4979,
-        0.0
-      ]
+        0.519301052631579,
+        0.10514541387024609
+      ],
+      "corte": "abajo"
     },
     "armLower": {
       "file": "armlower.png",
       "pivot": [
-        0.5022,
-        0.0
-      ]
+        0.44883186813186815,
+        0.07285714285714284
+      ],
+      "corte": "arriba"
     },
     "legUpper": {
       "file": "legupper.png",
       "pivot": [
-        0.502,
-        0.0
+        0.5014518950437318,
+        0.08075601374570447
       ]
     },
     "legLower": {
       "file": "leglower.png",
       "pivot": [
-        0.5018,
-        0.0
+        0.5013511936339523,
+        0.05147864184008762
       ]
     }
-  }
+  },
+  "_contorno": "Piezas con contorno horneado de 1.9 unidades de rig (47 px acá), por scripts/contorno.py. Volver a pasar cortar.py lo borra: primero cortar, después contornear."
 }

@@ -17,12 +17,23 @@ import { assetEmbedded, assetUrl } from '../art/assetUrl';
 /**
  * Cuánto se apaga la imagen antes de que la vea nadie.
  *
- * Los peleadores son verde `#00FF66` y rojo `#FF0055` puros, y miden unos
- * cincuenta píxeles. Un fondo a pleno brillo compite con ellos y la lectura de
- * quién ataca —que es TODO lo que la pantalla dice de un vistazo— se pierde.
- * Multiplicar por esto lo deja en algo más de un tercio.
+ * Estuvo mucho tiempo en `0x5d6675` —algo más de un tercio del brillo— porque
+ * los peleadores no tenían contorno y un fondo a pleno los tapaba. El precio
+ * era que el escenario se veía gris y deslavado, y esa era la diferencia más
+ * grande contra la referencia del proyecto: en Brawlhalla el fondo es saturado
+ * y brillante, y el personaje igual se lee.
+ *
+ * Se lee porque **lleva contorno negro**. Al hornear el contorno en las piezas
+ * (scripts/contorno.py) desapareció la razón de apagar el fondo, así que este
+ * número sube a cuatro quintos. El criterio se invirtió: antes se protegía la
+ * figura apagando el escenario, ahora se protege con su propio borde y el
+ * escenario puede vivir.
+ *
+ * No sube a 0xffffff porque los cristales de volumen y el tinte del cielo son
+ * DATOS —dicen quién está ganando el libro— y tienen que seguir ganándole a la
+ * escenografía. Un quinto de margen es lo que los deja arriba.
  */
-const DIM = 0x5d6675;
+const DIM = 0xccd2dd;
 
 export interface Stage {
   sprite: Sprite;

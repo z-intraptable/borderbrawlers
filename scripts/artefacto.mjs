@@ -38,9 +38,9 @@ const ESCENARIO = process.argv[2] ?? 'lich';
  * y el doble en una pantalla retina: 512 deja margen de sobra y sigue siendo un
  * octavo del original.
  */
-const ALTO_FIGURA = 512;
+const ALTO_FIGURA = Number(process.env.ALTO_FIGURA ?? 512);
 /** Ancho del fondo. El original es 2048 y se dibuja a 960. */
-const ANCHO_FONDO = 1600;
+const ANCHO_FONDO = Number(process.env.ANCHO_FONDO ?? 1600);
 
 const tmp = mkdtempSync(join(tmpdir(), 'bb-artefacto-'));
 
@@ -90,7 +90,7 @@ fondo = Image.open(carpeta / 'fondo.jpg').convert('RGB')
 if fondo.width > ancho_fondo:
     alto = round(fondo.height * ancho_fondo / fondo.width)
     fondo = fondo.resize((ancho_fondo, alto), Image.LANCZOS)
-buf = io.BytesIO(); fondo.save(buf, 'JPEG', quality=82, optimize=True)
+buf = io.BytesIO(); fondo.save(buf, 'JPEG', quality=int(sys.argv[6]), optimize=True)
 poner(f'escenarios/{escenario}/fondo.jpg', buf.getvalue(), 'image/jpeg')
 
 for losa in ('losa-centro.png', 'losa-lado.png'):
@@ -110,7 +110,8 @@ const guion = join(tmp, 'empaquetar.py');
 writeFileSync(guion, python);
 console.log('reescalando arte…');
 const crudo = execFileSync('python3',
-  [guion, RAIZ, PUBLIC, ESCENARIO, String(ALTO_FIGURA), String(ANCHO_FONDO)],
+  [guion, RAIZ, PUBLIC, ESCENARIO, String(ALTO_FIGURA), String(ANCHO_FONDO),
+    process.env.CALIDAD_JPEG ?? '82'],
   { maxBuffer: 1 << 30, encoding: 'utf8' });
 const mapa = JSON.parse(crudo);
 

@@ -168,6 +168,10 @@ def main() -> None:
         filename = f'{name.lower()}.png'
         piece.save(folder / filename)
         parts[name] = {'file': filename, 'pivot': [round(fx, 4), round(fy, 4)]}
+        # Qué borde de la pieza es un corte y no una silueta. Lo usa
+        # `contorno.py` para no hornearle contorno a ese lado.
+        if 'corte' in spec:
+            parts[name]['corte'] = spec['corte']
         print(f'  {name:9s} {piece.width:4d}x{piece.height:<4d} pivote [{fx:.3f}, {fy:.3f}]')
 
     (sx1, sy1), (sx2, sy2) = recipe['shoulders']

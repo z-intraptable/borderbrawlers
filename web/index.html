@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BorderBrawlers</title>
+<meta name="description" content="El order book de Binance peleado como un Smash Bros.">
+<style>
+  :root{
+    --fondo:#0B0F19; --panel:#121826; --panel2:#161d2e; --borde:#22304a;
+    --texto:#e6edf3; --tenue:#8695ad;
+    --compra:#00FF66; --venta:#FF0055; --oro:#ffcc33;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--fondo);color:var(--texto)}
+  body{font:14px/1.55 var(--mono);display:flex;flex-direction:column;min-height:100vh}
+
+  header{
+    display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;
+    padding:14px 20px;border-bottom:1px solid var(--borde);background:var(--panel);
+  }
+  header h1{margin:0;font-size:17px;letter-spacing:1px;font-weight:700}
+  header h1 .a{color:var(--compra)} header h1 .b{color:var(--venta)}
+  header p{margin:0;color:var(--tenue);font-size:12.5px}
+
+  #marco{flex:1;min-height:60vh;border:0;width:100%;display:block;background:var(--fondo)}
+
+  /* --- los controles ---------------------------------------------- */
+  .consola{border-top:1px solid var(--borde);background:var(--panel);padding:16px 20px 22px}
+  .fila{
+    display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end;
+    max-width:1200px;margin:0 auto;
+  }
+  .campo{display:flex;flex-direction:column;gap:6px;min-width:150px}
+  .campo label{font-size:10.5px;letter-spacing:2px;text-transform:uppercase;color:var(--tenue)}
+  select,button{
+    font:13px var(--mono);color:var(--texto);background:var(--panel2);
+    border:1px solid var(--borde);border-radius:7px;padding:9px 11px;
+  }
+  select:focus-visible,button:focus-visible{outline:2px solid var(--compra);outline-offset:2px}
+  button{cursor:pointer;border-color:var(--compra);color:var(--compra);font-weight:700;letter-spacing:1px}
+  button:hover{background:#0f2a1c}
+
+  .estado{
+    display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--tenue);
+    margin-left:auto;
+  }
+  .punto{width:9px;height:9px;border-radius:50%;background:var(--tenue);flex:none}
+  .punto.vivo{background:var(--compra);box-shadow:0 0 9px var(--compra)}
+  .punto.sim{background:var(--oro);box-shadow:0 0 9px var(--oro)}
+
+  .nota{
+    max-width:1200px;margin:16px auto 0;padding:12px 0 0;border-top:1px solid var(--borde);
+    color:var(--tenue);font-size:12.5px;line-height:1.65;
+  }
+  .nota b{color:var(--texto)}
+  .nota code{background:var(--panel2);padding:1px 5px;border-radius:4px;color:var(--oro)}
+</style>
+</head>
+<body>
+
+<header>
+  <h1><span class="a">BORDER</span><span class="b">BRAWLERS</span></h1>
+  <p>El order book de Binance, peleado. Verde compra, rojo vende.</p>
+</header>
+
+<iframe id="marco" title="BorderBrawlers"
+        allow="autoplay" src="juego.html?source=mock&scenario=volatile&stage=lich"></iframe>
+
+<section class="consola">
+  <div class="fila">
+    <div class="campo">
+      <label for="fuente">Datos</label>
+      <select id="fuente">
+        <option value="mock">Simulado</option>
+        <option value="binance-direct">Binance en vivo</option>
+      </select>
+    </div>
+
+    <div class="campo">
+      <label for="simbolo">Par</label>
+      <select id="simbolo">
+        <option value="btcusdt">BTC / USDT</option>
+        <option value="ethusdt">ETH / USDT</option>
+        <option value="solusdt">SOL / USDT</option>
+        <option value="bnbusdt">BNB / USDT</option>
+        <option value="xrpusdt">XRP / USDT</option>
+        <option value="dogeusdt">DOGE / USDT</option>
+      </select>
+    </div>
+
+    <div class="campo" id="campoRitmo">
+      <label for="ritmo">Ritmo simulado</label>
+      <select id="ritmo">
+        <option value="volatile">Volátil</option>
+        <option value="normal">Normal</option>
+        <option value="calm">Tranquilo</option>
+      </select>
+    </div>
+
+    <div class="campo">
+      <label for="calidad">Calidad</label>
+      <select id="calidad">
+        <option value="">Automática</option>
+        <option value="high">Alta</option>
+        <option value="low">Baja</option>
+      </select>
+    </div>
+
+    <div class="campo">
+      <label for="aplicar">&nbsp;</label>
+      <button id="aplicar" type="button">APLICAR</button>
+    </div>
+
+    <div class="estado"><span class="punto sim" id="punto"></span><span id="leyenda">Simulado</span></div>
+  </div>
+
+  <p class="nota">
+    <b>Binance en vivo no pide ninguna clave.</b> Los streams públicos de mercado
+    —<code>@depth20@100ms</code> y <code>@aggTrade</code>— son abiertos: el navegador
+    se conecta directo a <code>wss://data-stream.binance.vision</code> sin cuenta, sin API key
+    y sin backend en el medio. No hay dónde pegar un secreto porque no hace falta uno,
+    y no deberías pegar claves de tu cuenta en ninguna página: las de Binance sirven
+    para operar con tu plata, y esto sólo lee precios.
+    <br><br>
+    Requiere HTTPS —una página segura no puede abrir un socket inseguro—, cosa que Vercel
+    ya te da. Si el punto queda en <b>reconnecting</b>, es que la red desde donde mirás
+    bloquea el WebSocket de Binance; el modo simulado corre igual y no depende de nada.
+  </p>
+</section>
+
+<script>
+  const marco = document.getElementById('marco');
+  const fuente = document.getElementById('fuente');
+  const simbolo = document.getElementById('simbolo');
+  const ritmo = document.getElementById('ritmo');
+  const calidad = document.getElementById('calidad');
+  const campoRitmo = document.getElementById('campoRitmo');
+  const punto = document.getElementById('punto');
+  const leyenda = document.getElementById('leyenda');
+
+  // El ritmo sólo existe en el feed simulado: en vivo lo pone el mercado.
+  function refrescarVisibilidad() {
+    campoRitmo.style.visibility = fuente.value === 'mock' ? 'visible' : 'hidden';
+  }
+
+  function aplicar() {
+    const p = new URLSearchParams();
+    p.set('source', fuente.value);
+    p.set('symbol', simbolo.value);
+    p.set('stage', 'lich');
+    if (fuente.value === 'mock') p.set('scenario', ritmo.value);
+    if (calidad.value) p.set('quality', calidad.value);
+    // Recargar el iframe es lo que reinicia la pelea: el juego lee sus opciones
+    // una vez al arrancar, así que cambiarlas en caliente no tendría efecto.
+    marco.src = 'juego.html?' + p.toString();
+
+    const vivo = fuente.value === 'binance-direct';
+    punto.className = 'punto ' + (vivo ? 'vivo' : 'sim');
+    leyenda.textContent = vivo
+      ? 'Binance en vivo · ' + simbolo.value.toUpperCase()
+      : 'Simulado · ' + simbolo.value.toUpperCase();
+  }
+
+  fuente.addEventListener('change', refrescarVisibilidad);
+  document.getElementById('aplicar').addEventListener('click', aplicar);
+  refrescarVisibilidad();
+</script>
+
+</body>
+</html>

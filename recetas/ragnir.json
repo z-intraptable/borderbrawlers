@@ -57,35 +57,37 @@
     },
     "armUpper": {
       "box": [
-        1285,
-        389,
-        235,
-        799
+        1622,
+        380,
+        231,
+        400
       ],
       "from": [
-        1402,
-        389
+        1723,
+        380
       ],
       "to": [
-        1402,
-        1188
-      ]
+        1723,
+        730
+      ],
+      "corte": "abajo"
     },
     "armLower": {
       "box": [
         1622,
-        380,
+        700,
         231,
-        812
+        492
       ],
       "from": [
-        1738,
-        380
+        1696,
+        730
       ],
       "to": [
-        1738,
+        1763,
         1192
-      ]
+      ],
+      "corte": "arriba"
     },
     "legUpper": {
       "box": [
@@ -119,5 +121,6 @@
         1219
       ]
     }
-  }
+  },
+  "_brazos": "La hoja trajo dos brazos enteros bajo las etiquetas de brazo y antebrazo. Estas dos cajas salen del MISMO brazo —el de garras— partido en el codo (y=730, el mínimo del perfil de ancho), con 50 px de solape para que la articulación no abra hueco al doblar. El borde por donde se partió se marca con \"corte\": ese lado no es silueta y no lleva contorno, o el antebrazo se dibuja encima con una barra negra atravesada en el codo."
 }
