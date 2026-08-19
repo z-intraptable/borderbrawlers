@@ -1145,7 +1145,7 @@ interface Suavizado {
  * vuelta entera tarda 0,22 s: se lee como que el personaje gira, y sigue siendo
  * lo bastante rápido como para no mentir sobre hacia dónde está pegando.
  */
-const GIRO_POR_SEGUNDO = 9;
+const GIRO_POR_SEGUNDO = 14;
 /**
  * Lo más angosto que se deja ver el dibujo mientras se da vuelta.
  *
@@ -1159,6 +1159,17 @@ const GIRO_POR_SEGUNDO = 9;
  * es además lo que hace un juego de pelea de verdad, que espeja el sprite.
  */
 const GIRO_MINIMO = 0.34;
+/**
+ * Cuánto se estira a lo alto mientras se angosta.
+ *
+ * Un cuerpo que se comprime de un lado se abulta del otro: sin eso, angostarse
+ * al 34% se lee como que el personaje se aplasta contra un vidrio, no como que
+ * gira. Con la compensación el volumen se conserva a ojo y la vuelta se lee
+ * como una vuelta. Es la mitad barata de lo que haría una animación de giro
+ * dibujada, que es lo que no tenemos: el arte de los seis está dibujado de
+ * perfil y de un solo lado, así que un giro de verdad habría que dibujarlo.
+ */
+const GIRO_ALTO = 0.16;
 /** Cuánto aplasta el aterrizaje más fuerte, y en cuánto se apaga. */
 const GOLPE_PISO = 0.16;
 const GOLPE_PISO_DECAE = 5.5;
@@ -1238,14 +1249,19 @@ function drawFighters(
       match.vy[i] * 0.014 - suave.golpePiso[i] * GOLPE_PISO));
     const scale = match.scale[i];
     const ancho = anchoDelGiro(suave.giro[i]);
+    // `vuelta` vale 0 mirando de frente a su lado y 1 en el medio del giro.
+    const vuelta = 1 - Math.min(1, Math.abs(suave.giro[i]));
     view.scale.x = scale * ancho * (1 - stretch);
-    view.scale.y = scale * (1 + stretch);
+    view.scale.y = scale * (1 + stretch) * (1 + vuelta * GIRO_ALTO);
     // El contenedor está en el CENTRO del cuerpo, así que estirarlo o aplastarlo
     // le despega los pies del piso: un personaje que aterriza se hundía y uno
     // que salta se iba para arriba antes de despegar. Correr el centro medio
     // aplastón deja los pies clavados, que es de donde sale la sensación de
     // peso.
-    view.y = -match.y[i] - stretch * FIGHTER_HALF_HEIGHT * scale;
+    // El estirón del giro también levanta el centro, así que los pies se
+    // despegarían de la losa justo en el cuadro más visible de la vuelta.
+    view.y = -match.y[i]
+      - (stretch + vuelta * GIRO_ALTO) * FIGHTER_HALF_HEIGHT * scale;
 
     // El baile del final. Se compone acá y no sale de la hoja porque ninguno de
     // los seis tiene una animación de baile: lo que hay es una pose de pie. Con

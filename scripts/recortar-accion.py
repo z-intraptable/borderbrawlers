@@ -107,8 +107,17 @@ def empacar(carpeta: pathlib.Path, datos: dict, piezas: dict[str, list]) -> None
         datos['animations'][nombre] = {'frames': cuadros, 'ground': piso}
 
     datos['cell'] = [celda_w, celda_h]
-    hoja.save(carpeta / 'hojas.png', 'PNG', optimize=True)
-    (carpeta / 'hojas.json').write_text(json.dumps(datos, indent=2, ensure_ascii=False))
+    # **Se escribe a un archivo aparte y recién ahí se renombra.** Guardar una
+    # hoja de 2,7 MB con `optimize=True` tarda lo suyo, y un corte en el medio
+    # —un timeout, un Ctrl-C— deja el PNG a mitad de escribir. Eso ya pasó: el
+    # archivo quedó truncado y la única salida fue recuperarlo de git. El
+    # renombrado es atómico, así que o está el viejo entero o el nuevo entero.
+    tmp_png = carpeta / 'hojas.png.tmp'
+    tmp_json = carpeta / 'hojas.json.tmp'
+    hoja.save(tmp_png, 'PNG', optimize=True)
+    tmp_json.write_text(json.dumps(datos, indent=2, ensure_ascii=False))
+    tmp_png.replace(carpeta / 'hojas.png')
+    tmp_json.replace(carpeta / 'hojas.json')
     peso = (carpeta / 'hojas.png').stat().st_size / 1e6
     print(f'{carpeta / "hojas.png"}  {hoja.size}  {peso:.2f} MB  ·  celda {celda_w}x{celda_h}')
 
