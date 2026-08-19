@@ -52,6 +52,8 @@ import {
 import { createBackdrop } from './backdrop';
 import { createStage, loadFlames, loadPlatforms, loadStage, stageNames, stageTint } from './stage';
 import type { StagePlatforms } from './stage';
+import { loadVfxTexturas } from './loadVfx';
+import { createVfxSprites } from './vfxSprites';
 
 /**
  * La capa que dibuja. Lee el estado de la simulación y lo pinta; no decide nada.
@@ -465,6 +467,7 @@ export async function startGame(
     hojas: sinColgarse(Promise.all(armatures.map((name) => loadSheets(name))), 'las hojas de sprites'),
     fuegos: sinColgarse(
       Promise.all([loadFlames('verde'), loadFlames('rojo')]), 'las hogueras'),
+    vfx: sinColgarse(loadVfxTexturas(), 'las texturas de efectos'),
   };
 
   // Las hogueras entran cuando llegan y nadie las espera: hasta entonces el
@@ -691,6 +694,19 @@ export async function startGame(
   const poderInk = new Graphics();
   world.addChild(poderInk);
 
+  /**
+   * Las ráfagas con textura: especial, super, estallido, KO. Van en su propia
+   * pareja de capas, glow con Bloom e ink sin filtro, igual que todo lo
+   * demás — la textura no cambia esa regla, sólo lo que hay adentro del
+   * contorno.
+   */
+  const vfxGlowLayer = new Container();
+  glowLayer.addChild(vfxGlowLayer);
+  const vfxInkLayer = new Container();
+  world.addChild(vfxInkLayer);
+  const vfxTexturas = await pedidos.vfx ?? {};
+  const vfxSprites = createVfxSprites(vfxGlowLayer, vfxInkLayer, vfxTexturas);
+
   const shockwave = new ShockwaveFilter({
     amplitude: 22,
     wavelength: 140,
@@ -788,6 +804,7 @@ export async function startGame(
     // hitstop, porque congelar los efectos delataría la pausa.
     emitTrails(match, fx);
     updateFx(fx, dtPelea);
+    vfxSprites.update(dtPelea);
 
     // Antes de dibujar: si la simulación cambió de personaje algún slot, hay
     // que enganchar el cuerpo nuevo. Se hace acá y no adentro de `drainEvents`
@@ -930,10 +947,12 @@ export async function startGame(
         orb(fx, x + hacia * 0.3, y, 0.62, 0.3, teamColor);
         slash(fx, x + hacia * 0.35, y, hacia > 0 ? 0 : Math.PI, 1.25, 0.24, teamColor);
         burst(fx, x, y, 8, 6.5, 0.1, 0.42, teamColor);
+        vfxSprites.burst('tajo', x + hacia * 0.35, y, 1.1, 0.3, teamColor, hacia > 0 ? 0 : Math.PI);
       } else {
         orb(fx, x, y, 0.95, 0.34, teamColor);
         beams(fx, x, y, 6, 2.1, 0.28, teamColor);
         shards(fx, x, y, 6, 5.5, teamColor);
+        vfxSprites.burst('orbe', x, y, 1.1, 0.34, teamColor);
       }
       return;
     }
@@ -948,6 +967,9 @@ export async function startGame(
     wave(fx, x, y - FIGHTER_HALF_HEIGHT, magnitude * 1.6, 0.55, GOLD);
     shards(fx, x, y, 12, 9, GOLD);
     burst(fx, x, y, 12, 11, 0.16, 0.7, GOLD);
+    vfxSprites.burst('impacto', x, y, 2.2, 0.5, GOLD);
+    vfxSprites.burst('onda', x, y - FIGHTER_HALF_HEIGHT, 2.6, 0.55, GOLD);
+    vfxSprites.burst('esquirlas', x, y, 1.8, 0.4, GOLD);
     hitstop = Math.max(hitstop, HITSTOP_SUPER);
     camera.cine = CINE_TIEMPO;
     camera.cineX = x;
@@ -1026,6 +1048,8 @@ export async function startGame(
           orb(target, x, y, 1.1, 0.34, teamColor);
           shards(target, x, y, 10, 8, teamColor);
           burst(target, x, y, 12, 9, 0.16, 0.8, teamColor);
+          vfxSprites.burst('impacto', x, y, 2, 0.45, teamColor);
+          vfxSprites.burst('esquirlas', x, y, 1.6, 0.4, teamColor);
           stop = Math.max(stop, HITSTOP_KO);
           camera.zoom = 1;
           break;
@@ -1040,6 +1064,10 @@ export async function startGame(
           beams(target, x, y, 8, 1.4 + fuerza * 1.6, 0.34, teamColor);
           burst(target, x, y, 10, 7 + fuerza * 5, 0.14, 0.62, teamColor);
           wave(target, x, y, 1.6 + fuerza * 1.8, 0.42, teamColor);
+          // El estallido del poder es exactamente el momento que se veía
+          // pelado en las capturas: un círculo liso sin nada adentro. Acá va
+          // la textura del impacto entero, escalada con la fuerza del golpe.
+          vfxSprites.burst('impacto', x, y, 1.3 + fuerza * 1.1, 0.34 + fuerza * 0.14, teamColor);
           stop = Math.max(stop, HITSTOP_SKILL);
           // La cámara se acerca al impacto y no al que disparó: lo que hay que
           // mirar es dónde reventó.
