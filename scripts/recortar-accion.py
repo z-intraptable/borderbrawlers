@@ -85,28 +85,72 @@ def cortar(origen: str) -> list:
 def empacar(carpeta: pathlib.Path, datos: dict, piezas: dict[str, list]) -> None:
     """Vuelve a armar la grilla y reescribe hoja y manifiesto."""
     unidad = datos['unit']
-    celda_w = max(f.width for fila in piezas.values() for f, _ in fila) + hs.MARGEN * 2
-    celda_h = max(f.height for fila in piezas.values() for f, _ in fila) + hs.MARGEN * 2
-    ancho = celda_w * max(len(f) for f in piezas.values())
-    alto = celda_h * len(piezas)
-    hoja = Image.new('RGBA', (ancho, alto), (0, 0, 0, 0))
 
-    for fila_i, (nombre, fila) in enumerate(piezas.items()):
-        cuadros = []
-        for col, (figura, centro) in enumerate(fila):
-            w, h = figura.width, figura.height
-            x = col * celda_w + (celda_w - w) // 2
-            y = fila_i * celda_h + (celda_h - h) // 2
-            hoja.alpha_composite(figura, (x, y))
-            cuadros.append({
-                'rect': [x - hs.MARGEN, y - hs.MARGEN, w + hs.MARGEN * 2, h + hs.MARGEN * 2],
-                'anchor': [round((hs.MARGEN + centro[0]) / (w + hs.MARGEN * 2), 4),
-                           round((hs.MARGEN + centro[1]) / (h + hs.MARGEN * 2), 4)],
+    # **El atlas se empaca por estantes, no en una grilla pareja.**
+    #
+    # La grilla tenía una fila por acción y tantas columnas como la acción más
+    # larga —la carrera, con doce—, así que el puñetazo de dos cuadros dejaba
+    # diez celdas vacías. Medido antes de cambiarlo: 12x9 = 108 celdas para 44
+    # cuadros, o sea **40% ocupado**. Eran 82,6 Mpx de textura para 33,2 Mpx de
+    # dibujo, 331 MB de memoria de GPU, y dos personajes con el atlas más ancho
+    # que los 4096 px que declaran de límite muchas GPU de teléfono.
+    #
+    # Empacado por estantes no hay celda: cada cuadro ocupa lo suyo. Se ordena
+    # por alto para que en cada estante entren cuadros parecidos y sobre poco
+    # arriba, y se guarda el orden original aparte porque la animación depende
+    # de él.
+    #
+    # Nada del runtime mira la grilla: `loadSheets.ts` sólo lee el `rect` de cada
+    # cuadro. Por eso esto se puede cambiar sin tocar una línea del juego.
+    todos = []
+    for nombre, fila in piezas.items():
+        for i, (figura, centro) in enumerate(fila):
+            todos.append({
+                'accion': nombre, 'i': i, 'fig': figura, 'centro': centro,
+                'w': figura.width + hs.MARGEN * 2,
+                'h': figura.height + hs.MARGEN * 2,
             })
+
+    area = sum(c['w'] * c['h'] for c in todos)
+    # Un ancho que deje el atlas más o menos cuadrado y por debajo del límite de
+    # 4096. Se prueba de menor a mayor y se toma el primero que dé un alto que
+    # también entre.
+    ancho = 4096
+    for candidato in (1024, 2048, 4096):
+        if area / candidato <= candidato:
+            ancho = candidato
+            break
+    ancho = max(ancho, max(c['w'] for c in todos))
+
+    orden = sorted(todos, key=lambda c: (-c['h'], -c['w']))
+    x = y = estante = 0
+    for c in orden:
+        if x + c['w'] > ancho:
+            x = 0
+            y += estante
+            estante = 0
+        c['x'], c['y'] = x, y
+        x += c['w']
+        estante = max(estante, c['h'])
+    alto = y + estante
+
+    hoja = Image.new('RGBA', (ancho, alto), (0, 0, 0, 0))
+    puestos: dict[str, dict[int, dict]] = {}
+    for c in todos:
+        hoja.alpha_composite(c['fig'], (c['x'] + hs.MARGEN, c['y'] + hs.MARGEN))
+        puestos.setdefault(c['accion'], {})[c['i']] = {
+            'rect': [c['x'], c['y'], c['w'], c['h']],
+            'anchor': [round((hs.MARGEN + c['centro'][0]) / c['w'], 4),
+                       round((hs.MARGEN + c['centro'][1]) / c['h'], 4)],
+        }
+
+    for nombre, fila in piezas.items():
+        cuadros = [puestos[nombre][i] for i in range(len(fila))]
         piso = round(float(np.median([(f.height - c[1]) / unidad for f, c in fila])), 3)
         datos['animations'][nombre] = {'frames': cuadros, 'ground': piso}
 
-    datos['cell'] = [celda_w, celda_h]
+    datos.pop('cell', None)
+    usado = sum(c['w'] * c['h'] for c in todos)
     # **Se escribe a un archivo aparte y recién ahí se renombra.** Guardar una
     # hoja de 2,7 MB con `optimize=True` tarda lo suyo, y un corte en el medio
     # —un timeout, un Ctrl-C— deja el PNG a mitad de escribir. Eso ya pasó: el
@@ -119,7 +163,9 @@ def empacar(carpeta: pathlib.Path, datos: dict, piezas: dict[str, list]) -> None
     tmp_png.replace(carpeta / 'hojas.png')
     tmp_json.replace(carpeta / 'hojas.json')
     peso = (carpeta / 'hojas.png').stat().st_size / 1e6
-    print(f'{carpeta / "hojas.png"}  {hoja.size}  {peso:.2f} MB  ·  celda {celda_w}x{celda_h}')
+    print(f'{carpeta.name:9s} {ancho}x{alto}  {peso:.2f} MB  ·  '
+          f'{len(todos)} cuadros  ·  {usado / (ancho * alto) * 100:.0f}% ocupado  ·  '
+          f'{ancho * alto * 4 / 1e6:.0f} MB de GPU')
 
 
 def main() -> int:
