@@ -707,6 +707,20 @@ export async function startGame(
   const vfxTexturas = await pedidos.vfx ?? {};
   const vfxSprites = createVfxSprites(vfxGlowLayer, vfxInkLayer, vfxTexturas);
 
+  /**
+   * Los cuerpos vuelven a subirse por encima de TODAS las capas de efectos.
+   *
+   * Se agregaron a `world` antes de que existiera ninguna capa de brillo/tinta
+   * (líneas arriba), así que quedaban siempre tapados por lo último que se
+   * dibujara — y una ráfaga de especial/super/estallido mide 2-3 veces el
+   * ancho del personaje, así que lo tapaba entero durante todo el burst.
+   * `addChild` sobre un hijo que ya está en el contenedor no lo duplica: lo
+   * mueve al tope. Sí cambia el KO, que antes quedaba tapado a propósito por
+   * su propio fogonazo; ahora se ve al personaje bajo el destello, que es
+   * preferible a que cualquier poder lo vuelva invisible.
+   */
+  for (const view of viewByArmature.values()) world.addChild(view);
+
   const shockwave = new ShockwaveFilter({
     amplitude: 22,
     wavelength: 140,
