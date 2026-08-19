@@ -354,6 +354,13 @@ export const EVENT_MELEE = 6;
  * punto del impacto, que NO es donde está el que lo tiró.
  */
 export const EVENT_ESTALLIDO = 7;
+/**
+ * Alguien saltó. `magnitude` es 0 si despegó del piso y 1 si fue salto de aire.
+ *
+ * Faltaba: el aterrizaje tenía su polvo desde el principio y el despegue no
+ * tenía nada, así que la mitad de arriba del salto salía de la nada.
+ */
+export const EVENT_SALTO = 8;
 
 /**
  * Cola de eventos del paso. La capa de render la drena y la vacía: es cómo la
@@ -730,7 +737,21 @@ export function stepMatch(
       // `DISENGAGE_RANGE`. Con un umbral solo esto es un control de todo o nada
       // y el peleador oscila alrededor de la frontera.
       const rango = m.engaged[i] === 1 ? DISENGAGE_RANGE : ENGAGE_RANGE;
-      const closing = Math.abs(dx) > rango;
+      // **Con el poder cargado y el rival a tiro, no va a buscarlo.** Se planta
+      // y lo castiga de lejos.
+      //
+      // Es el cambio de flujo que pedía el 1v1: con la especial pegada al cuerpo
+      // el único plan posible era correr hacia el otro, así que los dos se
+      // pasaban el match encimados y saltando. Ahora el que tiene barra elige
+      // distancia, tira, se queda en cero, y recién entonces vuelve a entrar. Ese
+      // ida y vuelta es la pelea; el forcejeo permanente no lo era.
+      //
+      // No se traba: la especial gasta la barra ENTERA y tiene enfriamiento, así
+      // que `aTiro` se apaga solo apenas dispara. Y si los dos se plantan a la
+      // vez, el primero que se queda sin barra vuelve a avanzar.
+      const aTiro = target >= 0 && m.energy[i] >= COST_SKILL
+        && Math.abs(dx) <= ALCANCE * 0.8;
+      const closing = Math.abs(dx) > rango && !aTiro;
       m.engaged[i] = closing ? 0 : 1;
       const desired = brake ? 0
         : closing ? (dir + spread * 0.5) * RUN_SPEED * boost
@@ -758,7 +779,12 @@ export function stepMatch(
         m.lastTurn[i] = now;
       }
 
-      const jump = wantsJump({ grounded, dy, dx, groundAhead, sinceJump: now - m.lastJump[i] });
+      // El que está por tirar tampoco salta: el poder viaja recto y en el aire
+      // no se puede corregir la puntería. Además es la otra mitad de lo que se
+      // veía como *"se la pasan saltando"* — la mitad de los saltos eran para
+      // alcanzar en altura a alguien al que ahora le puede disparar.
+      const jump = !aTiro
+        && wantsJump({ grounded, dy, dx, groundAhead, sinceJump: now - m.lastJump[i] });
       // Recuperación: cayéndose por debajo del escenario gasta el salto extra.
       // Sin esto el primer empujón es siempre KO y no hay pelea.
       const recover = !grounded && m.vy[i] < 0 && m.y[i] < 0 && m.jumps[i] > 0
@@ -767,6 +793,10 @@ export function stepMatch(
         m.vy[i] = JUMP_SPEED;
         m.jumps[i]--;
         m.lastJump[i] = now;
+        // La magnitud dice si fue el salto DESDE EL PISO o el de aire: el
+        // primero levanta polvo y el segundo no tiene de dónde levantarlo, así
+        // que el dibujo tiene que poder distinguirlos.
+        emit(m.events, EVENT_SALTO, m.x[i], m.y[i], grounded ? 0 : 1, m.team[i], i);
         m.grounded[i] = 0;
       }
     }

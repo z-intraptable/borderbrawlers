@@ -10,6 +10,7 @@ import {
   EVENT_KO,
   EVENT_LAND,
   EVENT_MELEE,
+  EVENT_SALTO,
   EVENT_SKILL,
   EVENT_SUPER,
   FIGHTER_HALF_HEIGHT,
@@ -915,8 +916,27 @@ export async function startGame(
           camera.zoom = Math.max(camera.zoom, 0.45 + fuerza * 0.3);
           break;
         }
+        case EVENT_SALTO:
+          if (magnitude === 0) {
+            // Despegue: el polvo se queda en el piso, donde estaban los pies.
+            dust(target, x, y - FIGHTER_HALF_HEIGHT, 0.7);
+            wave(target, x, y - FIGHTER_HALF_HEIGHT, 0.75, 0.24, 0xd9cdb4);
+          } else {
+            // Salto de aire: no hay piso del que levantar polvo, así que lo que
+            // se ve es el empujón contra el aire — un anillo bajo los pies, del
+            // color del bando, que además muestra que gastó el salto extra.
+            wave(target, x, y - FIGHTER_HALF_HEIGHT * 0.7, 0.95, 0.3, teamColor);
+            burst(target, x, y - FIGHTER_HALF_HEIGHT * 0.7, 6, 4.5, 0.1, 0.34, teamColor);
+          }
+          break;
         case EVENT_LAND:
           dust(target, x, y - FIGHTER_HALF_HEIGHT, Math.min(1.4, magnitude));
+          // Encima del polvo, el anillo del golpe contra la losa. El polvo dice
+          // que cayó; el anillo dice CON CUÁNTA fuerza, y sin él un aterrizaje
+          // de dos metros se ve igual que un saltito.
+          if (magnitude > 0.9) {
+            wave(target, x, y - FIGHTER_HALF_HEIGHT, 0.8 + magnitude * 0.7, 0.3, 0xd9cdb4);
+          }
           break;
         case EVENT_GROW:
           // El anillo del gigantismo crecía con la magnitud sin tope y con una
