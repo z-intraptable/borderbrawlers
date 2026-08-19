@@ -17,6 +17,7 @@ import { mountHud } from './hud/hud';
  *   ?symbol=ethusdt
  *   ?vps=ws://host:8080
  *   ?stage=lich           fondo pintado; sin esto, el fondo plano de siempre
+ *   ?modo=melee           los seis a la vez; sin esto, el torneo 1v1
  *
  * Sin `source` va contra Binance en vivo, que es el punto del proyecto. Los
  * valores se validan contra la lista permitida en vez de castearse: un
@@ -76,7 +77,15 @@ const client = new BinanceFeedClient({
   onStatus: (status) => hud.setStatus(status),
 });
 
-const match = createMatch(lanes);
+/**
+ * El torneo es el modo por defecto.
+ *
+ * Cada bando manda uno, el que gana se queda, y el que se queda sin sus tres
+ * pierde el match. `?modo=melee` devuelve la pelea de seis a la vez, que es como
+ * estuvo hasta ahora y sigue siendo útil para mirar el motor con todo lleno.
+ */
+const torneo = params.get('modo') !== 'melee';
+const match = createMatch(lanes, torneo);
 /** Lo escribe el bucle de render, lo muestrea el HUD. */
 const perf = { frameMs: 0 };
 

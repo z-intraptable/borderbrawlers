@@ -160,7 +160,7 @@ const HITSTOP_MAX = 0.14;
  * cada lado del ring. Con 10 el ancho visible es 20 contra las 18 del escenario,
  * así que el borde —que es donde se pierde la pelea— se sigue viendo entero.
  */
-const MIN_HALF_WIDTH = 5.5;
+const MIN_HALF_WIDTH = 8;
 /**
  * Cuánto se puede ver a lo ALTO, en unidades de mundo (medio alto).
  *
@@ -178,9 +178,27 @@ const MIN_HALF_WIDTH = 5.5;
  * En 16:9 no cambia nada: el tope por alto da 13,3 de medio ancho, más que
  * `MAX_HALF_WIDTH`, así que no llega a morder nunca.
  */
-const MAX_HALF_HEIGHT = 7.5;
+const MAX_HALF_HEIGHT = 8.6;
 const MAX_HALF_WIDTH = STAGE_HALF_WIDTH + 1;
 const CAMERA_LAMBDA = 3.2;
+/**
+ * El acercamiento de los momentos clave.
+ *
+ * El plano abierto es para LEER la pelea: dónde está cada uno, dónde está el
+ * borde del escenario, quién va ganando. Pero un plano abierto todo el tiempo no
+ * tiene golpes, tiene puntitos moviéndose. Así que la cámara vive lejos y ENTRA
+ * cuando pasa algo —un KO, un super— y se vuelve sola.
+ *
+ * El acercamiento se aplica DESPUÉS del clamp a `MIN_HALF_WIDTH`, y eso es a
+ * propósito: el mínimo es lo más cerca que la cámara se pone sola, no lo más
+ * cerca que puede estar. Un primer plano que respeta el mínimo no es un primer
+ * plano.
+ *
+ * 1,9 por segundo de caída son unos 0,8 s de vuelta, que es más o menos lo que
+ * dura el hitstop de un KO más el tiempo de leer qué pasó.
+ */
+const ZOOM_CLAVE = 0.3;
+const ZOOM_DECAE = 1.9;
 /**
  * Hasta dónde puede subir y bajar la mirada de la cámara, como fracción del alto
  * visible. Con 0,55 el piso del escenario queda a poco más de tres cuartos de
@@ -223,6 +241,8 @@ interface Camera {
   x: number;
   y: number;
   halfWidth: number;
+  /** Cuánto del acercamiento de momento clave queda puesto, de 0 a 1. */
+  zoom: number;
 }
 
 export interface GameHandle {
@@ -596,7 +616,7 @@ export async function startGame(
   let shockwaveX = 0;
   let shockwaveY = 0;
 
-  const camera: Camera = { x: 0, y: 2.5, halfWidth: MAX_HALF_WIDTH };
+  const camera: Camera = { x: 0, y: 2.5, halfWidth: MAX_HALF_WIDTH, zoom: 0 };
   const fx = createFx();
 
   let accumulator = 0;
@@ -846,6 +866,10 @@ export async function startGame(
           // agenda y lo cobra `cobrarGolpe` en el cuadro en que suelta.
           agendar(m.events.slot[e], kind === EVENT_SUPER ? ACT_SUPER : ACT_SKILL,
             magnitude, m.events.team[e]);
+          // El super sí; la habilidad no. Si entrara con las dos, la cámara
+          // estaría entrando y saliendo todo el tiempo y el acercamiento
+          // dejaría de significar "esto importa".
+          if (kind === EVENT_SUPER) camera.zoom = Math.max(camera.zoom, 0.85);
           break;
         case EVENT_KO:
           // Se va de pantalla: fogonazo grande, esquirlas del color del que lo
@@ -855,12 +879,16 @@ export async function startGame(
           shards(target, x, y, 10, 8, teamColor);
           burst(target, x, y, 12, 9, 0.16, 0.8, teamColor);
           stop = Math.max(stop, HITSTOP_KO);
+          camera.zoom = 1;
           break;
         case EVENT_LAND:
           dust(target, x, y - FIGHTER_HALF_HEIGHT, Math.min(1.4, magnitude));
           break;
         case EVENT_GROW:
-          orb(target, x, y, 0.55 + magnitude * 0.2, 0.5, GOLD);
+          // El anillo del gigantismo crecía con la magnitud sin tope y con una
+          // ballena tapaba un quinto de la pantalla. El paso de gigantismo es
+          // de uno a tres: eso es lo que tiene que decidir el tamaño.
+          orb(target, x, y, 0.55 + Math.min(3, magnitude) * 0.2, 0.5, GOLD);
           break;
         default:
           break;
@@ -1094,6 +1122,24 @@ function drawFighters(
     // aplastón deja los pies clavados, que es de donde sale la sensación de
     // peso.
     view.y = -match.y[i] - stretch * FIGHTER_HALF_HEIGHT * scale;
+
+    // El baile del final. Se compone acá y no sale de la hoja porque ninguno de
+    // los seis tiene una animación de baile: lo que hay es una pose de pie. Con
+    // un salto, una inclinación y un balanceo que se contrapesan alcanza, y es
+    // la misma capa que ya hace el squash & stretch.
+    //
+    // Cada uno entra con su propio desfase. Tres muñecos saltando exactamente
+    // juntos no se leen como que festejan, se leen como un error.
+    if (match.state.ganador >= 0 && match.team[i] === match.state.ganador) {
+      const fase = elapsed * 2.4 + i * 0.9;
+      view.y -= Math.abs(Math.sin(fase)) * 0.36;
+      view.rotation = Math.sin(fase * 0.5) * 0.18;
+      const rebote = Math.cos(fase * 2) * 0.09;
+      view.scale.x = scale * suave.giro[i] * (1 - rebote);
+      view.scale.y = scale * (1 + rebote);
+    } else if (view.rotation !== 0) {
+      view.rotation = 0;
+    }
   }
 }
 
@@ -1205,6 +1251,9 @@ function updateCamera(camera: Camera, match: Match, dt: number, aspect: number):
   const techo = Math.min(MAX_HALF_WIDTH, topeAlto);
   const piso = Math.min(MIN_HALF_WIDTH, techo);
   targetHalf = Math.max(piso, Math.min(techo, targetHalf));
+  // Y recién acá el primer plano, por encima del mínimo.
+  camera.zoom = Math.max(0, camera.zoom - dt * ZOOM_DECAE);
+  targetHalf *= 1 - ZOOM_CLAVE * camera.zoom;
 
   const k = 1 - Math.exp(-CAMERA_LAMBDA * dt);
   camera.x += (targetX - camera.x) * k;

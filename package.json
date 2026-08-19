@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "escenarios": "node scripts/escenarios.mjs",
-    "test": "tsx scripts/smokeMockFeed.ts && tsx scripts/smokeFeedCore.ts && tsx scripts/smokeFighters.ts && tsx scripts/smokePhysics.ts && tsx scripts/smokeRoster.ts",
+    "test": "tsx scripts/smokeMockFeed.ts && tsx scripts/smokeFeedCore.ts && tsx scripts/smokeFighters.ts && tsx scripts/smokePhysics.ts && tsx scripts/smokeRoster.ts && tsx scripts/smokeTorneo.ts",
     "test:mem": "node --expose-gc --import tsx scripts/smokeFeedCore.ts"
   },
   "dependencies": {

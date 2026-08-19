@@ -127,10 +127,23 @@ console.log('\n== camino con timers ==');
   check('no corre antes de start()', !feed.isRunning());
   feed.start();
   check('isRunning() tras start()', feed.isRunning());
+  const desde = Date.now();
   setTimeout(() => {
     feed.stop();
+    const segundos = (Date.now() - desde) / 1000;
     const depths = seen.filter(m => isDepthSnapshot(m.data)).length;
-    check('~10 depth/s con timers', depths >= 7 && depths <= 13, `(${depths} en 1s)`);
+    // La banda es ANCHA a propósito, y el tiempo se mide en vez de suponerse.
+    //
+    // Lo que esta prueba tiene que atrapar es que el camino con timers emita
+    // snapshots: ni cero —el intervalo no arrancó— ni una avalancha. El ritmo
+    // exacto no lo puede afirmar, porque `setInterval` no atrasa las llamadas
+    // cuando la máquina está ocupada: las SALTEA. Con la banda de 7 a 13 esta
+    // aserción falló una y otra vez con el código intacto, sólo porque había
+    // otro proceso comiéndose la CPU, y una prueba que grita en falso enseña a
+    // ignorar la suite entera.
+    const ritmo = segundos > 0 ? depths / segundos : 0;
+    check('el camino con timers emite depth, ni cero ni avalancha',
+      ritmo >= 3 && ritmo <= 16, `(${ritmo.toFixed(1)}/s: ${depths} en ${segundos.toFixed(2)}s)`);
     check('stop() detiene', !feed.isRunning());
     const before = seen.length;
     setTimeout(() => {

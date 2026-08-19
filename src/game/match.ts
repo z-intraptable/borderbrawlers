@@ -60,6 +60,14 @@ import { createMoveResult, step as physicsStep } from './physics';
 export const FIGHTERS_PER_TEAM = 3;
 export const CAPACITY = FIGHTERS_PER_TEAM * 2;
 export const STOCKS = 3;
+/**
+ * Cuánto dura la ceremonia del final, en segundos.
+ *
+ * No es un número de gusto: es lo que tarda en leerse el título, mirar a los
+ * tres bailando y entender quién ganó. Menos que esto y el match siguiente
+ * arranca antes de que uno se entere de que terminó el anterior.
+ */
+export const CEREMONIA = 7;
 
 /* --- geometría del escenario ---------------------------------------- */
 
@@ -415,12 +423,33 @@ export interface Match {
    * que tiene que empujar y si la cámara sigue a quien corresponde.
    */
   lanes: number;
+  /**
+   * El torneo: cada bando manda UN peleador a la vez y el que gana se queda.
+   *
+   * Es un modo y no una variante del 3v3 porque cambia quién puede entrar, no
+   * cuántos. En melé los seis están en el escenario y el que se cae vuelve; acá
+   * hay un solo carril por bando, el que se cae **no vuelve**, y entra el
+   * siguiente de su plantilla. El bando que se queda sin los tres pierde el
+   * match.
+   */
+  torneo: boolean;
+  /** Cuántos perdió cada bando. Sólo en torneo. */
+  caidos: Uint8Array;
+  /** Quién ganó el match: -1 mientras se pelea. */
+  ganador: number;
+  /** En qué momento del reloj se terminó, para cronometrar la ceremonia. */
+  ganoEn: number;
   clock: number;
   /** Sacudón de cámara, decae solo. */
   shake: number;
 }
 
-export function createMatch(lanes: number = FIGHTERS_PER_TEAM): Match {
+export function createMatch(
+  lanes: number = FIGHTERS_PER_TEAM,
+  torneo: boolean = false,
+): Match {
+  // En torneo el carril es uno y no se discute: el 1v1 ES la regla del modo.
+  if (torneo) lanes = 1;
   const m: Match = {
     skyline: createSkyline(PLATFORM_COUNT),
     state: createMatchState(),
@@ -458,6 +487,10 @@ export function createMatch(lanes: number = FIGHTERS_PER_TEAM): Match {
     ultraTurn: new Uint8Array(2),
     growing: Int8Array.from([-1, -1]),
     lanes: Math.min(FIGHTERS_PER_TEAM, Math.max(1, Math.round(lanes))),
+    torneo,
+    caidos: new Uint8Array(2),
+    ganador: -1,
+    ganoEn: 0,
     clock: 0,
     shake: 0,
   };
@@ -540,6 +573,17 @@ export function stepMatch(
     const limit = PLATFORM_MAX_SPEED * dt;
     const delta = Math.max(-limit, Math.min(limit, next - m.skyline.topY[i]));
     m.skyline.topY[i] += delta;
+  }
+
+  // Terminado el match no se pelea más: se festeja. Va después de las
+  // plataformas para que el escenario siga respirando con el libro —congelarlo
+  // entero hace que la ceremonia parezca que el juego se colgó— y antes de todo
+  // lo demás, que es IA, golpes y altas.
+  if (m.ganador >= 0) {
+    if (m.clock - m.ganoEn >= CEREMONIA) reiniciar(m);
+    else ceremonia(m);
+    summarize(m);
+    return;
   }
 
   const greenBoost = momentumBoost(teamMomentum(stats.buyVolume, stats.sellVolume, TEAM_GREEN));
@@ -798,6 +842,17 @@ export function stepMatch(
     if (m.stocks[i] > 0) m.stocks[i]--;
     m.slot[i] = SLOT_FREE;
     m.shake = 1;
+    if (m.torneo && m.ganador < 0) {
+      // El que se cayó queda eliminado y entra el siguiente de su plantilla. No
+      // se decide acá quién entra —eso lo hace `activate` con el próximo trade
+      // del bando—; acá sólo se lleva la cuenta.
+      const suyo = m.team[i];
+      if (m.caidos[suyo] < FIGHTERS_PER_TEAM) m.caidos[suyo]++;
+      if (m.caidos[suyo] >= FIGHTERS_PER_TEAM) {
+        m.ganador = suyo === TEAM_GREEN ? TEAM_RED : TEAM_GREEN;
+        m.ganoEn = m.clock;
+      }
+    }
   }
 
   /* --- el ultra: la barra del equipo ---------------------------------- */
@@ -927,6 +982,11 @@ function guardando(m: Match, i: number): boolean {
 
 function freeSlot(m: Match, team: number): number {
   const from = team === TEAM_GREEN ? 0 : FIGHTERS_PER_TEAM;
+  // Con el match terminado no entra nadie más: los trades siguen llegando
+  // durante la ceremonia y sin esto el bando perdedor sacaría un cuarto
+  // peleador de la nada en mitad del baile.
+  if (m.ganador >= 0) return -1;
+  if (m.torneo && m.caidos[team] >= FIGHTERS_PER_TEAM) return -1;
   // Hasta `m.lanes` y no hasta los tres: es acá, y sólo acá, donde se decide
   // cuántos peleadores llega a tener un bando.
   for (let i = from; i < from + m.lanes; i++) if (m.slot[i] === SLOT_FREE) return i;
@@ -938,10 +998,13 @@ function activate(
   m: Match, slot: number, team: number,
   size: number, whale: boolean, median: number, now: number,
 ): void {
-  // `m.character[slot]` NO se toca: lo fijó `createMatch` y no cambia nunca.
-  // Antes acá se llamaba a `pickCharacter`, que repartía el siguiente de la
-  // plantilla en ronda; sin relevos, reactivar un slot es devolverle al mismo
-  // peleador que se cayó.
+  // En melé `m.character[slot]` no se toca: lo fijó `createMatch` y reactivar un
+  // slot es devolverle al MISMO peleador que se cayó, porque no hay relevos.
+  //
+  // En torneo sí cambia, y es el corazón del modo: el carril es uno solo por
+  // bando, así que quién entra por él es quién sigue en la plantilla. Por eso
+  // `character` siguió siendo un array por slot y no una constante.
+  if (m.torneo) m.character[slot] = m.caidos[team] % FIGHTERS_PER_TEAM;
   const weight = weightFor(size, median, whale);
   m.weight[slot] = weight;
   m.damage[slot] = 0;
@@ -1000,7 +1063,70 @@ function unleash(m: Match, self: number, now: number, spent: number): void {
   }
 }
 
+/**
+ * El final del match: los tres del bando ganador parados en el centro.
+ *
+ * Se hace desde la simulación y no sólo desde el dibujo porque los cuerpos ya
+ * existen por slot y `relieve` ya sabe cambiarlos cuando cambia el personaje.
+ * Activar los tres slots del ganador es todo lo que hace falta para que los tres
+ * aparezcan; el baile lo compone la capa de render, que es la que ya mueve
+ * escala y rotación.
+ */
+function ceremonia(m: Match): void {
+  const gana = m.ganador === TEAM_GREEN ? 0 : FIGHTERS_PER_TEAM;
+  const pierde = m.ganador === TEAM_GREEN ? FIGHTERS_PER_TEAM : 0;
+  const piso = m.skyline.topY[0] + FIGHTER_HALF_HEIGHT;
+  for (let n = 0; n < FIGHTERS_PER_TEAM; n++) {
+    const i = gana + n;
+    m.character[i] = n;
+    m.slot[i] = SLOT_ACTIVE;
+    m.x[i] = (n - 1) * 1.7;
+    m.y[i] = piso;
+    m.vx[i] = 0;
+    m.vy[i] = 0;
+    m.grounded[i] = 1;
+    m.damage[i] = 0;
+    m.scale[i] = 1;
+    m.stage[i] = 0;
+    m.whale[i] = 0;
+    m.hitstun[i] = -10;
+    // Mirándose entre ellos y no los tres al mismo lado: tres muñecos de perfil
+    // en fila parecen una cola, no un festejo.
+    m.facing[i] = n === FIGHTERS_PER_TEAM - 1 ? -1 : 1;
+    m.slot[pierde + n] = SLOT_FREE;
+  }
+}
+
+/** Vuelve a empezar. */
+function reiniciar(m: Match): void {
+  for (let i = 0; i < CAPACITY; i++) {
+    m.slot[i] = SLOT_FREE;
+    m.damage[i] = 0;
+    m.stocks[i] = STOCKS;
+    m.stage[i] = 0;
+    m.scale[i] = 1;
+    m.whale[i] = 0;
+    m.energy[i] = 0;
+    m.character[i] = i % FIGHTERS_PER_TEAM;
+  }
+  m.caidos[0] = 0;
+  m.caidos[1] = 0;
+  m.ganador = -1;
+  m.state.kos[0] = 0;
+  m.state.kos[1] = 0;
+  m.ultra[0] = 0;
+  m.ultra[1] = 0;
+  m.ultraTurn[0] = 0;
+  m.ultraTurn[1] = 0;
+  m.growing[0] = -1;
+  m.growing[1] = -1;
+}
+
 function summarize(m: Match): void {
+  // Acá y no en `stepMatch`: el KO que termina el match se cobra al final del
+  // paso, así que escribirlo arriba lo publicaba un cuadro tarde y el título
+  // salía después del golpe que lo causó.
+  m.state.ganador = m.ganador;
   for (let team = 0; team < 2; team++) {
     const from = team === TEAM_GREEN ? 0 : FIGHTERS_PER_TEAM;
     let damage = 0;
@@ -1015,5 +1141,11 @@ function summarize(m: Match): void {
     m.state.damage[team] = alive > 0 ? damage / alive : 0;
     m.state.alive[team] = alive;
     m.state.stocks[team] = stocks;
+    // Cuántos le quedan al bando. En torneo son los que todavía no cayeron; en
+    // melé, los que están en el escenario. Es lo que dibujan los puntitos del
+    // marcador, y en torneo `alive` no sirve: siempre vale 1 o 0.
+    m.state.plantel[team] = m.torneo
+      ? FIGHTERS_PER_TEAM - Math.min(FIGHTERS_PER_TEAM, m.caidos[team])
+      : alive;
   }
 }

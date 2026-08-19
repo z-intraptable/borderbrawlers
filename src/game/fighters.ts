@@ -595,6 +595,10 @@ export interface MatchState {
   stocks: Uint8Array;
   alive: Uint8Array;
   kos: Uint32Array;
+  /** Cuántos peleadores le quedan al bando: los puntitos del marcador. */
+  plantel: Uint8Array;
+  /** Quién ganó el match, o -1 mientras se pelea. */
+  ganador: number;
   /** Etapa de gigantismo en curso por equipo. 0 = nadie creciendo. */
   charge: Uint8Array;
   /** La barra de ultra del equipo, de 0 a 1. */
@@ -609,6 +613,8 @@ export function createMatchState(): MatchState {
     stocks: new Uint8Array(2),
     alive: new Uint8Array(2),
     kos: new Uint32Array(2),
+    plantel: new Uint8Array(2),
+    ganador: -1,
     charge: new Uint8Array(2),
     ultra: new Float32Array(2),
     ultraTurn: new Uint8Array(2),
