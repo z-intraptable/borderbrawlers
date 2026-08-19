@@ -1,37 +1,46 @@
 # BorderBrawlers — contexto para Claude Code
 
-Visualizador 3D del order book de Binance como escenario de pelea estilo Super
-Smash Bros. React Three Fiber v9 + Rapier, WebGL. Escala: 1 espectador, demo
-personal. Prioridad número uno: **presupuesto de frame de 16,6 ms**, por encima
-de la elegancia del código.
+Pelea 3 contra 3 estilo Super Smash Bros / Brawlhalla, dibujada sobre el order
+book de Binance en vivo. Verde compradores, rojo vendedores, **sin comandos de
+usuario**: todo lo maneja el libro y el flujo de compra/venta. Escala: 1
+espectador, demo personal.
 
-El documento de referencia es `PROMPT_MAESTRO_BorderBrawlers_v3.md` (fuera del
-repo). Este archivo resume lo que hace falta para seguir trabajando acá.
+Sin framework de UI. Sin motor de física de terceros. **PixiJS 8** para
+dibujar, WebSocket directo a Binance para el dato, TypeScript estricto para
+todo lo demás. `package.json` sólo trae `pixi.js` y `pixi-filters` como
+dependencias de runtime.
+
+**Esto no siempre fue así.** El proyecto arrancó como visualizador 3D puro
+(React Three Fiber v9 + Rapier), pasó a ser una pelea 3 vs 3 sin dejar el 3D, y
+después se mudó entera a Pixi (`d1d3437`, `bc9d719`) porque Rapier no daba el
+control "crujiente" que necesita un personaje jugable — ver más abajo, en
+"Por qué no hay motor de física". Si algo de lo que sigue contradice un
+recuerdo de la versión three.js, ganó el código: no queda una sola línea de
+React, three ni Rapier en `src/`.
 
 ---
 
 ## Estado
 
-Los 8 módulos están escritos y **la escena corre entera**. `tsc --noEmit` limpio
-en strict, `npm test` en verde, `npm run build` sin errores. Los módulos 6 y 7
-se ejecutaron por primera vez y se corrigieron los defectos que aparecieron al
-verlos andar (ver abajo).
+`tsc --noEmit` limpio en strict, `npm test` en verde (7 suites, ~130 asserts,
+sin red ni browser), `npm run build` sin errores.
 
-| # | Archivo | Estado |
-|---|---------|--------|
-| 1 | `src/types/binance.ts` | verificado |
-| 2 | `src/net/feedCore.ts` + `src/net/useBinanceFeed.ts` | verificado, 40 asserts |
-| 3 | `src/scene/OrderBookWalls.tsx` | corre |
-| 4 | `src/scene/FighterPool.tsx` + `src/game/fighters.ts` | corre |
-| 5 | `src/scene/DynamicCamera.tsx` + `src/scene/stageFocus.ts` | corre |
-| 6 | `src/scene/BorderBrawlersScene.tsx` | corre |
-| 7 | `src/BorderBrawlers.tsx` | corre |
-| 8 | `src/mock/mockFeed.ts` | verificado, 20 asserts |
-| — | `src/scene/StageBackdrop.tsx` + `ImpactFx.tsx` + `fighterGeometry.ts` | corren |
+| Capa | Archivos | Qué hace |
+|---|---|---|
+| Feed | `src/net/feedCore.ts`, `src/types/binance.ts` | WebSocket a Binance, parseo, reconexión con backoff |
+| Simulación | `src/game/match.ts`, `src/game/fighters.ts`, `src/game/physics.ts`, `src/game/roster.ts` | La pelea entera, sin una línea de Pixi. Funciones puras, testeadas sin browser |
+| Render | `src/render/game.ts`, `src/render/stage.ts`, `src/render/backdrop.ts`, `src/render/fx.ts`, `src/render/vfxSprites.ts`, `src/render/loadVfx.ts` | `Application` de Pixi, capas, filtros, partículas geométricas y texturas de efecto |
+| Arte de personaje | `src/art/fighter.ts`, `src/art/spriteFighter.ts`, `src/art/loadArt.ts`, `src/art/loadSheets.ts`, `src/art/manifest.ts`, `src/art/looks.ts`, `src/art/assetUrl.ts` | Arma cada peleador a partir de piezas recortadas + hojas de sprite |
+| HUD | `src/hud/hud.ts` | Marcador y barra de mercado en DOM plano, sin framework |
+| Mock | `src/mock/mockFeed.ts` | Generador sintético de trades/libro para desarrollar sin depender del mercado |
+| Auxiliar | `src/quality.ts` (`detectLowQuality`) | Heurística de calidad — ver nota abajo, quedó con vocabulario de la versión three.js |
+| Servidor | `server/` | Grabador y replay del VPS. No toca el camino en vivo — ver `server/README.md` |
 
-Auxiliares: `src/quality.ts` (`detectLowQuality`), `src/dev/PerfHud.tsx`
-(medidor propio). `src/dev/FeedProbe.tsx` se borró: el módulo 7 anda y el banco
-de pruebas del feed ya no aportaba nada que la escena no muestre.
+`src/quality.ts` tiene un comentario que habla de `MeshToonMaterial` /
+`MeshBasicMaterial`, que son de three.js y ya no existen en el proyecto. La
+función en sí (`detectLowQuality`) sigue viva y se usa para decidir Bloom
+sí/no; el comentario quedó desactualizado por el pivot a Pixi y conviene
+corregirlo si se toca ese archivo.
 
 ### Cómo arrancar
 
@@ -41,17 +50,27 @@ npm run typecheck
 npm run dev        # http://localhost:5173/?source=mock&scenario=normal
 ```
 
-Empezar con `?source=mock` para no depender del mercado. Después
-`?source=binance-direct`.
+Vite fija el puerto en `5173` (`server: { port: 5173 }` en `vite.config.ts`).
+Empezar con `?source=mock` para no depender del mercado real.
 
-Query params: `source`, `scenario`, `symbol`, `vps`, y `quality=high|low`
-(o `?low`). Los valores se validan contra la lista permitida: antes se
-casteaban a ciegas y un `?source=binancedirect` terminaba abriendo un
-WebSocket a la URL literal `undefined`.
+### Query params (`src/main.ts`)
 
-`quality=high` existe para poder medir la ruta con Bloom en una máquina que
-`detectLowQuality()` clasifica como lenta; sin eso el criterio de draw calls
-no se puede verificar en un headless de 2 núcleos.
+| Param | Valores | Qué hace |
+|---|---|---|
+| `source` | `mock` \| `binance-direct` \| `vps-replay` \| `vps-relay` | de dónde sale el feed. Sin el param, va contra Binance en vivo — es el punto del proyecto |
+| `scenario` | `calm` \| `normal` \| `volatile` \| `stress` | sólo aplica con `source=mock` |
+| `symbol` | p.ej. `ethusdt` | default `btcusdt` |
+| `vps` | `ws://host:8080` | base URL para `vps-replay`/`vps-relay` |
+| `stage` | slug de `public/escenarios/` | fija un fondo pintado; sin esto, plano de siempre. Se valida con `/^[a-z0-9-]+$/i` para no poder escapar de la carpeta |
+| `modo` | `melee` | los seis peleadores sueltos a la vez; sin esto, torneo 1v1 (ver abajo) |
+| `duo` | `kor,ragnir` | fija un peleador por bando para trabajar sobre un cambio sin esperar la rotación del torneo |
+| `vs` | número | peleadores por bando en modo melé, sin torneo. `?vs=1` es el mano a mano para mirar el motor sin seis cuerpos encima |
+| `ritmo` | 0–4 | multiplicador de velocidad de la pelea. Sin el param corre a la mitad del reloj de pared (desde el 18/08: a velocidad real no se llegaba a ver quién le pegaba a quién) |
+| `medir` | presente/ausente | dibuja en pantalla el tamaño real de ventana/viewport/canvas/buffer — existe porque un encuadre roto en teléfono no se reproduce en desktop ni en headless, y en el teléfono no hay consola |
+
+Todos los valores enumerados se validan contra una lista permitida (`pick()`
+en `main.ts`) en vez de castearse a ciegas: un `?source=binancedirect` mal
+tipeado terminaba abriendo un WebSocket a la URL literal `undefined`.
 
 ---
 
@@ -59,286 +78,303 @@ no se puede verificar en un headless de 2 núcleos.
 
 - **Sin backend en el camino en vivo.** El browser se conecta directo a
   `wss://data-stream.binance.vision:443`. Un relay no puede ganar en latencia
-  (desigualdad triangular) y el feed cuesta ~0,2 ms por segundo de hilo
-  principal, o sea <0,1% del presupuesto. Además, con conexión directa cada
-  visitante es cliente de Binance por su cuenta; con un relay público vos
-  retransmitís market data a terceros, que los términos de uso prohíben.
-- **El VPS de Vultr (2 vCPU / 4 GB / USD 20 mes) queda para grabación y replay
-  determinista**, no para el vivo. Es lo único que no se puede hacer sin
-  servidor: repetir el mismo minuto infernal del mercado mientras se perfila.
-  **Implementado en `server/`** — ver `server/README.md`. Con TLS resuelto,
-  `vps-relay` también sirve como salida ante bloqueo geográfico, sin tocar nada
-  más que el flag.
-- **Nada de esto va a Supabase ni a una base de datos.** Son archivos planos que
-  se escriben append-only y se leen secuencialmente por rango de tiempo: un
-  filesystem hace exactamente eso y una base no agrega nada. Además el grabador
-  es un proceso que sostiene un WebSocket 24/7, que es justo lo que las
-  plataformas serverless no hacen. Lo estático (el cliente) sí va a Vercel.
+  (desigualdad triangular) y retransmitir market data a terceros va contra los
+  términos de uso de Binance.
+- **El VPS de Vultr queda para grabación y replay determinista**, no para el
+  vivo — es lo único que no se puede hacer sin servidor: repetir el mismo
+  minuto del mercado mientras se perfila un cambio. Implementado en `server/`.
+  Retención por defecto: **10 GB o 30 días, lo que llegue primero** (~28 días
+  de mercado normal). Con TLS resuelto, `vps-relay` también serviría como
+  salida ante bloqueo geográfico.
+- **Nada va a una base de datos.** Archivos planos append-only, leídos
+  secuencialmente por rango de tiempo — un filesystem hace exactamente eso.
 - **`@depth20@100ms` es snapshot idempotente, no delta.** Sin bootstrap REST,
   sin buffering, sin manejo de gaps.
-- **`r3f-perf` está prohibido.** `7.2.3`, la última publicada, depende de
-  `@react-three/drei@^9` (React 18 / R3F v8) e instala un segundo drei anidado
-  junto al drei@10 del proyecto. Era la única fuente de los 8 warnings ERESOLVE.
-  Se reemplazó por `src/dev/PerfHud.tsx`, que lee `gl.info` en ~50 líneas.
-- **Hosting**: sitio estático. El destino previsto es Vercel.
-
-## Matriz de versiones — exacta, sin caret
-
-```
-react 19.2.0 · react-dom 19.2.0 · three 0.185.1
-@react-three/fiber 9.7.0 · @react-three/rapier 2.2.0
-@react-three/drei 10.7.8 · @react-three/postprocessing 3.0.5
-```
-
-- Ventana válida de three: **0.182–0.185**. `@react-three/postprocessing@3`
-  exige `three >= 0.182` y `postprocessing@6.39.x` exige `three < 0.186`.
-- **Nunca** instalar `@dimforge/rapier3d-compat` aparte: rapier@2.2.0 lo fija en
-  `0.19.2` y hacerlo a mano produce un binding WASM duplicado.
-- R3F v9 usa React 19. La augmentación de JSX va con
-  `declare module '@react-three/fiber'` e interfaz `ThreeElements`, nunca en el
-  namespace global `JSX`. Los tipos `MeshProps`, `Object3DNode`, `MaterialNode`,
-  `BufferGeometryNode` y `Props` **no existen** en v9.
-- Rapier v1 es para React 18 y v2 para React 19. No mezclar ejemplos de v1.
+- **Por qué no hay motor de física** (`src/game/physics.ts`, reemplaza a
+  Rapier). Un motor de cuerpos rígidos simula objetos que CAEN, no personajes
+  que se CONTROLAN: con Rapier los peleadores resbalaban por las plataformas,
+  se apilaban uno sobre la cabeza del otro y flotaban al empujarse, y cada
+  arreglo era pelearle al solver. Smash y Brawlhalla tampoco usan cuerpos
+  rígidos para el personaje — usan exactamente esto: velocidad propia y
+  colisión contra rectángulos, sin dependencias, testeable sin browser.
+- **Cero azar en la pelea.** Había un `mulberry32` con semilla fija cuyo único
+  consumidor era el reloj que sacaba una especial cada 8-12 s. Al pasar los
+  golpes a la barra de fuerza que cargan las órdenes, ese reloj sobró y con él
+  la última fuente de azar: todo lo que pasa en pantalla se puede seguir hasta
+  un trade o una cifra del libro. El replay determinista del VPS, que era la
+  razón de tener el PRNG, sale ahora de que no hay nada que sembrar.
+- **La plantilla es exactamente la pelea: seis personajes, tres por bando, sin
+  relevos.** El que se cae reaparece él mismo en su slot. Antes eran
+  diecinueve nombres para seis lugares —para que la pelea no se repitiera—,
+  recortado a seis por una razón de producción y no de diseño: cada personaje
+  necesita un dibujo cortado en piezas, y seis bien cortados se ven mejor que
+  diecinueve a medias. `Match.character` sigue siendo un dato por slot en vez
+  de una constante, así que volver a agrandar la plantilla es sumar entradas
+  en `src/game/roster.ts` y devolverle a `activate` el reparto por ronda.
+- **El bando se lee en los poderes, no en la ropa.** Cada peleador conserva
+  sus colores propios — son personajes dibujados, no siluetas teñidas — y lo
+  que dice de qué lado está es el color de sus efectos: verde comprador, rojo
+  vendedor. Por eso `roster.ts` viene partido al medio con el bando fijo por
+  personaje, y nada se tiñe en runtime.
+- **Hosting**: sitio estático, destino previsto Vercel.
 
 ---
 
-## Invariantes del código
+## Invariantes del feed (no tocar sin releer)
 
-**Regla del agresor.** `m` es *"¿el comprador es el market maker?"*. El taker es
-el agresor y define el color. Está escrito literalmente así en `feedCore.ts` y
-hay un test por cada lado. Invertirlo produce una visualización plausible y
-sistemáticamente al revés.
+**Regla del agresor.** `m` es *"¿el comprador es el market maker?"*. El taker
+es el agresor y define el color:
 
 ```ts
-const side: 'buy' | 'sell' = trade.m ? 'sell' : 'buy';
+const side: Side = trade.m ? 'sell' : 'buy';   // src/net/feedCore.ts:609
 ```
 
-El color del personaje **es** esa regla hecha visible: `buy` verde, `sell` rojo,
-ballena en dorado fuera del rango 0–1 para que la levante el Bloom. Se pinta con
-un `setColorAt` por spawn y un solo `needsUpdate` al final del frame. Hasta la
-auditoría los personajes salían todos dorados y el lado no se veía en ningún
-lado de la escena.
+Invertirlo produce una visualización plausible y sistemáticamente al revés.
 
-**Ballenas por mediana móvil**, ventana de 200 trades, `size > mediana * 8`, sin
-clasificar hasta tener 20 muestras. Nunca un umbral fijo.
+**Ballenas por mediana móvil**, `whale = size > mediana * WHALE_MULT`, sin
+clasificar hasta tener muestras mínimas (evita falsos al arrancar). Nunca un
+umbral fijo — ver constantes al inicio de `feedCore.ts`.
 
-**Cero estado de React en el camino de datos de mercado.** El libro vive en
-`Float64Array` preasignados; los trades en un ring buffer de 256 con pool de
-objetos y descarte del más viejo. `useState` sí para el chrome de UI de baja
-frecuencia: estado de conexión, visibilidad, símbolo, toggle de calidad.
+**Ring buffer de trades preasignado**, pool de slots reutilizados
+(`push(id, side, price, size, whale, t)` escribe sobre un slot existente, no
+asigna). El libro también vive en estructuras preasignadas. El objetivo:
+cero asignaciones por trade en el hilo principal.
 
-**Cero asignaciones en `useFrame` y en el handler del socket.** Todos los
-temporales (`Object3D`, `Vector3`, `Color`, `Matrix4`, y los `{x,y,z}` que come
-Rapier) están preasignados a nivel de módulo. Verificado: 400k trades con
-crecimiento de heap retenido cero.
-
-**Visual y física desacopladas.** Un `InstancedMesh` es un único `Object3D` y no
-admite un collider por instancia. El libro son 40 instancias visuales en 1 draw
-call (10 Hz) y, aparte, 9 plataformas con 9 colliders. Nunca desmontar y
-remontar componentes para cambiar una forma.
-
-> El invariante decía "sólo 3 colliders" y cambió cuando la escena pasó a ser
-> una pelea: hace falta dónde pararse. La razón original —recrear 40 colliders
-> diez veces por segundo bloquea el hilo principal— sigue valiendo, y por eso
-> las 9 losas **no se recrean ni se redimensionan**: tienen medias extensiones
-> constantes y sólo se mueven en Y. Sale más barato que el `setHalfExtents` a
-> 4 Hz que había antes.
-
-**Las plataformas son `kinematicPosition`, nunca `fixed`.** Un cuerpo fijo que se
-teletransporta con `setTranslation` no barre contra los dinámicos: los personajes
-se hunden o quedan trabados cuando la plataforma crece abajo de ellos. Con
-cuerpos cinemáticos movidos por `setNextKinematicTranslation`, Rapier resuelve el
-contacto y el personaje viaja arriba de la losa que sube.
-
-**La IA consulta el skyline, no el mundo de física.** Las alturas ya están
-calculadas para dibujar, así que "¿hay piso en x?" es un índice y una
-comparación. Un raycast por personaje por frame sería trabajo y basura para
-responder algo que ya sabemos.
-
-**`Outlines` de drei: `screenspace` hace lo contrario de lo que sugiere.** En
-`true` desplaza la cáscara en unidades de MUNDO — con grosor 4 tapa media
-pantalla con una mancha negra. El grosor en píxeles, constante aunque la cámara
-haga zoom, es el modo por defecto.
-
-**Ningún collider más fino que 0,2 unidades** — los finos causan tunneling.
-
-**Los acumuladores de sub-frecuencia no se resetean en los early return.** El
-libro se redibuja sólo cuando cambia `lastUpdateId`, y la física va a 4 Hz con
-un acumulador propio. Resetear ese acumulador en el return de "no hay snapshot
-nuevo" descarta el tick pendiente en 5 de cada 6 frames — 60 Hz de render contra
-10 Hz de snapshots — y los muros terminan redimensionándose 0,7 veces por
-segundo en vez de 4. El síntoma no es un error: es física que va atrasada
-respecto de lo que se ve.
-
-**`interpolate`, no `interpolation`.** El README de rapier lo escribe mal en un
-ejemplo; React no valida props desconocidos, así que el error es silencioso.
-
-**El zoom no se clampea directo.** En R3F la cámara ortográfica tiene el frustum
-en unidades de píxel (`camera.right === size.width / 2`), así que un zoom
-razonable ronda 50–100 y depende de la resolución. Se clampea la extensión
-visible en unidades de mundo. Y hay que llamar `camera.updateProjectionMatrix()`
-en el mismo frame en que se toca `camera.zoom`, o no pasa nada y no hay error.
-
-**La calidad se resuelve en el montaje, nunca en caliente.** El toggle remonta
-el `<Canvas>` con una `key`. Alternar el tipo de material en runtime fuerza
-compilar y linkear un `WebGLProgram` nuevo y congela.
-
-### Dos hallazgos sobre `@react-three/rapier@2.2.0`
-
-Verificados leyendo el código fuente de la versión fijada, no la documentación.
-
-1. **`setMatrixAt` a mano no sirve** para las instancias del pool. La matriz se
-   recompone cada frame como `compose(translation, rotation, state.scale)`,
-   donde `state` vive en `useRapier().rigidBodyStates` (marcado `@internal`,
-   pero es el único camino). La escala por instancia se cambia ahí.
-2. **El bucle de sincronización saltea los cuerpos dormidos**: la guarda es
-   `rigidBody.isSleeping() && !("isInstancedMesh" in state.object)`, y para
-   cuerpos instanciados `state.object` es el wrapper del `RigidBody`, no el
-   `InstancedMesh`. Si se llama `sleep()` en el mismo frame en que se retira el
-   personaje, la escala 0 no llega a escribirse y queda un cubo congelado en el
-   aire. Por eso el retiro es **en dos fases**: un frame para encoger y
-   teletransportar, y recién al siguiente `sleep()`.
+**Reloj y constructor de WebSocket inyectables** en `BinanceFeedClient`, así
+que la reconexión con backoff exponencial + jitter (hasta 300 intentos / 5
+min) se simula en microsegundos en los tests, sin esperar de verdad.
 
 ---
 
-## Criterio de aceptación (Parte E) — verificable
+## El juego
 
-- `renderer.info.render.calls` **≤ 16** con la pelea entera y el libro completo.
-  El techo subió de 12 a 16 al entrar el escenario jugable: contornos, losas,
-  efectos de impacto y fondo. Medido: **15 en calidad alta** y 5 en baja. `PerfHud` lo muestra en vivo y se pone rojo al pasarse.
-  Medido con `?source=mock&scenario=stress`: **11 en calidad alta** (escena más
-  todos los pasos del Bloom) y **2 en calidad baja**.
+- **Los trades hacen aparecer peleadores y les dan peso.** El tamaño del trade
+  define el peso del golpe; una ballena entra como peso pesado. El flujo
+  agresor acumulado carga la barra de fuerza de cada equipo — de ahí salen
+  los golpes de cuerpo a cuerpo y las especiales, no de un reloj con azar.
+- **Gigantismo y super.** Cuando la liquidez de un lado pasa el 56% del libro,
+  ese equipo agranda a UNO de los suyos en tres pasos; al tercero descarga un
+  super que despide a todo rival en el radio y vuelve a tamaño normal. De a
+  uno: con los tres creciendo a la vez no se entiende qué pasó. La cámara
+  corta al que lo tira durante el super (`845e13d`).
+- **El daño es la regla de Smash**: cuanto más acumulado, más lejos sale el
+  empujón — sin eso la pelea es plana.
+- **El libro es el escenario.** Losa central ancha (`CENTER_HALF_WIDTH`) más
+  dos plataformas laterales por costado que suben y bajan con la liquidez.
+  Bajó de cuatro repisas angostas a dos anchas por costado: con cuatro,
+  ninguna medía más de 1,6 cuerpos y no eran plataformas, eran repisas.
+- **Poderes a distancia.** Una especial no estalla encima de quien la tira:
+  sale disparada, viaja, y recién estalla al llegar (o al pool cíclico de
+  hasta ~12 en vuelo). No le pega a los propios.
+- **Torneo 1v1 por defecto.** Cada bando manda uno; el que gana se queda, el
+  que cae no vuelve y entra el siguiente de la plantilla; el bando que se
+  queda sin sus tres pierde el match. Ceremonia de cierre de `CEREMONIA = 7`
+  segundos antes de reiniciar — lo que tarda en leerse el título y entender
+  quién ganó. `?modo=melee` da los seis sueltos a la vez, útil para mirar el
+  motor con todo lleno.
+- **El fondo reacciona al volumen por lado**: hoguera verde y roja, cielo
+  teñido hacia el que domina. El super rota el escenario pintado
+  (`public/escenarios/lista.json`, generado por `npm run escenarios` porque
+  `public/` no pasa por Vite y el browser no puede listar carpetas); el corte
+  cae dentro del hitstop del super para no verse como un parpadeo suelto.
+  `?stage=` fija uno.
 
-  Dos cosas hacían que ese número fuera mentira y están arregladas:
-  `PerfHud` apaga `gl.info.autoReset` (three resetea los contadores en cada
-  `render()`, y `EffectComposer` hace uno por paso, así que lo que se leía era
-  el último quad del Bloom: "1 draw call"), y el Bloom va con `levels={4}` en
-  vez del default de 8, porque el mipmap blur cuesta 2 draw calls por nivel y
-  con 8 el total daba 19.
-- Cero asignaciones de `Vector3`, `Quaternion`, `Matrix4`, `Color` u `Object3D`
-  dentro de `useFrame` o del handler del WebSocket.
-- Cero setters de estado de React en el camino de datos de mercado. Por eso no
-  hay freeze frame global: `paused` de `<Physics>` es estado de React, y el
-  hitstun por personaje da el mismo golpe sin romper el invariante.
-- La regla del agresor implementada como `trade.m ? 'sell' : 'buy'`, literal.
-- Pestaña oculta 60 s y luego visible: sin ráfaga de spawns, sin salto de física.
-  Verificado en headless emulando lo que hace el browser de verdad —
-  `visibilityState` a `hidden` **y** rAF suspendido, que es la mitad que se
-  olvida. 60 s ocultos acumulan ~2400 trades y al volver el peor frame no se
-  movió (16,8 ms) ni hubo ráfaga.
-- Reconexión con backoff exponencial y jitter, sin superar 300 intentos / 5 min.
-- `tsc --noEmit` limpio en strict, sin `any` ni `@ts-ignore`.
+La lógica vive en `src/game/fighters.ts` y `src/game/match.ts`, sin Pixi ni
+DOM, con asserts. `src/render/game.ts` sólo la lee y la dibuja.
+
+### Render (`src/render/game.ts`)
+
+`Application` de Pixi con capas ordenadas a mano, no z-index automático:
+fondo → losas → cuerpos → capas de VFX (glow con Bloom, ink sin Bloom) →
+HUD (DOM, aparte del canvas). Después de armar las capas de brillo/tinta de
+los efectos hay que volver a subir los cuerpos al tope (`08955b2`) o un
+especial/super/estallido —que mide 2-3 veces el ancho del personaje— tapa al
+peleador durante todo el burst. `ShockwaveFilter` sobre el impacto de los
+golpes fuertes.
+
+`src/render/fx.ts` dibuja las partículas del cuerpo a cuerpo con geometría
+pura (dos `Graphics`: `glow` tintable del color de bando, `ink` el contorno
+negro fijo) — decodificar un PNG por golpe no es viable con seis peleadores
+pegándose varias veces por segundo. Las texturas de verdad
+(`src/render/vfxSprites.ts` + `loadVfx.ts`, pool de diez sprites fijos, cero
+asignación por cuadro) van sólo en los momentos que ya de por sí frenan el
+ritmo — especial, super, estallido, KO —, generadas con Nano Banana Pro y
+separadas en las mismas dos capas glow/ink por `scripts/separar-vfx.py`, así
+que un poder de cualquier bando sale teñido del color que le toca. Si una
+textura no cargó, el golpe se sigue viendo con la geometría de siempre: la
+textura es un agregado, nunca una dependencia.
+
+### Arte de personaje
+
+Pipeline en capas, en orden de cuánto detalle necesita cada acción:
+
+1. **Piezas recortadas** (`torso`, `head`, `armupper`, `armlower`,
+   `leglower`, `legupper`) armadas como muñeco de piezas — cortadas de un
+   único dibujo de pie con `scripts/cortar.py` a partir de una receta en
+   `recetas/<personaje>.json` que dice dónde están las articulaciones. Cubre
+   `idle`/`run`/`jump`/`hurt` y el cuerpo a cuerpo.
+2. **Hojas de sprite** (`hojas.png`/`hojas.webp` + `hojas.json`) para las
+   acciones que no se pueden fingir rotando piezas — especiales, super,
+   dash — generadas a partir de clips de Kling con `scripts/hoja-sprites.py`.
+   El WebP bajó el peso de 26,6 MB a 6,5 MB por visita (`6252154`).
+3. **El cuadro de `gira`** (turnaround, un frame). El giro fingido —angostar
+   el ancho al 34%— seguía leyéndose como que el personaje desaparece un
+   instante, sobre todo con fondo pintado detrás. La solución fue un frame de
+   FRENTE real para el instante del cruce, generado con Kling + Nano Banana
+   Pro a partir del propio sprite del juego e inyectado con
+   `scripts/inyectar-giro.py`. **Kor, Ragnir y Mako** lo tienen generado;
+   **Asuri, WuShang y Dusk** no lo necesitaron porque su `idle` ya mira de
+   frente a cámara. `src/art/spriteFighter.ts` decide cuál mostrar según el
+   umbral de giro (`UMBRAL_GIRO_FRENTE`).
+
+`public/art/deadpool/` existe en disco pero **no está en el roster** —
+`src/game/roster.ts` tiene exactamente seis entradas (Kor/Mako/Asuri verdes,
+Ragnir/WuShang/Dusk rojos) y Deadpool no es una de ellas. Quedó del período en
+que se probaba el método de corte con una sola figura de referencia
+(`3d78c3c`, `44ef457`); no se está usando ni desarrollando activamente.
+
+**Quién entra al roster es una condición de corte, no de gusto**: brazos
+despegados del torso, hueco entre las piernas, nada cruzando por delante del
+cuerpo. Un arma en diagonal sobre el pecho obliga a inventar lo que hay
+detrás, y eso ya no es cortar — es dibujar.
+
+---
+
+## Pipeline de arte (`scripts/`)
+
+Agrupado por etapa. Cada script trae su propio docstring en español con
+ejemplo de uso; esto es sólo el mapa.
+
+**Del generador a la figura recortable**
+`fondo.py` / `alfa.py` — sacan el fondo (blanco o damero) y dejan alfa real.
+`piezas.py` — lista componentes conectados del alfa, para escribir una receta
+sin medir a ojo. `receta.py` — escribe la receta de un kit en fila. `armar.py`
+— arma la figura quieta desde el manifiesto, fuera del juego, para probar
+números de rig. `proporcion.py` — sólo mide y avisa, **no reescala** (quedó
+documentado que reescalar fue un error).
+
+**Corte y limpieza de piezas**
+`cortar.py` — corta la figura entera según la receta y escribe el manifiesto.
+`contorno.py` — contorno negro sobre lo ya cortado. `piezas-sueltas.py` —
+acerca piezas que se fueron lejos, borra esquirlas. `blancos-sueltos.py` —
+borra fondo blanco encerrado adentro del dibujo. `sombra-de-piso.py` — borra
+sombras que Kling dibujó adentro del sprite. `piso-por-accion.py` — fija la
+distancia del centroide a los pies por animación.
+
+**Hojas de sprite**
+`cortar-poses.py` — parte una hoja de poses en una imagen por pose.
+`juntar-poses.py` — junta poses sueltas en una hoja para `hoja-sprites.py`.
+`hoja-sprites.py` — convierte clips de Kling en la hoja de sprites final de un
+personaje. `cuadros.py` — saca cuadros que Kling dibujó con otro personaje
+encima. `intercalar.py` — interpola cuadros intermedios pieza por pieza, sin
+generar arte nuevo. `recortar-accion.py` — rehace una acción sola sin tocar
+las demás. `reempacar.py` — reempaqueta hojas sin tocar un píxel de dibujo.
+`ventana-ciclo.py` — encuentra el tramo de un clip que es ciclo real, para la
+carrera. `hoja-fuego.py` — corta una hoja de llamas de Kling en tira de
+cuadros para Pixi (no sirve `hoja-sprites.py` para esto).
+
+**El giro**
+`inyectar-giro.py` — mete el frame de `gira` generado como acción de un
+cuadro, ver arriba.
+
+**VFX**
+`separar-vfx.py` — separa una textura de efecto de Nano Banana en las capas
+glow/ink que ya usa `fx.ts`.
+
+**Escenarios**
+`escenarios.mjs` — escribe `public/escenarios/lista.json` leyendo disco.
+`fuego-recolor.py` — saca la hoguera roja de la verde por recolor, en vez de
+generar dos dibujos.
+
+**Medición y auditoría**
+`auditar.py` — ordena candidatos de `arte-crudo/candidatos/` por facilidad de
+corte según los criterios eliminatorios. `hoja.py` — arma una hoja de
+contactos de candidatos para elegir mirando (`shots/candidatos.png`).
+`medirFlujo.ts`, `medirRuido.ts`, `medirVacio.ts` — métricas sobre capturas.
+
+**Verificación visual (headless, Playwright)**
+`mirar.mjs` — abre una URL del juego y saca una foto, imprime consola/red.
+`mirar-movil.mjs` — igual, con caja de teléfono en horizontal.
+`mirar-efectos.mjs` — banco de efectos a varias edades. `shoot.mjs` /
+`video.mjs` / `video-cdp.mjs` — capturan la escena corriendo sobre el feed
+mock (foto o video, por screenshot o por CDP). `demo-video.mjs` — graba el
+banco de animación a paso fijo. `showcase.mjs` — una imagen por pose de todo
+el elenco. `webm.py` / `gif.py` — arman video/GIF desde los cuadros
+capturados (el GIF va a 12 fps a propósito: es la velocidad real del bucle,
+no una elección de gusto).
+
+**Empaquetado**
+`artefacto.mjs` — empaqueta el juego entero en un único HTML que anda sin
+servidor.
 
 ---
 
 ## Tests
 
 ```bash
-npm test           # mockFeed + feedCore + fighters, ~130 asserts, sin red
-npm run test:mem   # igual, con --expose-gc, mide heap retenido
-
-cd server && npm test   # formato de grabación + servidor de replay, sin red
+npm test           # 7 suites, sin red ni browser
+npm run test:mem   # smokeFeedCore con --expose-gc, mide heap retenido
 ```
 
-La suite del servidor levanta el servidor de replay de verdad en otro proceso y
-le conecta **el `BinanceFeedClient` real**, el mismo del browser, con un
-`socketFactory` de Node. Si el libro se llena y los trades salen bien sin tocar
-una línea del cliente, el replay es indistinguible del vivo — que es la única
-propiedad que le pedimos.
+| Suite | Cubre |
+|---|---|
+| `smokeFeedCore.ts` | Núcleo del feed: parseo, reconexión, backoff. Relojes y sockets falsos |
+| `smokeMockFeed.ts` | El generador sintético |
+| `smokeFighters.ts` | Reglas de pelea puras: cargas, daño, empuje, gigantismo |
+| `smokePhysics.ts` | Controlador de personaje: gravedad, snap a plataformas, caída |
+| `smokePoderes.ts` | Poderes a distancia: salen, viajan, estallan lejos de quien los tiró, no le pegan a los propios, el pool no se satura |
+| `smokeRoster.ts` | No hay relevos: siempre los mismos seis, el que cae reaparece él mismo |
+| `smokeTorneo.ts` | Regla del torneo 1v1: gana y se queda, cae y no vuelve, pierde sin los tres |
 
-El reloj y el constructor de WebSocket se inyectan en `BinanceFeedClient`, así
-que las 24 h de la reconexión proactiva se simulan en microsegundos. Cualquier
-cambio en `feedCore.ts` tiene que mantener esas suites en verde.
+`cd server && npm test` — formato de grabación y servidor de replay, contra
+el `BinanceFeedClient` real con un `socketFactory` de Node, sin red.
 
 ---
 
-## El juego
+## Otros directorios
 
-Verde = compradores agresores, rojo = vendedores, 3 contra 3, sin comandos de
-usuario: todo lo maneja el libro.
+- **`godot/`** — banco de rigging, EN CURSO, no es el juego. Prueba si
+  deformar la figura entera con huesos (en vez de cortarla en piezas
+  simétricas de frente) sirve mejor para los dibujos en tres cuartos y pose
+  dinámica que trae el arte actual. Si convence, es candidato a portar las
+  ~5000 líneas de simulación que ya funcionan en Pixi; si no, se descarta sin
+  pérdida. Ver `godot/LEEME.md`.
+- **`docs/`** — `guia-arte.md`, `REFERENCIA-BRAWLHALLA.md`, `ficha-deadpool.md`.
+- **`recetas/`** — un JSON de articulaciones por personaje (entrada de
+  `cortar.py`) más `PROMPT-KIT-PARTES.md`, el prompt para regenerar kits.
+- **`web/`** — HTML standalone, último tocado en el commit del pivot a
+  sprites (`2019734`); no se confirmó si sigue generándose con
+  `scripts/artefacto.mjs` o quedó de un empaquetado puntual — revisar antes de
+  asumir que está al día.
+- **`index.html`** — el juego (entrada real de `npm run dev`). `demo.html`,
+  `efectos.html`, `showcase.html`, `consola.html` — bancos de prueba
+  auxiliares para animación, VFX y elenco, fuera del camino principal.
+- **`.agents/skills/`** — skills de Higgsfield instaladas para este repo, no
+  código del proyecto.
 
-- **El bando se lee en los poderes, no en la ropa.** Cada peleador dibujado
-  conserva sus propios colores; lo que dice de qué lado está es el color de sus
-  efectos —verde el comprador, rojo el vendedor—. Por eso `src/game/roster.ts`
-  viene partido al medio con el bando fijo por personaje. El muñeco vectorial,
-  que es el marcador de posición mientras el dibujo no está cortado, sí sale
-  teñido del color del bando.
-- **La plantilla es exactamente la pelea: seis, tres por bando, y no hay
-  relevos.** El que se cae del escenario reaparece él mismo en su slot, y son
-  siempre los mismos seis en todos los escenarios. Los cuerpos se construyen
-  todos al arrancar y reaparecer es cambiar de `visible`.
+---
 
-  Antes eran diecinueve para seis lugares, con relevo por ronda, para que la
-  pelea no se repitiera. Se recortó por producción y no por diseño: cada
-  personaje necesita su dibujo cortado en piezas, y seis bien cortados se ven
-  mejor que diecinueve a medias. Volver a agrandarla es sumar entradas en
-  `src/game/roster.ts` y devolverle a `activate` el reparto por ronda —
-  `Match.character` sigue siendo un dato por slot justamente para eso.
-- **Quién entra a la plantilla es una condición de corte, no de gusto**: brazos
-  despegados del torso, hueco entre las piernas y nada cruzando por delante del
-  cuerpo. Un arma en diagonal sobre el pecho obliga a inventar lo que hay
-  detrás, y eso ya no es cortar.
-- **El super cambia de escenario.** La rotación sale de
-  `public/escenarios/lista.json`, que escribe `npm run escenarios` leyendo las
-  carpetas — `public/` no pasa por Vite, así que el browser no puede listarlas.
-  El corte cae dentro del hitstop del super, que es el momento más ruidoso de la
-  pelea; suelto se vería como un parpadeo del fondo. Con `?stage=` se fija uno y
-  no se mueve.
-- **El libro es el escenario.** 9 losas que suben y bajan con la liquidez.
-- **Los trades hacen aparecer peleadores.** El tamaño define el peso, una ballena
-  entra como peso pesado, y el flujo agresor le da ímpetu a su equipo.
-- **Gigantismo.** Cuando la liquidez de un lado pasa el 56% del libro, ese equipo
-  agranda a UNO de los suyos en tres pasos; al tercero descarga un super que
-  despide a todo rival en el radio, y vuelve a su tamaño. De a uno, porque con
-  los tres creciendo a la vez no se entiende qué pasó.
-- **El daño es la regla de Smash**: cuanto más acumulado, más lejos sale el
-  empujón. Sin eso la pelea es plana.
-- **El fondo es el volumen por lado**: hoguera verde y roja, y el cielo teñido
-  hacia el que domina.
+## Pendientes reales
 
-Las decisiones (a quién pegarle, cuándo saltar, cuánto empuja un golpe) están en
-`src/game/fighters.ts`, sin three ni rapier ni React, y con asserts. `FighterPool`
-sólo las traduce a llamadas de física.
+No hay TODOs ni FIXMEs en `src/`. Lo que sigue abierto, a nivel de commits y
+del banco de Godot en curso:
 
-## Pendientes
-
-0. **Repartir la pelea.** Los seis peleadores se emparejan en el centro y se
-   quedan ahí en vez de usar las plataformas laterales. Es ajuste de la búsqueda
-   de objetivo, no arquitectura.
-1. **Correr contra Binance de verdad.** El camino en vivo nunca se ejercitó: el
-   sandbox donde se auditó no tunelea WebSockets y el cliente se quedó en
-   `reconnecting`, que es lo correcto pero no prueba nada del feed real. Es lo
-   único del proyecto que sigue sin verse funcionando.
-2. Ajustar a ojo las constantes de escenario: `HEIGHT_GAIN`, `IMPULSE_GAIN`,
-   `HDR_THRESHOLD`, los lambdas de `damp` de la cámara. Están puestas por
-   razonamiento, no por haberlas visto. En las capturas el encuadre deja bastante
-   aire muerto abajo y los personajes pasan por encima de los muros altos: los
-   colliders son 2 cuboides con la altura PROMEDIO del lado, así que un pico de
-   liquidez se ve pero no se choca. Es decisión de diseño, no bug; si molesta, el
-   ajuste es de constantes, no de arquitectura.
-3. Medir el presupuesto de 16,6 ms en una GPU real. Los números de fps de la
-   auditoría salieron de SwiftShader por software (6–10 fps) y no dicen nada:
-   lo que sí es válido de ahí son los draw calls y el conteo de triángulos.
-4. **Desplegar el grabador en el VPS.** El código está y anda (`server/`, con
-   tests de punta a punta), pero nunca corrió contra Binance de verdad ni contra
-   un disco real — por lo mismo que el punto 1.
-
-   El presupuesto de disco del README viejo estaba mal y ya se corrigió: medido
-   con `npm run sizing`, un día son 0,36 GB comprimidos y un año ~131 GB, contra
-   los "180 MB/día, más de un año en 80 GB" que se habían supuesto. La compresión
-   real de este formato es 5x, no 8x.
-
-   Por eso la retención por defecto es **10 GB o 30 días, lo que llegue primero**,
-   y el que manda es el tamaño: son ~28 días de mercado, ~23 si hay volatilidad.
-   La cinta se pisa sola y el disco nunca pasa de 10 GB.
-5. Si alguna vez se quiere `vps-relay` en vivo, hace falta `wss://` — una página
-   HTTPS no puede abrir `ws://` a una IP pelada. Requiere dominio propio con
-   Caddy, o un túnel de Cloudflare.
+1. **El banco de Godot** (`godot/`) — decidir si el rigging por huesos
+   reemplaza el corte en piezas, y si conviene portar la simulación.
+2. **Correr contra Binance de verdad, de punta a punta, en un entorno con
+   salida de red real** — no se pudo ejercitar en este sandbox.
+3. **`server/` (grabador/replay)** no tiene commits desde que se implementó
+   (`6bb017a`, `67f857a`); sigue sin haber corrido contra Binance real ni
+   contra disco real, por la misma razón que el punto 2.
+4. Medir el presupuesto de frame en una GPU real — los números de este
+   sandbox salen de SwiftShader por software y sólo valen para comparar draw
+   calls, no fps.
+5. `web/` sin confirmar si está actualizado (ver arriba).
 
 ## Nota legal
 
-Los términos de uso de Binance licencian los datos de mercado para uso personal
-no comercial o interno y prohíben retransmitirlos a terceros. Un proyecto
-personal o demo privada es exposición baja. Si esto se vuelve un producto
-público comercial hace falta consentimiento escrito de Binance o un proveedor
-con licencia de redistribución. No es asesoramiento legal.
+Los términos de uso de Binance licencian los datos de mercado para uso
+personal no comercial o interno y prohíben retransmitirlos a terceros. Un
+proyecto personal o demo privada es exposición baja. Si esto se vuelve un
+producto público comercial hace falta consentimiento escrito de Binance o un
+proveedor con licencia de redistribución. No es asesoramiento legal.

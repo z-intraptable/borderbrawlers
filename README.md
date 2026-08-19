@@ -2,83 +2,46 @@
 
 Pelea estilo Super Smash Bros / Brawlhalla sobre el order book de Binance.
 
-3 contra 3, verde compradores contra rojo vendedores, **sin comandos de usuario**:
-todo lo maneja el libro de órdenes y el flujo de compra y venta. Los peleadores
-saltan entre plataformas que suben y bajan con la liquidez, se empujan y se sacan
-del ring. Cuando un lado domina el libro, agranda a uno de los suyos en tres
-pasos y descarga un super.
+3 contra 3, verde compradores contra rojo vendedores, **sin comandos de
+usuario**: todo lo maneja el libro de órdenes y el flujo de compra y venta.
+Los peleadores saltan entre plataformas que suben y bajan con la liquidez, se
+empujan y se sacan del ring. Cuando un lado domina el libro, agranda a uno de
+los suyos en tres pasos y descarga un super que despide a todo rival cerca.
+Por defecto es torneo 1v1: cada bando manda uno, el que gana se queda.
 
-React Three Fiber v9 + Rapier, WebGL, presupuesto de frame de 16,6 ms.
+Sin framework de UI, sin motor de física de terceros: **PixiJS 8** para
+dibujar y TypeScript estricto para todo lo demás. `src/game/` simula la pelea
+entera con funciones puras y arrays tipados, testeadas sin browser; `src/
+render/` sólo la lee y la dibuja.
 
----
-
-## Estado
-
-| # | Módulo | Estado |
-|---|--------|--------|
-| 1 | `src/types/binance.ts` | listo, verificado |
-| 2 | `src/net/feedCore.ts` + `src/net/useBinanceFeed.ts` | listo, verificado |
-| 3 | `src/scene/OrderBookWalls.tsx` | listo |
-| 4 | `src/scene/FighterPool.tsx` + `src/game/fighters.ts` | listo, verificado |
-| 5 | `src/scene/DynamicCamera.tsx` + `stageFocus.ts` | listo |
-| 6 | `src/scene/BorderBrawlersScene.tsx` | listo |
-| 7 | `src/BorderBrawlers.tsx` | listo |
-| 8 | `src/mock/mockFeed.ts` | listo, verificado |
-| — | `StageBackdrop` · `ImpactFx` · `fighterGeometry` | listo |
-| — | `server/` — grabador y replay del VPS | listo, verificado |
-
-Ver `CLAUDE.md` para el contexto completo: decisiones cerradas, invariantes del
-código, y los pendientes.
+Ver `CLAUDE.md` para el contexto completo: decisiones cerradas, invariantes
+del feed, el pipeline de arte de los peleadores y los pendientes reales.
 
 ```bash
-npm run dev
-# http://localhost:5173/?source=mock&scenario=normal
+npm i
+npm run dev        # http://localhost:5173/?source=mock&scenario=normal
+npm run typecheck  # tsc --noEmit, strict
+npm test           # 7 smoke suites, sin red ni browser
 ```
 
 Parámetros por query string: `?source=` (`mock` | `binance-direct` |
 `vps-replay` | `vps-relay`), `?scenario=` (`calm` | `normal` | `volatile` |
-`stress`), `?symbol=`, `?vps=`, `?low` y `?quality=high|low`.
+`stress`, sólo con `source=mock`), `?symbol=`, `?vps=`, `?stage=` (fondo
+pintado), `?modo=melee` (los seis sueltos en vez de torneo 1v1), `?duo=kor,
+ragnir` (fija un peleador por bando para trabajar), `?vs=` (peleadores por
+bando en melé), `?ritmo=` (velocidad, 0–4), `?medir` (regla de tamaños en
+pantalla, para depurar el encuadre en teléfono).
 
-`src/dev/PerfHud.tsx` muestra en vivo el criterio de aceptación de la Parte E
-(`renderer.info.render.calls <= 12`, frame ms, peor frame del período).
-
-### Por qué no usamos `r3f-perf`
-
-El prompt maestro pedía montar `<Perf />` desde el primer día. No se puede con
-esta matriz: `r3f-perf@7.2.3` —la última publicada— depende de
-`@react-three/drei@^9.103.0`, y drei@9 declara peers de React 18 y
-`@react-three/fiber@^8`. npm resuelve instalando un **segundo drei anidado**
-escrito contra la API de R3F v8, junto al drei@10 del proyecto, ambos
-importando el mismo fiber@9. Es la mezcla v8/v9 que la Parte A prohíbe, y era
-la única fuente de los 8 warnings `ERESOLVE` del install.
-
-`PerfHud.tsx` lee `gl.info` directamente —que es de dónde `r3f-perf` saca sus
-números— en unas 50 líneas, sin dependencias y sin conflictos de peers.
-
----
-
-## Setup
-
-```bash
-npm i
-npm run dev        # http://localhost:5173
-npm run typecheck  # tsc --noEmit, strict
-npm test           # smoke tests de los módulos 1, 2, 8 y de la pelea
-```
-
-Las versiones están fijadas **sin caret** a propósito. `@react-three/postprocessing@3`
-exige `three >= 0.182.0` y `postprocessing@6.39.x` exige `three < 0.186.0`: la
-ventana válida es **0.182–0.185**. Un `npm update` te saca de ahí y rompe el build.
-
-Nunca instales `@dimforge/rapier3d-compat` por separado: `@react-three/rapier@2.2.0`
-lo fija en `0.19.2` y hacerlo a mano produce un binding WASM duplicado.
+Todos los valores enumerados se validan contra una lista permitida — un
+`?source=binancedirect` mal tipeado no abre un WebSocket a `undefined`, avisa
+por consola y usa el default.
 
 ---
 
 ## Arquitectura de datos
 
 Cuatro fuentes intercambiables detrás de un flag, todas emitiendo **las mismas
-formas de cable de Binance**. Cambiar de fuente no toca una línea de la escena.
+formas de cable de Binance**. Cambiar de fuente no toca una línea del juego.
 
 ```
 mock            generador sintético local, sin red
@@ -91,106 +54,95 @@ vps-relay       passthrough en vivo. Sólo si Binance bloquea el directo
 
 - **El relay nunca puede ganar en latencia.** `browser→VPS→Binance` es, por
   desigualdad triangular, ≥ `browser→Binance`.
-- **El feed no es el cuello de botella.** El parseo completo cuesta ~0,2 ms por
-  segundo (`depth20@100ms` son ~1,15 KB y `JSON.parse` ~15 µs, a 10 Hz). Contra
-  un presupuesto de 1000 ms/s, es menos del 0,1%. Los 60 FPS se pierden en
-  Rapier, draw calls y GC, no en la red.
-- **Posición legal.** Con conexión directa cada visitante es cliente de Binance
-  por su cuenta. Con un relay público, vos retransmitís market data a terceros,
-  que es justo lo que prohíben los términos de uso.
+- **El feed no es el cuello de botella.** El parseo completo cuesta ~0,2 ms
+  por segundo de hilo principal — menos del 0,1% de un presupuesto de frame de
+  16,6 ms.
+- **Posición legal.** Con conexión directa cada visitante es cliente de
+  Binance por su cuenta. Con un relay público, vos retransmitís market data a
+  terceros, que es justo lo que prohíben los términos de uso.
 
 ### Para qué sí sirve el VPS
 
-**Grabar y reproducir.** Para perfilar hace falta correr *el mismo minuto
-infernal del mercado* una y otra vez mientras mirás el profiler. Contra el
-mercado en vivo no hay dos corridas comparables, así que "esto mejoró o empeoró"
-no se puede contestar.
+**Grabar y reproducir.** Para perfilar hace falta correr *el mismo minuto del
+mercado* una y otra vez. Contra el mercado en vivo no hay dos corridas
+comparables, así que "esto mejoró o empeoró" no se puede contestar.
 
-Está implementado en **`server/`** — grabador y servidor de replay, con tests de
-punta a punta que no tocan la red. Ver `server/README.md`.
+Implementado en **`server/`** — grabador y servidor de replay, con tests de
+punta a punta que no tocan la red. Ver `server/README.md`. Retención por
+defecto: 10 GB o 30 días, lo que llegue primero (~28 días de mercado normal,
+la cinta se pisa sola). También sirve como salida ante bloqueo geográfico con
+`vps-relay`, sin cambiar nada más que el flag.
 
-Cuánto ocupa, medido con `npm run sizing` sobre el formato real:
-
-| escenario | por día | comprimido | por año |
-|---|---|---|---|
-| calm | 0,95 GB | 0,24 GB | 87 GB |
-| normal | 1,86 GB | 0,36 GB | 131 GB |
-| volatile | 2,67 GB | 0,44 GB | 161 GB |
-
-Un año **no** entra en el disco de 80 GB del VPS: la compresión real de este
-formato es 5x, no las 8x que suponía la estimación anterior.
-
-Tampoco hace falta. La retención por defecto es **10 GB o 30 días, lo que llegue
-primero**, y el que manda es el tamaño: ~28 días de mercado, ~23 si hay
-volatilidad. La cinta se pisa sola, el disco nunca pasa de 10 GB, y nunca hay
-que intervenir.
-
-Y queda como salida ante bloqueo geográfico, con `vps-relay`, sin cambiar nada
-más que el flag.
+`server/` no tiene commits desde que se implementó y nunca corrió contra
+Binance real ni contra disco real — el camino en vivo tampoco se ejercitó de
+punta a punta en este entorno de desarrollo.
 
 ---
 
 ## Reglas que no se negocian
 
 **Regla del agresor.** `m` es *"¿el comprador es el market maker?"*. El maker
-estaba en reposo; el taker es el agresor y define el color. Invertirlo produce
-una visualización que se ve plausible y está sistemáticamente al revés.
+estaba en reposo; el taker es el agresor y define el color. Invertirlo
+produce una visualización que se ve plausible y está sistemáticamente al
+revés.
 
 ```ts
 const side: 'buy' | 'sell' = trade.m ? 'sell' : 'buy';
 ```
 
-**Ballenas por mediana móvil, nunca por umbral fijo.** Un umbral en BTC no sirve
-para ETH ni sobrevive a un movimiento de precio. `whale = size > mediana * 8`,
-sobre una ventana de 200 trades, y sin clasificar hasta tener 20 muestras.
+**Ballenas por mediana móvil, nunca por umbral fijo.** Un umbral en BTC no
+sirve para ETH ni sobrevive a un movimiento de precio.
 
-**Nada de estado de React en el camino de datos de mercado.** El libro vive en
-arrays tipados preasignados; los trades en un ring buffer de 256 con pool de
-objetos y política descartar-el-más-viejo. `useState` sí, para el chrome de UI
-de baja frecuencia: estado de conexión, visibilidad, toggle de calidad.
+**Cero azar en la pelea.** Todo lo que pasa en pantalla se puede seguir hasta
+un trade o una cifra del libro — no hay generador con semilla en el camino de
+juego.
 
-**`@depth20@100ms` es snapshot idempotente, no delta.** Sin bootstrap REST, sin
-buffering, sin manejo de gaps.
+**`@depth20@100ms` es snapshot idempotente, no delta.** Sin bootstrap REST,
+sin buffering, sin manejo de gaps.
+
+---
+
+## El elenco y su arte
+
+Seis peleadores fijos, tres por bando (`src/game/roster.ts`): **Kor, Mako,
+Asuri** verdes; **Ragnir, WuShang, Dusk** rojos. Sin relevos — el que se cae
+del ring reaparece él mismo en su slot.
+
+Cada uno se arma en capas: piezas recortadas de un dibujo de pie para el
+movimiento normal, hojas de sprite generadas de clips de Kling para las
+especiales, y un frame de turnaround generado aparte (Kor, Ragnir, Mako) para
+que el giro no se vea como que el personaje desaparece un instante. El
+pipeline completo de recorte, generación y verificación visual vive en
+`scripts/` — está documentado en `CLAUDE.md`.
 
 ---
 
 ## Verificación
 
-`npm test` corre dos suites, sin red y sin esperas reales:
-
-- **`smokeMockFeed`** — formato de cable exacto, orden de bids/asks, libro no
-  cruzado, determinismo por semilla, escalado de los cuatro escenarios.
-- **`smokeFeedCore`** — mediana móvil contra implementación naive, ring buffer
-  descartando el más viejo, regla del agresor, umbral de ballena, backoff
-  exponencial con jitter y su techo, límite de 300 intentos / 5 min, reconexión
-  proactiva de 24 h *make-before-break* (el socket viejo sigue abierto hasta que
-  el nuevo confirma), limpieza en `stop()`, y crecimiento de heap retenido cero
-  sobre 400k trades.
-
-El reloj y el constructor de WebSocket se inyectan, así que las 24 h se simulan
-en microsegundos.
-
-`cd server && npm test` corre otras dos, también sin red:
-
-- **`smokeRecording`** — ida y vuelta del formato, la garantía de que el crudo
-  no se normaliza, líneas corruptas que no voltean al lector, nombres de
-  archivo, selección de horas, y dos cargas de la misma ventana que dan
-  exactamente lo mismo.
-- **`smokeReplayServer`** — levanta el servidor en otro proceso y le conecta el
-  `BinanceFeedClient` real. Verifica que la grabación llega byte por byte, que
-  el libro se llena y los trades se cuentan sin tocar una línea del cliente, y
-  que dos corridas de la misma ventana son idénticas.
-
 ```bash
-npm run test:mem   # igual que npm test pero con --expose-gc
+npm test           # 7 suites: feed, mock, reglas de pelea, física del
+                    # personaje, poderes a distancia, plantilla fija, torneo
+npm run test:mem   # smokeFeedCore con --expose-gc, mide heap retenido
+cd server && npm test   # formato de grabación + servidor de replay, sin red
 ```
+
+El reloj y el constructor de WebSocket se inyectan en `BinanceFeedClient`, así
+que la reconexión con backoff exponencial (hasta 300 intentos / 5 min) y la
+reconexión proactiva de 24 h se simulan en microsegundos, sin esperar de
+verdad.
+
+Verificación visual fuera de la suite automática — sin assert, a ojo, sobre
+capturas headless con Playwright: `node scripts/mirar.mjs <url> [foto.png]`.
+Existe porque un defecto de encuadre o un personaje que no aparece no se ve en
+el typecheck ni en los tests.
 
 ---
 
 ## Nota legal
 
-Los términos de uso de Binance licencian los datos de mercado para uso personal
-no comercial o interno, y prohíben retransmitirlos o publicarlos a terceros. Un
-proyecto personal o una demo privada es exposición baja. Si esto se vuelve un
-producto público comercial hace falta consentimiento escrito de Binance o un
-proveedor con licencia de redistribución. No es asesoramiento legal.
+Los términos de uso de Binance licencian los datos de mercado para uso
+personal no comercial o interno, y prohíben retransmitirlos o publicarlos a
+terceros. Un proyecto personal o una demo privada es exposición baja. Si esto
+se vuelve un producto público comercial hace falta consentimiento escrito de
+Binance o un proveedor con licencia de redistribución. No es asesoramiento
+legal.
