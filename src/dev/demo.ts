@@ -246,7 +246,7 @@ function paso(dt: number): void {
   girarAccion(mostrando ? dt : 0);
   const duracion = ACTION_TIME[accion];
   view.pose(vx, vy, grounded, false, accion,
-    duracion > 0 ? edad / duracion : 0, elapsed);
+    duracion > 0 ? edad / duracion : 0, elapsed, 0);
   // Squash & stretch, igual que en la pelea: se estira al subir y se aplasta al
   // caer. Es lo que separa un muñeco que se traslada de uno que se mueve.
   const stretch = Math.max(-0.18, Math.min(0.18, vy * 0.014));

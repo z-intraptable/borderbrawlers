@@ -155,7 +155,7 @@ app.ticker.add(() => {
     view.x = slotWidth * ((i % columns) + 1);
     view.y = height * 0.2 + rowHeight * (Math.floor(i / columns) + 0.55);
     view.scale.set(unit);
-    view.pose(vx, vy, !airborne, step.label === 'hurt', step.action, actionT, elapsed);
+    view.pose(vx, vy, !airborne, step.label === 'hurt', step.action, actionT, elapsed, 0);
     names[i].x = view.x;
     names[i].y = view.y + unit * 0.62;
   }

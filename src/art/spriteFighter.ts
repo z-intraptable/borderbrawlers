@@ -27,6 +27,15 @@ import type { FighterSheets, SheetAnimation } from './loadSheets';
 const RIG = 100;
 /** Media altura del cuerpo en unidades de rig: `FIGHTER_HALF_HEIGHT * RIG`. */
 const HALF = 52;
+/**
+ * Qué tan adentro del giro —0 de perfil, 1 en el medio— hace falta estar para
+ * cambiar al cuadro de frente. La misma constante la usa `game.ts` para saber
+ * hasta dónde deshacer el angostamiento del cuerpo, así que vive acá y se
+ * importa: que las dos mitades del efecto usen números distintos es
+ * exactamente el tipo de bug que no tira ningún error, sólo un salto feo un
+ * cuadro antes o después de que el dibujo cambie.
+ */
+export const UMBRAL_GIRO_FRENTE = 0.42;
 
 /**
  * Cuánto avanza el ciclo de carrera por unidad de mundo recorrida.
@@ -143,6 +152,14 @@ export function createSpriteFighterView(sheets: FighterSheets): FighterView {
   const jump = sheets.animations.get('jump') ?? null;
   const hurtAnim = sheets.animations.get('hurt') ?? null;
   const fallAnim = sheets.animations.get('fall') ?? null;
+  /**
+   * El cuadro de frente, generado con Kling/Nano Banana para el giro.
+   *
+   * No todos los personajes lo tienen todavía —se hizo Kor y Ragnir primero,
+   * de a uno por vez que da la técnica de referencia+turnaround—, así que es
+   * opcional: sin él, `pose()` sigue angostando el perfil como hacía antes.
+   */
+  const gira = sheets.animations.get('gira') ?? null;
   // Sin `idle` propio, el primer cuadro de la carrera hace de pose de pie: es
   // el mismo personaje parado en una zancada, y se lee mucho mejor que dejarlo
   // en blanco.
@@ -207,11 +224,20 @@ export function createSpriteFighterView(sheets: FighterSheets): FighterView {
 
   root.pose = (
     vx: number, vy: number, grounded: boolean, hurt: boolean,
-    action: number, actionT: number, elapsed: number,
+    action: number, actionT: number, elapsed: number, turn: number,
   ): void => {
     const dt = Math.max(0, Math.min(0.1, elapsed - lastElapsed));
     lastElapsed = elapsed;
     travelled += Math.abs(vx) * dt;
+
+    // El giro pasa a mostrar el cuadro de FRENTE en vez de seguir angostando
+    // el de perfil. Va antes que golpeado y que la acción a propósito: un
+    // puño que conecta justo en medio del cruce tiene que seguir viéndose de
+    // frente y no partirse en dos cuadros por medio paso de diferencia.
+    if (gira !== null && turn >= UMBRAL_GIRO_FRENTE) {
+      show(gira, 0);
+      return;
+    }
 
     if (hurt) {
       // Golpeado en el piso es un retroceso; golpeado en el aire es salir

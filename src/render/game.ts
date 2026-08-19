@@ -4,6 +4,7 @@ import { AdvancedBloomFilter } from 'pixi-filters/advanced-bloom';
 import { ShockwaveFilter } from 'pixi-filters/shockwave';
 import type { Match } from '../game/match';
 import {
+  EVENT_ENTRA,
   EVENT_ESTALLIDO,
   EVENT_GROW,
   EVENT_HIT,
@@ -42,7 +43,7 @@ import { loadArt, unloadArt } from '../art/loadArt';
 import type { FighterArt } from '../art/loadArt';
 import { loadSheets, unloadSheets } from '../art/loadSheets';
 import type { FighterSheets } from '../art/loadSheets';
-import { createSpriteFighterView } from '../art/spriteFighter';
+import { UMBRAL_GIRO_FRENTE, createSpriteFighterView } from '../art/spriteFighter';
 import { ROSTER, characterFor } from '../game/roster';
 import {
   beams, burst, createFx, drawFx, dust, flash, impact, orb, shards, slash,
@@ -1067,6 +1068,15 @@ export async function startGame(
             wave(target, x, y - FIGHTER_HALF_HEIGHT, 0.8 + magnitude * 0.7, 0.3, 0xd9cdb4);
           }
           break;
+        case EVENT_ENTRA:
+          // La entrada: un anillo del color del bando y una tolvanera bajo los
+          // pies, en el mismo lugar en que va a caer. Es lo que hace que el
+          // relevo se lea como que ALGUIEN ENTRÓ y no como que la escena se
+          // corrigió sola después de estar vacía.
+          wave(target, x, y - FIGHTER_HALF_HEIGHT, 1.1, 0.34, teamColor);
+          burst(target, x, y - FIGHTER_HALF_HEIGHT * 0.6, 9, 6, 0.12, 0.4, teamColor);
+          dust(target, x, y - FIGHTER_HALF_HEIGHT, 1.1);
+          break;
         case EVENT_GROW:
           // El anillo del gigantismo crecía con la magnitud sin tope y con una
           // ballena tapaba un quinto de la pantalla. El paso de gigantismo es
@@ -1298,16 +1308,19 @@ function drawFighters(
     const progress = duration > 0 ? actionAge[i] / duration : 0;
     const hurt = match.clock - match.hitstun[i] < HITSTUN;
 
-    view.pose(
-      match.vx[i], match.vy[i], match.grounded[i] === 1, hurt,
-      action[i], progress, elapsed,
-    );
-
-    // El dibujo persigue a la simulación a velocidad finita en vez de espejarse
-    // en un frame. Cruzar por el cero es como se da vuelta un personaje
-    // dibujado: se afina, pasa de perfil y sale del otro lado.
+    // El giro se calcula ANTES de posar y no después: `pose()` necesita saber
+    // qué tan adentro del giro está para elegir entre el cuadro de la acción y
+    // el de frente, y calcularlo con el `giro` del frame pasado lo dejaría un
+    // cuadro atrasado justo en el momento más visible.
     const paso = GIRO_POR_SEGUNDO * dt;
     suave.giro[i] += Math.max(-paso, Math.min(paso, match.facing[i] - suave.giro[i]));
+    // `vuelta` vale 0 mirando de frente a su lado y 1 en el medio del giro.
+    const vuelta = 1 - Math.min(1, Math.abs(suave.giro[i]));
+
+    view.pose(
+      match.vx[i], match.vy[i], match.grounded[i] === 1, hurt,
+      action[i], progress, elapsed, vuelta,
+    );
 
     // Al tocar el piso la simulación pone `vy` en cero en el mismo frame, así
     // que el aplastón de abajo se apagaría justo cuando tendría que verse. Este
@@ -1326,9 +1339,14 @@ function drawFighters(
     const stretch = Math.max(-0.22, Math.min(0.18,
       match.vy[i] * 0.014 - suave.golpePiso[i] * GOLPE_PISO));
     const scale = match.scale[i];
-    const ancho = anchoDelGiro(suave.giro[i]);
-    // `vuelta` vale 0 mirando de frente a su lado y 1 en el medio del giro.
-    const vuelta = 1 - Math.min(1, Math.abs(suave.giro[i]));
+    // Más allá de `UMBRAL_GIRO_FRENTE` el cuadro que se está mostrando ya es el
+    // de frente —lo decide `pose()`— así que angostarlo además sería angostar
+    // un dibujo que ya mira a cámara: se lee como que se aplasta contra un
+    // vidrio. Se DESHACE el angostamiento a medida que entra a esa zona, con la
+    // misma curva con la que entró, para que no haya un salto en el borde.
+    const abre = Math.max(0, (vuelta - UMBRAL_GIRO_FRENTE) / (1 - UMBRAL_GIRO_FRENTE));
+    const anchoBase = anchoDelGiro(suave.giro[i]);
+    const ancho = anchoBase + (Math.sign(anchoBase) * 1 - anchoBase) * abre;
     view.scale.x = scale * ancho * (1 - stretch);
     view.scale.y = scale * (1 + stretch) * (1 + vuelta * GIRO_ALTO);
     // El contenedor está en el CENTRO del cuerpo, así que estirarlo o aplastarlo
@@ -1402,7 +1420,7 @@ function dibujarPoderes(
     const cos = Math.cos(ang);
     const sen = Math.sin(ang);
 
-    /* --- la cola: una gota que se afina hacia atrás -------------------- */
+    /* --- la cola: capas que se apagan hacia afuera -------------------- */
     // Nace recién cuando el poder ya salió: los primeros centímetros de vuelo
     // no pueden tener una estela de dos metros.
     const salida = Math.min(1, (PODER_VIDA - p.vida[k]) * 6);
@@ -1410,36 +1428,36 @@ function dibujarPoderes(
     if (largo > 0.01) {
       const nx = -sen;
       const ny = cos;
-      const bocaX = px + cos * r * 0.35;
-      const bocaY = py + sen * r * 0.35;
-      const colaX = px - cos * largo;
-      const colaY = py - sen * largo;
-      // Tres tramos de ancho decreciente y no un triángulo: la curva es lo que
-      // separa una llama de un cono.
-      glow.moveTo(bocaX + nx * r * 0.92, bocaY + ny * r * 0.92);
-      glow.quadraticCurveTo(
-        px - cos * largo * 0.45 + nx * r * 0.55,
-        py - sen * largo * 0.45 + ny * r * 0.55,
-        colaX, colaY,
-      );
-      glow.quadraticCurveTo(
-        px - cos * largo * 0.45 - nx * r * 0.55,
-        py - sen * largo * 0.45 - ny * r * 0.55,
-        bocaX - nx * r * 0.92, bocaY - ny * r * 0.92,
-      );
-      glow.fill({ color, alpha: 0.42 });
-      ink.moveTo(bocaX + nx * r * 0.92, bocaY + ny * r * 0.92);
-      ink.quadraticCurveTo(
-        px - cos * largo * 0.45 + nx * r * 0.55,
-        py - sen * largo * 0.45 + ny * r * 0.55,
-        colaX, colaY,
-      );
-      ink.quadraticCurveTo(
-        px - cos * largo * 0.45 - nx * r * 0.55,
-        py - sen * largo * 0.45 - ny * r * 0.55,
-        bocaX - nx * r * 0.92, bocaY - ny * r * 0.92,
-      );
-      ink.stroke({ width: 0.055, color: 0x05070d, alpha: 0.75 });
+      // Tres gotas metidas una adentro de la otra, cada una más corta, más
+      // angosta y más opaca. Sumadas dan una CAÍDA: el borde de afuera queda
+      // apenas insinuado y el centro casi sólido, que es como se ve una llama.
+      //
+      // Antes era una sola gota de alfa plana con un contorno negro encima, y
+      // eso es exactamente lo que la hacía ver como un triángulo de papel:
+      // una figura recortada tiene borde, una luz no.
+      const capas: Array<[number, number, number]> = [
+        [1, 1, 0.16],
+        [0.62, 0.66, 0.28],
+        [0.3, 0.4, 0.5],
+      ];
+      for (const [fl, fa, alfa] of capas) {
+        const lg = largo * fl;
+        const an = r * 0.92 * fa;
+        const bocaX = px + cos * r * 0.35;
+        const bocaY = py + sen * r * 0.35;
+        glow.moveTo(bocaX + nx * an, bocaY + ny * an);
+        glow.quadraticCurveTo(
+          px - cos * lg * 0.45 + nx * an * 0.6,
+          py - sen * lg * 0.45 + ny * an * 0.6,
+          px - cos * lg, py - sen * lg,
+        );
+        glow.quadraticCurveTo(
+          px - cos * lg * 0.45 - nx * an * 0.6,
+          py - sen * lg * 0.45 - ny * an * 0.6,
+          bocaX - nx * an, bocaY - ny * an,
+        );
+        glow.fill({ color, alpha: alfa });
+      }
     }
 
     /* --- la cabeza ---------------------------------------------------- */
@@ -1447,12 +1465,22 @@ function dibujarPoderes(
     // Aura, cuerpo del color del bando, y núcleo blanco. Los tres anillos son
     // lo mismo que hace `FX_ORB`: es lo que le da el borde duro de dibujo en
     // vez del degradé de una luz.
-    glow.circle(px, py, rr * 1.35);
-    glow.fill({ color, alpha: 0.3 });
-    glow.circle(px, py, rr);
-    glow.fill({ color, alpha: 0.95 });
-    glow.circle(px, py, rr * 0.5);
-    glow.fill({ color: 0xffffff, alpha: 0.95 });
+    // Seis anillos y no tres. Con tres el salto de alfa entre uno y otro se ve
+    // como un escalón y la bola queda con aros concéntricos; con seis el ojo ya
+    // no separa los bordes y lee un degradé. Es un degradé hecho a mano, que es
+    // lo único que hay: `Graphics` no rellena con degradé radial.
+    const anillos: Array<[number, number, number]> = [
+      [1.9, 0.1, color],
+      [1.5, 0.2, color],
+      [1.2, 0.4, color],
+      [1.0, 0.85, color],
+      [0.66, 0.7, 0xffffff],
+      [0.4, 0.98, 0xffffff],
+    ];
+    for (const [f, alfa, c] of anillos) {
+      glow.circle(px, py, rr * f);
+      glow.fill({ color: c, alpha: alfa });
+    }
 
     // Adentro, una estrella de cuatro puntas girando. Es la "textura" del
     // poder: sin nada adentro el núcleo es un círculo blanco plano, y un
@@ -1468,8 +1496,10 @@ function dibujarPoderes(
     }
     glow.fill({ color: 0xffffff, alpha: 0.7 });
 
-    ink.circle(px, py, rr * 1.1);
-    ink.stroke({ width: 0.07, color: 0x05070d, alpha: 0.9 });
+    // Sin contorno negro. El contorno le da borde de calcomanía a algo que
+    // tiene que ser luz: en el juego se veía un decágono negro con relleno
+    // adentro, porque el círculo de `Graphics` es un polígono y el trazo lo
+    // delata. Lo que separa el poder del fondo es el Bloom, no una línea.
   }
 }
 

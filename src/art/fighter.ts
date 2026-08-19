@@ -145,6 +145,12 @@ export interface FighterView extends Container {
   pose(
     vx: number, vy: number, grounded: boolean, hurt: boolean,
     action: number, actionT: number, elapsed: number,
+    /**
+     * Qué tan adentro del giro está el dibujo: 0 de perfil, 1 en el medio.
+     * Sólo lo usa la hoja de sprites, para cambiar al cuadro de frente cerca
+     * del cruce; el muñeco de piezas lo ignora porque gira rotando de verdad.
+     */
+    turn: number,
   ): void;
   /** Se llama al entrar o salir del gigantismo. */
   paint(color: number, glow: boolean): void;
@@ -396,7 +402,7 @@ export function createFighterView(
   // contenedor, así que las poses se escriben SIEMPRE mirando a la derecha y acá
   // no hace falta el `facing`. Es la misma convención que se le va a pedir al
   // rig cuando exista.
-  root.pose = (vx, vy, grounded, hurt, action, actionT, elapsed): void => {
+  root.pose = (vx, vy, grounded, hurt, action, actionT, elapsed, _turn): void => {
     const speed = Math.abs(vx);
 
     if (hurt) {

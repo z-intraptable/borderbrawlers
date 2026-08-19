@@ -375,6 +375,15 @@ export const EVENT_ESTALLIDO = 7;
  * tenía nada, así que la mitad de arriba del salto salía de la nada.
  */
 export const EVENT_SALTO = 8;
+/**
+ * Alguien entra al escenario, propio o del torneo. `x`/`y` es dónde cae.
+ *
+ * Sin esto el peleador que releva aparecía de la nada: un cuadro no hay nadie
+ * de ese bando, al siguiente hay un cuerpo entero parado. Servía para que el
+ * hueco del relevo se leyera como "no hay nadie" y no como "algo se rompió",
+ * pero la entrada en sí no tenía ningún efecto que la anunciara.
+ */
+export const EVENT_ENTRA = 9;
 
 /**
  * Cola de eventos del paso. La capa de render la drena y la vacía: es cómo la
@@ -1325,6 +1334,7 @@ function activate(
   m.facing[slot] = team === TEAM_GREEN ? 1 : -1;
   m.grounded[slot] = 0;
   m.slot[slot] = SLOT_ACTIVE;
+  emit(m.events, EVENT_ENTRA, m.x[slot], m.y[slot], 0, team, slot);
 }
 
 /**

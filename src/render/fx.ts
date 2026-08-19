@@ -417,10 +417,27 @@ export function drawFx(fx: Fx, plain: Graphics, glow: Graphics, ink: Graphics): 
         // Corona del bando, y adentro el núcleo blanco. El núcleo es más chico
         // que la mitad a propósito: si ocupa casi todo, el color del equipo
         // queda de filete y no se lee a la distancia de la cámara.
-        ovalo(glow, px, py, r, r);
-        glow.fill({ color, alpha: vivo });
-        ovalo(glow, px, py, r * 0.52, r * 0.52);
-        glow.fill({ color: 0xffffff, alpha: vivo });
+        // Seis anillos y no dos. Con dos, la bola es un disco plano de color con
+        // un disco blanco encima —que es exactamente lo que se veía en pantalla,
+        // una calcomanía— porque `Graphics` no rellena con degradé radial. Seis
+        // radios con alfas escalonados son ese degradé hecho a mano: el ojo deja
+        // de separar los bordes y lee una caída de luz.
+        //
+        // Los dos primeros pasan de 1: son el halo que se derrama fuera del
+        // cuerpo de la bola. Sin él la bola termina de golpe y el Bloom no tiene
+        // de dónde agarrarse.
+        const capas: Array<[number, number, number]> = [
+          [1.55, 0.12, color],
+          [1.24, 0.24, color],
+          [1.0, 0.82, color],
+          [0.74, 0.5, 0xffffff],
+          [0.52, 0.8, 0xffffff],
+          [0.3, 1, 0xffffff],
+        ];
+        for (const [f, alfa, c] of capas) {
+          ovalo(glow, px, py, r * f, r * f);
+          glow.fill({ color: c, alpha: vivo * alfa });
+        }
 
         // Las púas: cuatro puntas cortas que hacen que la bola no sea un punto.
         //
@@ -442,8 +459,10 @@ export function drawFx(fx: Fx, plain: Graphics, glow: Graphics, ink: Graphics): 
           glow.fill({ color, alpha: vivo * 0.85 });
         }
 
-        ovalo(ink, px, py, r, r);
-        ink.stroke({ width: TINTA, color, alpha: vivo });
+        // Sin filete. El trazo alrededor de la bola le pone borde de figura
+        // recortada a algo que tiene que ser luz, y además delata que el
+        // círculo de `Graphics` es un polígono: en pantalla se veía el
+        // decágono. Lo que la separa del fondo es el Bloom.
         break;
       }
       case FX_BEAM: {
