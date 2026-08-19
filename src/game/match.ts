@@ -1349,6 +1349,21 @@ function ceremonia(m: Match): void {
   }
 }
 
+/**
+ * Fija qué personaje pelea por cada bando y no lo suelta.
+ *
+ * Es el modo de trabajo: con seis peleadores rotando, probar un cambio en UNO
+ * es esperar a que le toque. Acá salen siempre los dos elegidos, y como va sobre
+ * la melé de un carril el que se cae vuelve él mismo en vez de ser reemplazado.
+ *
+ * El índice es dentro de la plantilla de SU bando, que es lo que guarda
+ * `m.character`. Ver `characterFor` en roster.ts.
+ */
+export function fijarDuo(m: Match, verde: number, rojo: number): void {
+  m.character[0] = verde % FIGHTERS_PER_TEAM;
+  m.character[FIGHTERS_PER_TEAM] = rojo % FIGHTERS_PER_TEAM;
+}
+
 /** Vuelve a empezar. */
 function reiniciar(m: Match): void {
   for (let i = 0; i < CAPACITY; i++) {

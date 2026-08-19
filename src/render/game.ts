@@ -441,7 +441,6 @@ export async function startGame(
     losas: rotation.length === 0
       ? Promise.resolve(null)
       : sinColgarse(loadPlatforms(rotation[0]), 'las losas'),
-    arte: sinColgarse(Promise.all(armatures.map((name) => loadArt(name))), 'el arte cortado'),
     hojas: sinColgarse(Promise.all(armatures.map((name) => loadSheets(name))), 'las hojas de sprites'),
     fuegos: sinColgarse(
       Promise.all([loadFlames('verde'), loadFlames('rojo')]), 'las hogueras'),
@@ -492,22 +491,37 @@ export async function startGame(
   const plainFx = new Graphics();
   world.addChild(plainFx);
 
-  // Se pide el arte de TODA la plantilla una sola vez, en paralelo, y no sólo
-  // el de los seis que arrancan: al caerse uno entra otro en el mismo frame, y
-  // ahí no hay tiempo de ir a buscar una imagen. El que no lo tenga dibujado
-  // todavía devuelve null y sale vectorial, en la misma pelea.
-  const loaded = await pedidos.arte ?? armatures.map(() => null);
-  const artByArmature = new Map<string, FighterArt | null>(
-    armatures.map((name, i) => [name, loaded[i]]),
-  );
-
-  // Y las hojas de sprites, con el mismo criterio: el que la tenga se dibuja
-  // cuadro por cuadro, el que no sigue con el muñeco de piezas. Los dos en la
-  // misma pelea.
+  // Las hojas de sprites son el dibujo bueno: el que la tenga se anima cuadro
+  // por cuadro. Se piden para TODA la plantilla y no sólo para los que
+  // arrancan, porque al caerse uno entra otro en el mismo frame y ahí no hay
+  // tiempo de ir a buscar una imagen.
   const sheeted = await pedidos.hojas ?? armatures.map(() => null);
   const sheetsByArmature = new Map<string, FighterSheets | null>(
     armatures.map((name, i) => [name, sheeted[i]]),
   );
+
+  /**
+   * **El arte cortado se pide SÓLO para el que se quedó sin hoja.**
+   *
+   * Es el respaldo: el muñeco de piezas articuladas que se usa cuando la hoja de
+   * sprites no está. Se pedía siempre, en paralelo con las hojas, y eso son
+   * **8 MB por visita bajados y tirados** — seis torsos, seis cabezas y cuatro
+   * miembros por personaje que no se dibujan nunca porque los seis tienen hoja.
+   * Sobre un total de 26,6 MB por visita era casi un tercio.
+   *
+   * Va después y no en paralelo a propósito: hasta no saber qué hoja falló no se
+   * sabe qué respaldo hace falta. La latencia extra la paga únicamente el caso
+   * degradado, que ya es el caso en el que algo salió mal.
+   */
+  const faltan = armatures.filter((_, i) => sheeted[i] === null);
+  const respaldo = faltan.length === 0
+    ? []
+    : await sinColgarse(Promise.all(faltan.map((name) => loadArt(name))), 'el arte cortado')
+      ?? faltan.map(() => null);
+  const artByArmature = new Map<string, FighterArt | null>(
+    armatures.map((name) => [name, null]),
+  );
+  faltan.forEach((name, i) => artByArmature.set(name, respaldo[i] ?? null));
 
   /**
    * Un cuerpo articulado por personaje, no por slot.

@@ -3,7 +3,8 @@ import { BINANCE_DATA_HOST, combinedStreamUrl } from './types/binance';
 import type { FeedSource } from './types/binance';
 import { createMockFeed } from './mock/mockFeed';
 import type { MockFeedHandle, MockScenario } from './mock/mockFeed';
-import { createMatch } from './game/match';
+import { createMatch, fijarDuo } from './game/match';
+import { GREEN_ROSTER, RED_ROSTER } from './game/roster';
 import { startGame } from './render/game';
 import { mountHud } from './hud/hud';
 
@@ -84,8 +85,29 @@ const client = new BinanceFeedClient({
  * pierde el match. `?modo=melee` devuelve la pelea de seis a la vez, que es como
  * estuvo hasta ahora y sigue siendo útil para mirar el motor con todo lleno.
  */
-const torneo = params.get('modo') !== 'melee';
-const match = createMatch(lanes, torneo);
+/**
+ * `?duo=kor,ragnir` — uno por bando y siempre los mismos.
+ *
+ * Existe para trabajar: con seis rotando, probar un cambio en uno es esperar a
+ * que le toque. Va sobre la melé de un carril y no sobre el torneo, así que el
+ * que se cae vuelve él mismo y la pelea no se termina nunca.
+ */
+const duoParam = params.get('duo');
+const duo = duoParam
+  ? duoParam.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+  : null;
+
+const torneo = duo === null && params.get('modo') !== 'melee';
+const match = createMatch(duo !== null ? 1 : lanes, torneo);
+if (duo !== null) {
+  // Se busca por el nombre del armature en minúscula: es el mismo que da nombre
+  // a la carpeta de arte, así que `?duo=kor,ragnir` se lee igual que el disco.
+  const cual = (lista: readonly { armature: string }[], nombre: string | undefined): number => {
+    const i = lista.findIndex((c) => c.armature.toLowerCase() === nombre);
+    return i >= 0 ? i : 0;
+  };
+  fijarDuo(match, cual(GREEN_ROSTER, duo[0]), cual(RED_ROSTER, duo[1]));
+}
 /** Lo escribe el bucle de render, lo muestrea el HUD. */
 const perf = { frameMs: 0 };
 
