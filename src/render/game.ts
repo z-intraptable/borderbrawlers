@@ -241,12 +241,45 @@ const PUNO_ALCANCE = 0.52;
 /** Duración de la onda de choque del super, en segundos. */
 const SHOCKWAVE_TIME = 0.85;
 
+/**
+ * El plano cerrado del super.
+ *
+ * El super era un fogonazo con temblor y nada más: la cámara seguía encuadrando
+ * a los dos bandos como en cualquier otro momento, así que el momento más caro
+ * de la pelea —sale una vez cada medio minuto largo— se veía igual que un puño.
+ * Acá la cámara CORTA: se olvida del encuadre de grupo, se va encima del que lo
+ * tira, y vuelve.
+ *
+ * Las barras de arriba y abajo entran de golpe y salen deslizando. De golpe
+ * porque un corte de cámara es un corte, no un fundido; deslizando porque la
+ * vuelta a la pelea sí tiene que sentirse como que se abre el cuadro.
+ */
+const CINE_TIEMPO = 0.9;
+/**
+ * Cuánto alto de mundo se ve durante el plano, en unidades.
+ *
+ * Se pide el ALTO y no el ancho porque es lo único que se lee igual en un
+ * teléfono vertical y en un monitor: un `halfWidth` fijo encuadra la cabeza en
+ * uno y medio escenario en el otro. Con 4,5 el peleador —que mide 1,04— ocupa
+ * casi un cuarto de la pantalla en las dos.
+ */
+const CINE_ALTO = 4.5;
+/** Qué fracción del alto de pantalla se come cada barra. */
+const CINE_BARRA = 0.11;
+/** A qué velocidad se pega la cámara al plano cerrado. Más rápida que la normal. */
+const CINE_LAMBDA = 9;
+
 interface Camera {
   x: number;
   y: number;
   halfWidth: number;
   /** Cuánto del acercamiento de momento clave queda puesto, de 0 a 1. */
   zoom: number;
+  /** Segundos que le quedan al plano cerrado del super. Cero es pelea normal. */
+  cine: number;
+  /** A quién encuadra ese plano. */
+  cineX: number;
+  cineY: number;
 }
 
 export interface GameHandle {
@@ -634,7 +667,21 @@ export async function startGame(
   let shockwaveX = 0;
   let shockwaveY = 0;
 
-  const camera: Camera = { x: 0, y: 2.5, halfWidth: MAX_HALF_WIDTH, zoom: 0 };
+  const camera: Camera = { x: 0, y: 2.5, halfWidth: MAX_HALF_WIDTH, zoom: 0,
+    cine: 0,
+    cineX: 0,
+    cineY: 0,
+  };
+  /**
+   * Las barras del plano cerrado.
+   *
+   * Van en `app.stage` y no en `world` a propósito: `applyCamera` mueve, escala
+   * y sacude el mundo entero, y unas barras que se mueven con la cámara no son
+   * barras de cine, son dos rectángulos flotando en el escenario.
+   */
+  const cineBarras = new Graphics();
+  app.stage.addChild(cineBarras);
+
   const fx = createFx();
 
   let accumulator = 0;
@@ -710,6 +757,7 @@ export async function startGame(
     applyCamera(world, app, camera, match.shake);
     drawFighters(views, match, action, actionAge, suave, dtPelea, elapsed, cobrarGolpe);
     dibujarPoderes(poderGlow, poderInk, match, elapsed);
+    dibujarCine(cineBarras, app, camera.cine);
     drawFx(fx, plainFx, glowFx, inkFx);
 
     /* --- fondo ------------------------------------------------------- */
@@ -827,6 +875,9 @@ export async function startGame(
     shards(fx, x, y, 12, 9, GOLD);
     burst(fx, x, y, 12, 11, 0.16, 0.7, GOLD);
     hitstop = Math.max(hitstop, HITSTOP_SUPER);
+    camera.cine = CINE_TIEMPO;
+    camera.cineX = x;
+    camera.cineY = y;
     shockwaveTime = 0;
     shockwaveX = x;
     shockwaveY = y;
@@ -1328,6 +1379,26 @@ function dibujarPoderes(
   }
 }
 
+/**
+ * Las dos barras negras del plano cerrado.
+ *
+ * Entran de golpe y salen deslizando: `min(1, p * 4)` está lleno mientras queda
+ * más de un cuarto del plano y recién ahí baja. Un corte de cámara es un corte
+ * —no un fundido— pero la vuelta a la pelea sí tiene que sentirse como que se
+ * abre el cuadro.
+ */
+function dibujarCine(g: Graphics, app: Application, resta: number): void {
+  g.clear();
+  if (resta <= 0) return;
+  const { ancho, alto } = pantalla(app);
+  const p = Math.min(1, resta / CINE_TIEMPO);
+  const franja = alto * CINE_BARRA * Math.min(1, p * 4);
+  if (franja < 0.5) return;
+  g.rect(0, 0, ancho, franja);
+  g.rect(0, alto - franja, ancho, franja);
+  g.fill({ color: 0x05070d, alpha: 0.96 });
+}
+
 /** Arranca una acción, pisando la que hubiera. */
 function startAction(
   action: Uint8Array, actionAge: Float32Array, slot: number, kind: number,
@@ -1389,6 +1460,21 @@ function drawBars(g: Graphics, match: Match): void {
 }
 
 function updateCamera(camera: Camera, match: Match, dt: number, aspect: number): void {
+  // Mientras dura el plano cerrado, la cámara NO encuadra la pelea: encuadra al
+  // que tiró el super. Se sale temprano a propósito — todo el cálculo de abajo
+  // es el encuadre de grupo, que es justo lo que este plano viene a suspender.
+  if (camera.cine > 0) {
+    camera.cine = Math.max(0, camera.cine - dt);
+    const cerca = 1 - Math.exp(-CINE_LAMBDA * dt);
+    const medio = aspect > 0 ? CINE_ALTO / (2 * aspect) : MIN_HALF_WIDTH;
+    camera.x += (camera.cineX - camera.x) * cerca;
+    // Un poco arriba del centro del cuerpo: encuadrado al centro exacto, la
+    // mitad del plano es el piso.
+    camera.y += (camera.cineY + 0.6 - camera.y) * cerca;
+    camera.halfWidth += (medio - camera.halfWidth) * cerca;
+    return;
+  }
+
   let minX = Infinity;
   let maxX = -Infinity;
   let minY = Infinity;
