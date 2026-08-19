@@ -27,6 +27,7 @@ import {
   shouldBrakeAtLedge,
   skillDamage,
   skillForce,
+  stunFor,
   skillRadius,
   superForce,
   ULTRA_HOLD,
@@ -316,6 +317,19 @@ const ALCANCE = 22;
  * como un disparo horizontal.
  */
 const BOCA = 0.55;
+/**
+ * Cuánto puede corregir el rumbo el poder en vuelo, en radianes por segundo.
+ *
+ * Sale del *Homing Super Dash* de Dragon Ball FighterZ: la dirección deseada se
+ * recalcula cada cuadro contra la posición del rival, pero el giro está
+ * limitado, así que el proyectil CURVA en vez de doblar en ángulo recto.
+ *
+ * 2,2 rad/s a 16 unidades por segundo dan un radio de giro de 7,3 unidades —casi
+ * medio escenario—, y eso es lo que lo mantiene esquivable: persigue lo
+ * suficiente para no ser un tiro al aire cuando el rival camina, y no tanto como
+ * para ser inevitable. Un poder que no falla nunca deja de ser una jugada.
+ */
+const GIRO_PODER = 2.2;
 
 function createPoderes(): Poderes {
   return {
@@ -1112,6 +1126,31 @@ function moverPoderes(m: Match, dt: number, now: number): void {
   for (let k = 0; k < PODERES; k++) {
     if (p.vida[k] <= 0) continue;
     p.vida[k] -= dt;
+
+    // Persigue: busca al rival más cercano y corrige el rumbo hacia él, con el
+    // giro acotado. La velocidad no cambia — sólo la dirección.
+    let objetivo = -1;
+    let cerca = Infinity;
+    for (let j = 0; j < CAPACITY; j++) {
+      if (m.slot[j] !== SLOT_ACTIVE || m.team[j] === p.team[k]) continue;
+      const d = Math.hypot(m.x[j] - p.x[k], m.y[j] - p.y[k]);
+      if (d < cerca) { cerca = d; objetivo = j; }
+    }
+    if (objetivo >= 0) {
+      const rapidez = Math.hypot(p.vx[k], p.vy[k]) || PODER_VELOCIDAD;
+      const quiere = Math.atan2(m.y[objetivo] - p.y[k], m.x[objetivo] - p.x[k]);
+      const va = Math.atan2(p.vy[k], p.vx[k]);
+      // La diferencia normalizada a [-pi, pi]: sin esto, un rival que quedó
+      // apenas del otro lado del cero manda al poder a dar la vuelta larga.
+      let giro = quiere - va;
+      while (giro > Math.PI) giro -= Math.PI * 2;
+      while (giro < -Math.PI) giro += Math.PI * 2;
+      const tope = GIRO_PODER * dt;
+      const nuevo = va + Math.max(-tope, Math.min(tope, giro));
+      p.vx[k] = Math.cos(nuevo) * rapidez;
+      p.vy[k] = Math.sin(nuevo) * rapidez;
+    }
+
     p.x[k] += p.vx[k] * dt;
     p.y[k] += p.vy[k] * dt;
 
@@ -1162,7 +1201,10 @@ function moverPoderes(m: Match, dt: number, now: number): void {
       m.vy[j] = ny * force * 0.3 + force * 0.5;
       m.grounded[j] = 0;
       m.damage[j] += skillDamage(spent);
-      m.hitstun[j] = now;
+      // El aturdimiento sale de la fuerza del empujón, no de una constante: es
+      // lo que hace que el poder cargado se sienta distinto del que salió con la
+      // barra a medias. Ver `stunFor`.
+      m.hitstun[j] = now - HITSTUN + stunFor(force);
       m.lastHit[j] = now;
       emit(m.events, EVENT_HIT, m.x[j], m.y[j], 0.8 + spent * 0.9, m.team[j], j);
     }
@@ -1309,7 +1351,7 @@ function unleash(m: Match, self: number, now: number, spent: number): void {
     m.vy[i] = ny * force * 0.4 + force * 0.55;
     m.grounded[i] = 0;
     m.damage[i] += SUPER_DAMAGE * power;
-    m.hitstun[i] = now;
+    m.hitstun[i] = now - HITSTUN + stunFor(force);
     m.lastHit[i] = now;
     emit(m.events, EVENT_HIT, m.x[i], m.y[i], 1.4, m.team[i], i);
   }

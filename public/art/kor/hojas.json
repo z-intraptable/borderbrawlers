@@ -1,6 +1,6 @@
 {
   "_": "Hoja de sprites armada por scripts/hoja-sprites.py desde los clips de Kling. `anchor` es la fracción del cuadro donde cae el centroide de la silueta, que es el punto que la física mueve. `ground` es cuántas unidades de rig hay de ese centroide a los pies: el de arriba es el de la primera acción y queda de respaldo, y el de cada animación es el que vale, porque el centroide no cae a la misma altura parado que pateando. Lo escribe scripts/piso-por-accion.py.",
-  "file": "hojas.png",
+  "file": "hojas.webp",
   "unit": 3.0769,
   "ground": 50.641,
   "animations": {

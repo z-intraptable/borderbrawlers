@@ -299,6 +299,29 @@ export function knockback(damage: number, weight: number, attackerWeight: number
   return Math.min(MAX_KNOCKBACK, raw / Math.max(0.35, weight));
 }
 
+/**
+ * Cuánto dura el aturdimiento, en segundos, según la fuerza del empujón.
+ *
+ * **Era fijo.** Todos los golpes dejaban al rival tildado exactamente 0,34 s,
+ * desde el roce del forcejeo hasta el super, y eso es la mitad de por qué la
+ * pelea se sentía plana: si el golpe grande y el chico se ven durar lo mismo, no
+ * hay golpe grande.
+ *
+ * La forma sale del documento de arquitectura de fighting games —Brawlhalla lo
+ * calcula como `BaseStun + Knockback × 0,055` en cuadros a 60 Hz— pero los
+ * números son propios, porque acá el empuje es una velocidad en unidades por
+ * segundo y no la escala de ellos. Con el tope de empuje de 9,5 el aturdimiento
+ * llega a 0,55 s, casi el doble del que había; un roce queda en 0,12.
+ */
+export function stunFor(knockback: number): number {
+  return Math.min(STUN_MAX, STUN_BASE + Math.max(0, knockback) * STUN_POR_EMPUJE);
+}
+
+/** Lo que dura el aturdimiento de un roce, y lo que suma cada unidad de empuje. */
+export const STUN_BASE = 0.12;
+export const STUN_POR_EMPUJE = 0.045;
+export const STUN_MAX = 0.6;
+
 /** Daño de un empujón. Un peso pesado lastima más. */
 export function hitDamage(attackerWeight: number): number {
   return HIT_DAMAGE * attackerWeight;
