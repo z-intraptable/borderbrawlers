@@ -99,6 +99,32 @@ function embestida(action: number, t: number): number {
   return (1 - Math.cos(Math.PI * Math.max(0, Math.min(1, fase)))) / 2;
 }
 
+/**
+ * El ritmo de un golpe: lento al cargar, rápido al pegar, lento al volver.
+ *
+ * `actionT` viene lineal, y reproducir cuadros a ritmo constante es lo que hace
+ * que una acción se vea mecánica: los dibujos pueden ser buenos y el golpe igual
+ * no pesa. Un golpe animado a mano no reparte el tiempo por igual — se demora en
+ * la carga, cruza el impacto en un suspiro y se toma el resto para volver. Eso
+ * es lo que acá se le devuelve.
+ *
+ * La curva se dobla alrededor de `ACTION_HIT`, no del medio: el instante que
+ * tiene que llegar rápido es el del impacto, y cae al 36% de la habilidad y al
+ * 72% del super. Doblarla en el medio le pondría el acento en cualquier lado.
+ *
+ * Con dos o tres cuadros por acción esto no interpola nada: cambia CUÁNTO se
+ * sostiene cada cuadro, que con tan pocos es justamente donde está el peso.
+ */
+function ritmo(t: number, golpe: number): number {
+  if (!(golpe > 0) || !(golpe < 1)) return t;
+  if (t < golpe) {
+    const u = t / golpe;
+    return golpe * u * u;
+  }
+  const u = (t - golpe) / (1 - golpe);
+  return golpe + (1 - golpe) * (1 - (1 - u) * (1 - u));
+}
+
 export function createSpriteFighterView(sheets: FighterSheets): FighterView {
   const root = new Container() as FighterView;
 
@@ -194,7 +220,9 @@ export function createSpriteFighterView(sheets: FighterSheets): FighterView {
       // juego donde el knockback es la mecánica central se tiene que ver.
       const cual = !grounded && fallAnim !== null ? fallAnim : hurtAnim;
       if (cual !== null) {
-        show(cual, Math.floor(actionT * cual.frames.length));
+        // Encajar un golpe es lo más asimétrico que hay: el cuerpo se dobla en
+        // un cuadro y tarda en enderezarse. El impacto va al principio.
+        show(cual, Math.floor(ritmo(actionT, 0.15) * cual.frames.length));
         return;
       }
     }
@@ -206,7 +234,9 @@ export function createSpriteFighterView(sheets: FighterSheets): FighterView {
         if (animation === undefined) continue;
         // `actionT` ya viene normalizado de 0 a 1 por `game.ts`, así que la
         // acción no necesita reloj propio y no puede quedar desfasada del golpe.
-        show(animation, Math.floor(actionT * animation.frames.length));
+        // Lo que sí se le cambia es el RITMO: ver `ritmo`.
+        const fase = ritmo(actionT, ACTION_HIT[action] ?? 0);
+        show(animation, Math.floor(fase * animation.frames.length));
         sprite.x = (EMBESTIDA[action] ?? 0) * embestida(action, actionT);
         return;
       }

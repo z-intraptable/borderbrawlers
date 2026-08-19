@@ -12,9 +12,17 @@ en la losa cuando patea**, que es exactamente lo que se ve.
 
 **El arreglo no necesita volver a cortar nada.** El dato ya está en el
 manifiesto: `rect[3] * (1 - anchor[1])` son los píxeles del centroide a la base
-del cuadro, y dividido por `unit` da unidades de rig. Así que se calcula por
+del CUADRO, y dividido por `unit` da unidades de rig. Así que se calcula por
 acción y se escribe al lado de sus cuadros. Cortar las seis hojas de nuevo son
 cuarenta minutos; esto son milisegundos y da el mismo número.
+
+**Y hay que descontarle `MARGEN`.** La base del cuadro no son los pies: el
+`rect` lleva `MARGEN` píxeles de aire alrededor de la figura, así que sin
+restarlo el piso queda 4 píxeles —1,3 unidades de rig— más abajo de donde está,
+y los seis personajes se hunden en la losa esa misma cantidad. `recortar-accion.py`
+mide lo mismo pero sobre la figura ya recortada, y por eso da el número bueno;
+si estos dos no coinciden, el que cortó último gana y el piso cambia sin que
+nadie haya tocado el dibujo.
 
 Por ACCIÓN y no por CUADRO a propósito: dentro de una acción los cuadros tienen
 que conservar su movimiento relativo. Pegando cada cuadro al piso, el salto se
@@ -24,6 +32,7 @@ aplana justo cuando tendría que despegar.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import pathlib
 import statistics
@@ -31,6 +40,10 @@ import sys
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 ARTE = RAIZ / 'public' / 'art'
+
+_spec = importlib.util.spec_from_file_location('hs', RAIZ / 'scripts' / 'hoja-sprites.py')
+hs = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(hs)
 
 
 def main() -> int:
@@ -44,7 +57,8 @@ def main() -> int:
         global_ = float(datos['ground'])
         cambios = []
         for nombre, animacion in datos['animations'].items():
-            pisos = [c['rect'][3] * (1 - c['anchor'][1]) / unidad for c in animacion['frames']]
+            pisos = [(c['rect'][3] * (1 - c['anchor'][1]) - hs.MARGEN) / unidad
+                     for c in animacion['frames']]
             piso = round(statistics.median(pisos), 3)
             animacion['ground'] = piso
             cambios.append(f'{nombre}:{piso - global_:+.0f}')

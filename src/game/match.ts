@@ -257,6 +257,87 @@ const MAX_TRADES_PER_STEP = 24;
 
 const BLAST = { minX: -15, maxX: 15, minY: -11, maxY: 26 };
 
+/* ------------------------------------------------------------------ */
+/* Poderes a distancia                                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * La especial deja de ser un estallido alrededor del que la tira y pasa a ser
+ * un poder que SALE DISPARADO, viaja y estalla contra el rival.
+ *
+ * El motivo es de pelea, no de efectos: con la especial pegada al cuerpo el
+ * único modo de usarla era estar encima del otro, así que los seis se pasaban
+ * el match persiguiéndose y saltando y todo terminaba en contacto. Un poder que
+ * cruza el escenario le da a la pelea la distancia que le faltaba — que es lo
+ * que hacen Street Fighter, Mortal Kombat y las bolas de ki de Dragon Ball.
+ *
+ * Es un pool y no una lista: los poderes en vuelo son pocos y de vida corta, y
+ * el camino de datos de mercado no puede asignar memoria por cuadro.
+ */
+export interface Poderes {
+  x: Float64Array;
+  y: Float64Array;
+  vx: Float64Array;
+  vy: Float64Array;
+  /** Segundos que le quedan de vuelo. Cero o menos es una ranura libre. */
+  vida: Float32Array;
+  /** De qué bando es, para no pegarle al que lo tiró ni a sus compañeros. */
+  team: Uint8Array;
+  /** Quién lo tiró. Sirve para el peso del empujón y para el rastro. */
+  duenio: Int8Array;
+  /** La barra que se gastó: escala daño, empuje y tamaño. */
+  fuerza: Float32Array;
+  /** Radio del estallido, en unidades de mundo. */
+  radio: Float32Array;
+  /** Cuál de las dos especiales del personaje es. Lo usa el dibujo. */
+  tipo: Uint8Array;
+}
+
+/** Cuántos poderes pueden estar viajando a la vez. */
+export const PODERES = 12;
+
+/**
+ * A qué velocidad viaja, en unidades por segundo.
+ *
+ * El escenario mide 30 de lado a lado, así que a 16 el poder lo cruza en menos
+ * de dos segundos: se ve viajar —que es todo el punto— y sigue siendo esquivable
+ * saltando, que es lo que lo vuelve una jugada y no un impuesto.
+ */
+const PODER_VELOCIDAD = 16;
+/** Cuánto vive si no le pega a nadie. Alcanza para cruzar el escenario. */
+export const PODER_VIDA = 2;
+/** Desde qué distancia se anima a tirar. */
+const ALCANCE = 22;
+/**
+ * A qué altura del cuerpo apunta.
+ *
+ * Al centro del rival y no a sus pies: `m.y` es el centro del cuerpo, y un poder
+ * que sale de la altura del pecho y llega a la altura del pecho es el que se lee
+ * como un disparo horizontal.
+ */
+const BOCA = 0.55;
+
+function createPoderes(): Poderes {
+  return {
+    x: new Float64Array(PODERES),
+    y: new Float64Array(PODERES),
+    vx: new Float64Array(PODERES),
+    vy: new Float64Array(PODERES),
+    vida: new Float32Array(PODERES),
+    team: new Uint8Array(PODERES),
+    duenio: new Int8Array(PODERES).fill(-1),
+    fuerza: new Float32Array(PODERES),
+    radio: new Float32Array(PODERES),
+    tipo: new Uint8Array(PODERES),
+  };
+}
+
+/** La primera ranura libre del pool, o -1 si están todas ocupadas. */
+function poderLibre(p: Poderes): number {
+  for (let k = 0; k < PODERES; k++) if (p.vida[k] <= 0) return k;
+  return -1;
+}
+
 
 
 /* --- eventos para la capa de render ---------------------------------- */
@@ -268,6 +349,11 @@ export const EVENT_LAND = 3;
 export const EVENT_GROW = 4;
 export const EVENT_SKILL = 5;
 export const EVENT_MELEE = 6;
+/**
+ * Un poder estalló. `magnitude` es la fuerza con la que salió y `x`/`y` el
+ * punto del impacto, que NO es donde está el que lo tiró.
+ */
+export const EVENT_ESTALLIDO = 7;
 
 /**
  * Cola de eventos del paso. La capa de render la drena y la vacía: es cómo la
@@ -435,11 +521,24 @@ export interface Match {
   torneo: boolean;
   /** Cuántos perdió cada bando. Sólo en torneo. */
   caidos: Uint8Array;
+  /**
+   * Cuándo puede entrar el próximo de cada plantilla. Sólo en torneo.
+   *
+   * El relevo NO espera a que llegue un trade de su bando. Esperaba, y ése era
+   * el defecto que se veía como *"desaparecen uno o dos personajes"*: el alta
+   * la disparaba la cola de trades, así que un tramo de mercado comprador
+   * dejaba al bando vendedor sin NADIE en el escenario. Con tres carriles por
+   * lado se disimulaba —faltaba uno de seis—; en 1v1 el que falta es la mitad
+   * de la pelea y queda un peleador solo dando vueltas.
+   */
+  relevoEn: Float32Array;
   /** Quién ganó el match: -1 mientras se pelea. */
   ganador: number;
   /** En qué momento del reloj se terminó, para cronometrar la ceremonia. */
   ganoEn: number;
   clock: number;
+  /** Los poderes que están viajando por el escenario. */
+  poderes: Poderes;
   /** Sacudón de cámara, decae solo. */
   shake: number;
 }
@@ -489,9 +588,11 @@ export function createMatch(
     lanes: Math.min(FIGHTERS_PER_TEAM, Math.max(1, Math.round(lanes))),
     torneo,
     caidos: new Uint8Array(2),
+    relevoEn: new Float32Array(2),
     ganador: -1,
     ganoEn: 0,
     clock: 0,
+    poderes: createPoderes(),
     shake: 0,
   };
 
@@ -714,50 +815,60 @@ export function stepMatch(
     // precio, la barra se drenaría de a 0,45 y todas las especiales saldrían
     // iguales — que es el goteo que este sistema vino a sacar.
     const spent = m.energy[i];
-    const radius = skillRadius(spent);
 
-    // No se descarga al vacío. Antes la especial salía por tener barra, hubiera
-    // o no alguien a quien pegarle: el peleador tiraba el poder al aire, se
-    // quedaba en cero y volvía al cuerpo a cuerpo sin nada. Se veía como
-    // fuegos artificiales sueltos en un rincón de la pantalla, que es
-    // exactamente el ruido que no aporta nada.
-    let alcanza = false;
-    for (let j = 0; j < CAPACITY && !alcanza; j++) {
+    // A quién apuntarle: el rival más cercano que esté dentro del ALCANCE del
+    // poder. Antes la condición era tenerlo dentro del radio del estallido —o
+    // sea, encima— y eso obligaba a que toda la pelea terminara en contacto.
+    // Ahora se tira de lejos, que es lo que le faltaba.
+    //
+    // Sigue sin descargarse al vacío: sin nadie a la vista el poder no sale y
+    // la barra se guarda. Un poder tirado a un rincón vacío es ruido.
+    let objetivo = -1;
+    let cerca = Infinity;
+    for (let j = 0; j < CAPACITY; j++) {
       if (j === i || m.slot[j] !== SLOT_ACTIVE || m.team[j] === m.team[i]) continue;
-      alcanza = Math.hypot(m.x[j] - m.x[i], m.y[j] - m.y[i]) <= radius;
+      const d = Math.hypot(m.x[j] - m.x[i], m.y[j] - m.y[i]);
+      if (d > ALCANCE || d >= cerca) continue;
+      cerca = d;
+      objetivo = j;
     }
-    if (!alcanza) continue;
+    if (objetivo < 0) continue;
+
+    const k = poderLibre(m.poderes);
+    if (k < 0) continue;
 
     m.energy[i] = 0;
     m.lastSkillAt[i] = now;
     m.lastSkill[i] = m.lastSkill[i] === 0 ? 1 : 0;
-    emit(m.events, EVENT_SKILL, m.x[i], m.y[i], m.lastSkill[i], m.team[i], i);
-    m.shake = Math.max(m.shake, 0.2 + spent * 0.5);
 
-    for (let j = 0; j < CAPACITY; j++) {
-      if (j === i || m.slot[j] !== SLOT_ACTIVE || m.team[j] === m.team[i]) continue;
-      const dx = m.x[j] - m.x[i];
-      const dy = m.y[j] - m.y[i];
-      const distance = Math.hypot(dx, dy);
-      if (distance > radius) continue;
-      const nx = distance > 1e-6 ? dx / distance : 1;
-      const ny = distance > 1e-6 ? dy / distance : 0;
-      const falloff = 0.55 + 0.45 * (1 - distance / radius);
-      // Acá sí entra el knockback por daño acumulado: cuanto más viene
-      // recibiendo el rival, más lejos lo manda esta misma habilidad. Es lo que
-      // hace que la pelea escale en vez de ser plana. `skillForce` le suma la
-      // otra escala, la de cuánta orden había atrás del golpe.
-      const force = knockback(m.damage[j], m.weight[j], m.weight[i])
-        * falloff * skillForce(spent);
-      m.vx[j] = nx * force * 1.15;
-      m.vy[j] = ny * force * 0.3 + force * 0.5;
-      m.grounded[j] = 0;
-      m.damage[j] += skillDamage(spent);
-      m.hitstun[j] = now;
-      m.lastHit[j] = now;
-      emit(m.events, EVENT_HIT, m.x[j], m.y[j], 0.8 + spent * 0.9, m.team[j], j);
-    }
+    const dx = m.x[objetivo] - m.x[i];
+    const dy = m.y[objetivo] - m.y[i];
+    const largo = Math.hypot(dx, dy) || 1;
+    // Se da vuelta para tirar. Un poder que sale de la espalda del personaje se
+    // lee como un error de dibujo, no como un ataque.
+    m.facing[i] = dx >= 0 ? 1 : -1;
+
+    const poder = m.poderes;
+    poder.x[k] = m.x[i] + m.facing[i] * BOCA;
+    poder.y[k] = m.y[i] + 0.12;
+    poder.vx[k] = (dx / largo) * PODER_VELOCIDAD;
+    poder.vy[k] = (dy / largo) * PODER_VELOCIDAD;
+    poder.vida[k] = PODER_VIDA;
+    poder.team[k] = m.team[i];
+    poder.duenio[k] = i;
+    poder.fuerza[k] = spent;
+    // El mismo radio de antes, pero ahora medido en el punto de IMPACTO y no en
+    // el del que tira: el poder revienta donde llega.
+    poder.radio[k] = skillRadius(spent) * 0.42;
+    poder.tipo[k] = m.lastSkill[i];
+
+    emit(m.events, EVENT_SKILL, m.x[i], m.y[i], m.lastSkill[i], m.team[i], i);
+    // El disparo sacude poco: lo que sacude es el impacto, y eso lo cobra
+    // `moverPoderes`. Repartirlo así es lo que hace que se sienta el viaje.
+    m.shake = Math.max(m.shake, 0.12 + spent * 0.15);
   }
+
+  moverPoderes(m, dt, now);
 
   /* --- empujones ----------------------------------------------------- */
   for (let i = 0; i < CAPACITY; i++) {
@@ -843,11 +954,12 @@ export function stepMatch(
     m.slot[i] = SLOT_FREE;
     m.shake = 1;
     if (m.torneo && m.ganador < 0) {
-      // El que se cayó queda eliminado y entra el siguiente de su plantilla. No
-      // se decide acá quién entra —eso lo hace `activate` con el próximo trade
-      // del bando—; acá sólo se lleva la cuenta.
+      // El que se cayó queda eliminado y entra el siguiente de su plantilla,
+      // después de un respiro para que se vea el KO. Quién entra lo resuelve
+      // `relevar`, que es lo único que da de alta en torneo.
       const suyo = m.team[i];
       if (m.caidos[suyo] < FIGHTERS_PER_TEAM) m.caidos[suyo]++;
+      m.relevoEn[suyo] = m.clock + RELEVO;
       if (m.caidos[suyo] >= FIGHTERS_PER_TEAM) {
         m.ganador = suyo === TEAM_GREEN ? TEAM_RED : TEAM_GREEN;
         m.ganoEn = m.clock;
@@ -949,7 +1061,104 @@ export function stepMatch(
   }
   if (trades.count > CAPACITY * 6) trades.clear();
 
+  relevar(m, stats.tradeMedian, now);
   summarize(m);
+}
+
+/**
+ * Mueve los poderes en vuelo y cobra el impacto.
+ *
+ * El poder viaja RECTO y sin gravedad: es energía, no una piedra. Que no caiga
+ * es además lo que lo hace esquivable de una sola manera —saltando o
+ * agachándose de su línea—, y una regla que se entiende mirando es una regla
+ * que sirve.
+ *
+ * El estallido sí es de área: al llegar revienta y se lleva a todo rival dentro
+ * del radio. En 1v1 da lo mismo, pero en melé es lo que hace que un poder bien
+ * puesto valga por dos.
+ */
+function moverPoderes(m: Match, dt: number, now: number): void {
+  const p = m.poderes;
+  for (let k = 0; k < PODERES; k++) {
+    if (p.vida[k] <= 0) continue;
+    p.vida[k] -= dt;
+    p.x[k] += p.vx[k] * dt;
+    p.y[k] += p.vy[k] * dt;
+
+    // Se apagó en el aire o se fue del escenario: no estalla, se disuelve. Un
+    // estallido en el borde de la pantalla es un fogonazo que nadie entiende.
+    if (p.vida[k] <= 0 || isKO(BLAST, p.x[k], p.y[k])) {
+      p.vida[k] = 0;
+      continue;
+    }
+
+    let pego = false;
+    for (let j = 0; j < CAPACITY; j++) {
+      if (m.slot[j] !== SLOT_ACTIVE || m.team[j] === p.team[k]) continue;
+      const dx = m.x[j] - p.x[k];
+      const dy = m.y[j] - p.y[k];
+      // Contra el CUERPO y no contra su centro: el peleador es una caja, y un
+      // poder que le pasa rozando el pecho tiene que pegarle.
+      if (Math.abs(dx) > FIGHTER_HALF_WIDTH + p.radio[k] * 0.5) continue;
+      if (Math.abs(dy) > FIGHTER_HALF_HEIGHT + p.radio[k] * 0.5) continue;
+      pego = true;
+      break;
+    }
+    if (!pego) continue;
+
+    const spent = p.fuerza[k];
+    const radio = p.radio[k];
+    const dueno = p.duenio[k];
+    const pesoDelQueTira = dueno >= 0 ? m.weight[dueno] : 1;
+    emit(m.events, EVENT_ESTALLIDO, p.x[k], p.y[k], spent, p.team[k], dueno);
+    m.shake = Math.max(m.shake, 0.3 + spent * 0.55);
+    p.vida[k] = 0;
+
+    for (let j = 0; j < CAPACITY; j++) {
+      if (m.slot[j] !== SLOT_ACTIVE || m.team[j] === p.team[k]) continue;
+      const dx = m.x[j] - p.x[k];
+      const dy = m.y[j] - p.y[k];
+      const distance = Math.hypot(dx, dy);
+      if (distance > radio) continue;
+      // El empuje sale del CENTRO DEL ESTALLIDO, no del que tiró. Es la
+      // diferencia que se ve: al que le pega de frente lo manda para atrás, y
+      // al que lo agarra de costado lo despide para el lado.
+      const nx = distance > 1e-6 ? dx / distance : 1;
+      const ny = distance > 1e-6 ? dy / distance : 0;
+      const falloff = 0.55 + 0.45 * (1 - distance / radio);
+      const force = knockback(m.damage[j], m.weight[j], pesoDelQueTira)
+        * falloff * skillForce(spent);
+      m.vx[j] = nx * force * 1.15;
+      m.vy[j] = ny * force * 0.3 + force * 0.5;
+      m.grounded[j] = 0;
+      m.damage[j] += skillDamage(spent);
+      m.hitstun[j] = now;
+      m.lastHit[j] = now;
+      emit(m.events, EVENT_HIT, m.x[j], m.y[j], 0.8 + spent * 0.9, m.team[j], j);
+    }
+  }
+}
+
+/**
+ * En torneo, mantiene UN peleador por bando en el escenario.
+ *
+ * La pelea de torneo no puede depender del mercado para existir: el mercado
+ * decide con qué fuerza pegan y cuándo cargan el ultra, pero un 1v1 con un solo
+ * peleador no es una pelea. En melé sigue mandando el trade —ahí el alta ES la
+ * visualización del flujo—, y por eso esto arranca con un `return`.
+ *
+ * Entra con el peso de un trade mediano a propósito: en un torneo la plantilla
+ * está fijada de antemano y el tercero no puede salir enano porque justo venían
+ * órdenes chicas.
+ */
+function relevar(m: Match, median: number, now: number): void {
+  if (!m.torneo || m.ganador >= 0) return;
+  for (let team = 0; team < 2; team++) {
+    if (m.clock < m.relevoEn[team]) continue;
+    const slot = freeSlot(m, team);
+    if (slot < 0) continue;
+    activate(m, slot, team, median > 0 ? median : 1, false, median, now);
+  }
 }
 
 /**
@@ -980,6 +1189,15 @@ function guardando(m: Match, i: number): boolean {
   return m.growing[team] === i && m.ultra[team] >= ULTRA_HOLD;
 }
 
+/**
+ * Cuánto tarda en entrar el siguiente de la plantilla, en segundos.
+ *
+ * No es cero: el KO tiene que poder verse. Con el relevo instantáneo el que se
+ * cae y el que entra se pisan en el mismo cuadro y no se entiende que hubo un
+ * cambio de peleador, que es justamente lo que el modo tiene para contar.
+ */
+const RELEVO = 0.8;
+
 function freeSlot(m: Match, team: number): number {
   const from = team === TEAM_GREEN ? 0 : FIGHTERS_PER_TEAM;
   // Con el match terminado no entra nadie más: los trades siguen llegando
@@ -987,6 +1205,10 @@ function freeSlot(m: Match, team: number): number {
   // peleador de la nada en mitad del baile.
   if (m.ganador >= 0) return -1;
   if (m.torneo && m.caidos[team] >= FIGHTERS_PER_TEAM) return -1;
+  // La pausa del relevo también vale para la cola de trades: sin esto una venta
+  // que llega justo después del KO mete al siguiente en el mismo cuadro y el
+  // cambio de peleador no se ve.
+  if (m.torneo && m.clock < m.relevoEn[team]) return -1;
   // Hasta `m.lanes` y no hasta los tres: es acá, y sólo acá, donde se decide
   // cuántos peleadores llega a tener un bando.
   for (let i = from; i < from + m.lanes; i++) if (m.slot[i] === SLOT_FREE) return i;
@@ -1109,8 +1331,13 @@ function reiniciar(m: Match): void {
     m.energy[i] = 0;
     m.character[i] = i % FIGHTERS_PER_TEAM;
   }
+  // Los poderes que estaban viajando se apagan: si no, el primer cuadro del
+  // match nuevo trae una bola de energía cruzando de un match que ya terminó.
+  m.poderes.vida.fill(0);
   m.caidos[0] = 0;
   m.caidos[1] = 0;
+  m.relevoEn[0] = 0;
+  m.relevoEn[1] = 0;
   m.ganador = -1;
   m.state.kos[0] = 0;
   m.state.kos[1] = 0;
@@ -1127,6 +1354,7 @@ function summarize(m: Match): void {
   // paso, así que escribirlo arriba lo publicaba un cuadro tarde y el título
   // salía después del golpe que lo causó.
   m.state.ganador = m.ganador;
+  m.state.torneo = m.torneo;
   for (let team = 0; team < 2; team++) {
     const from = team === TEAM_GREEN ? 0 : FIGHTERS_PER_TEAM;
     let damage = 0;

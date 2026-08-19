@@ -599,6 +599,8 @@ export interface MatchState {
   plantel: Uint8Array;
   /** Quién ganó el match, o -1 mientras se pelea. */
   ganador: number;
+  /** Si se está jugando el torneo 1v1. Lo lee el HUD para no mentir. */
+  torneo: boolean;
   /** Etapa de gigantismo en curso por equipo. 0 = nadie creciendo. */
   charge: Uint8Array;
   /** La barra de ultra del equipo, de 0 a 1. */
@@ -615,6 +617,7 @@ export function createMatchState(): MatchState {
     kos: new Uint32Array(2),
     plantel: new Uint8Array(2),
     ganador: -1,
+    torneo: false,
     charge: new Uint8Array(2),
     ultra: new Float32Array(2),
     ultraTurn: new Uint8Array(2),

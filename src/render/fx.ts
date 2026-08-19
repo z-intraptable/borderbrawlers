@@ -423,10 +423,17 @@ export function drawFx(fx: Fx, plain: Graphics, glow: Graphics, ink: Graphics): 
         glow.fill({ color: 0xffffff, alpha: vivo });
 
         // Las púas: cuatro puntas cortas que hacen que la bola no sea un punto.
+        //
+        // Cortas de verdad. Estaban en 2,25 veces el radio, y eso hace que el
+        // tamaño que se le pide al orbe no tenga nada que ver con el que ocupa:
+        // el anillo del gigantismo, pedido en 1,15 unidades, medía 5,2 de punta
+        // a punta —un tercio de la pantalla— y con tres pasos de carga quedaban
+        // tres estrellas gigantes encimadas. El que llama tiene que poder
+        // razonar sobre el número que pasa.
         const a0 = fx.angle[i] + t * 1.6;
         for (let k = 0; k < 4; k++) {
           const a = a0 + (k * Math.PI) / 2;
-          const largo = r * (1.75 + brote * 0.5);
+          const largo = r * (1.15 + brote * 0.35);
           const ancho = r * 0.3;
           glow.moveTo(px + Math.cos(a) * largo, py + Math.sin(a) * largo);
           glow.lineTo(px + Math.cos(a + 1.57) * ancho, py + Math.sin(a + 1.57) * ancho);

@@ -11,6 +11,14 @@ import { FIGHTERS_PER_TEAM } from '../game/match';
  * y el HUD los MUESTREA — no se suscribe. El productor no sabe que el HUD
  * existe, que es lo que mantiene el camino de datos de mercado libre de trabajo
  * de interfaz.
+ *
+ * **Arriba el marcador, abajo el mercado.** Estaban al revés: el cartel del
+ * ticker ocupaba el borde de arriba —que es el lugar que en un juego de pelea
+ * pertenece a los dos bandos— y el marcador quedaba en la mitad de abajo, justo
+ * donde pasa la pelea. Mortal Kombat, Tekken y Street Fighter ponen las barras
+ * enfrentadas en el borde superior por una razón que se comprueba mirando: es
+ * el único lugar de la pantalla donde nunca hay acción, así que se puede leer
+ * sin dejar de mirar el combate.
  */
 
 const BULL = '#00FF66';
@@ -21,16 +29,18 @@ const REFRESH_MS = 250;
 
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 
+/** El contorno negro que hace legible un texto sin caja atrás. */
+const CONTORNO = '0 2px 0 #05070d,0 -1px 0 #05070d,1px 0 0 #05070d,-1px 0 0 #05070d';
+
 /**
- * Dónde está parada cada hoguera, en fracción del ancho de pantalla.
+ * A cuánto daño se considera vacía la barra.
  *
- * Sale de `backdrop.ts`, que las pone en `width * 0.16` y `width * 0.84`. El
- * marcador se para en los mismos dos puntos a propósito: el bando no es una
- * caja al lado de otra, es el número apoyado sobre SU fuego. Si alguna vez se
- * mueven las hogueras, estos dos números se mueven con ellas.
+ * El daño de Smash no tiene techo —es un multiplicador de empuje, no una vida—
+ * así que una barra necesita un tope elegido. A 200 la barra se vacía justo
+ * cuando el peleador empieza a salir despedido de verdad, que es cuando el que
+ * mira quiere ver que está en problemas.
  */
-const HOGUERA_VERDE = 0.16;
-const HOGUERA_ROJA = 0.84;
+const DANO_MAXIMO = 200;
 
 /**
  * El toro y el oso, dibujados en línea.
@@ -56,10 +66,10 @@ const OSO = '<svg viewBox="0 0 24 24" width="1.5em" height="1.5em" aria-hidden="
   + '<circle cx="14.6" cy="12" r="1" fill="#05070d"/></svg>';
 
 /**
- * El resplandor del icono cuando el bando anota.
+ * Las animaciones de interfaz.
  *
- * Va en una hoja de estilo y no en `style.transform` frame a frame porque es
- * una animación de interfaz: el navegador la corre en su compositor y no gasta
+ * Van en una hoja de estilo y no en `style.transform` frame a frame porque son
+ * animaciones de interfaz: el navegador las corre en su compositor y no gastan
  * nada del presupuesto del juego, que es lo que el HUD tiene que respetar.
  */
 const ANIMACION = '@keyframes bbAnota{'
@@ -72,7 +82,14 @@ const ANIMACION = '@keyframes bbAnota{'
   + '55%{transform:scale(.94);opacity:1;letter-spacing:.12em}'
   + '100%{transform:scale(1);opacity:1;letter-spacing:.16em}}'
   + '.bb-gana{animation:bbGana .7s cubic-bezier(.16,1,.3,1) both}'
-  + '@media (prefers-reduced-motion:reduce){.bb-anota{animation:none}}';
+  // El golpe: la barra tiembla cuando le entra daño. Es lo que hace que el
+  // número no sea lo único que avisa que algo pasó.
+  + '@keyframes bbGolpe{'
+  + '0%{transform:translateX(0)}25%{transform:translateX(-3px)}'
+  + '60%{transform:translateX(2px)}100%{transform:translateX(0)}}'
+  + '.bb-golpe{animation:bbGolpe .22s ease-out}'
+  + '@media (prefers-reduced-motion:reduce){'
+  + '.bb-anota,.bb-golpe{animation:none}}';
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -98,19 +115,152 @@ export function mountHud(
   source: string,
   perf: { frameMs: number },
 ): HudHandle {
-  /* --- barra de mercado, arriba a la izquierda --------------------- */
-  // Las medidas van con `clamp` y no fijas: en un teléfono de 390 px de ancho,
-  // ocho datos a 12 px con separación de 14 se salen de la pantalla, y los dos
-  // paneles de 220 px no entran uno al lado del otro. Con `clamp` la misma
-  // barra se achica sola sin una segunda hoja de estilos ni un media query, y
-  // en pantalla grande queda exactamente como estaba.
+  const estilo = document.createElement('style');
+  estilo.textContent = ANIMACION;
+  document.head.append(estilo);
+
+  /* --- el marcador, arriba de todo y enfrentado ---------------------- */
+  // Una sola fila con los dos bandos mirándose. `padding-top` con
+  // `env(safe-area-inset-top)` porque en un iPhone el borde de arriba de la
+  // página está tapado por la muesca y ahí no se lee nada.
+  const marcador = el('div',
+    'position:absolute;top:0;left:0;right:0;display:flex;align-items:flex-start;' +
+    'gap:clamp(6px,2vw,20px);pointer-events:none;user-select:none;' +
+    'padding:calc(env(safe-area-inset-top,0px) + clamp(6px,1.6vh,14px)) ' +
+    'clamp(8px,2.5vw,26px) clamp(10px,2vh,18px);' +
+    `font:clamp(9px,2.2vw,12px)/1.2 ${MONO};color:#e6edf3;` +
+    // El velo no es una caja: es una sombra que se apaga hacia abajo, así que no
+    // tiene borde ni un lado donde termine y el escenario sigue detrás.
+    'background:linear-gradient(180deg,rgba(5,7,13,.86),rgba(5,7,13,.55) 55%,rgba(5,7,13,0))');
+
+  const paneles = [TEAM_GREEN, TEAM_RED].map((team) => {
+    const verde = team === TEAM_GREEN;
+    const color = verde ? BULL : BEAR;
+    const lado = verde ? 'flex-start' : 'flex-end';
+
+    const panel = el('div',
+      `flex:1;display:flex;flex-direction:column;align-items:${lado};gap:clamp(3px,.7vh,6px);` +
+      'min-width:0');
+
+    /* nombre e icono, del lado de afuera */
+    const head = el('div', 'display:flex;align-items:center;gap:clamp(4px,1.2vw,9px);' +
+      `color:${color};filter:drop-shadow(0 0 10px ${color}aa)`);
+    const icono = el('span', 'display:flex;transform-origin:50% 60%;font-size:1.25em');
+    icono.innerHTML = verde ? TORO : OSO;
+    const label = el('strong',
+      'letter-spacing:clamp(2px,.9vw,6px);font-size:clamp(13px,3.4vw,22px);' +
+      `text-shadow:${CONTORNO}`, verde ? 'BULLS' : 'BEARS');
+    // El toro entra desde la izquierda y el oso desde la derecha: el icono va
+    // siempre del lado de afuera, mirando a la pelea.
+    head.append(...(verde ? [icono, label] : [label, icono]));
+
+    /* la barra de resistencia, que se vacía hacia el centro */
+    // El riel se llena desde el borde de AFUERA. Es lo que hace que las dos
+    // barras se consuman una contra la otra: en un juego de pelea eso se lee sin
+    // que nadie lo explique.
+    const riel = el('div',
+      'position:relative;width:100%;height:clamp(9px,2.2vh,17px);' +
+      'background:rgba(5,7,13,.72);border-radius:3px;overflow:hidden;' +
+      `outline:1px solid ${color}55;box-shadow:inset 0 0 12px rgba(0,0,0,.7)`);
+    const borde = verde ? 'left:0' : 'right:0';
+    // El trozo fantasma: sigue al daño con retraso, así se ve CUÁNTO se acaba de
+    // perder. Es el chunk blanco de los juegos de pelea, y es la mitad del
+    // impacto de un golpe fuerte.
+    const fantasma = el('div',
+      `position:absolute;top:0;bottom:0;${borde};width:100%;background:#fff8e0;` +
+      'opacity:.55;transition:width .45s cubic-bezier(.4,0,.2,1) .12s');
+    const relleno = el('div',
+      `position:absolute;top:0;bottom:0;${borde};width:100%;` +
+      `background:linear-gradient(180deg,${color},${color}99);` +
+      `box-shadow:0 0 14px ${color}aa;transition:width .12s linear`);
+    riel.append(fantasma, relleno);
+
+    /* la fila de abajo: daño, KO, plantel y ultra */
+    const fila = el('div',
+      `display:flex;align-items:center;gap:clamp(5px,1.6vw,12px);width:100%;` +
+      `flex-direction:${verde ? 'row' : 'row-reverse'}`);
+
+    const damage = el('div',
+      `font:700 clamp(17px,4.6vw,30px)/1 ${MONO};color:${color};` +
+      `text-shadow:${CONTORNO},0 0 20px ${color};` +
+      'font-variant-numeric:tabular-nums', '0%');
+
+    const kos = el('div',
+      `color:#9fb0c4;letter-spacing:1px;text-shadow:${CONTORNO};white-space:nowrap`, '0 KO');
+
+    // Los puntitos del plantel, al estilo de las rondas ganadas de Mortal
+    // Kombat: cuántos peleadores le quedan al bando.
+    const lives = el('div', 'display:flex;gap:clamp(3px,.9vw,5px)');
+    const dots: HTMLElement[] = [];
+    for (let i = 0; i < FIGHTERS_PER_TEAM; i++) {
+      const dot = el('span',
+        'width:clamp(8px,2.1vw,12px);height:clamp(8px,2.1vw,12px);border-radius:50%;' +
+        'background:#1b2331;outline:2px solid #05070d');
+      dots.push(dot);
+      lives.append(dot);
+    }
+
+    const charge = el('div', 'display:flex;gap:2px');
+    const pips: HTMLElement[] = [];
+    for (let i = 0; i < GROWTH_MAX_STAGE; i++) {
+      const pip = el('span', 'width:clamp(7px,1.8vw,12px);height:3px;border-radius:2px;' +
+        'background:#263041');
+      pips.push(pip);
+      charge.append(pip);
+    }
+
+    // La barra de ULTRA, fina y debajo de todo: es la que avisa que viene el
+    // super, y tiene que verse sin competirle a la de resistencia.
+    const ultraWrap = el('div',
+      'display:flex;align-items:center;gap:5px;flex:1;min-width:0;' +
+      `flex-direction:${verde ? 'row' : 'row-reverse'}`);
+    const ultraTag = el('span',
+      `color:${DIM};letter-spacing:1px;font-size:clamp(8px,1.9vw,10px);` +
+      `text-shadow:${CONTORNO}`, 'ULTRA');
+    const ultraTrack = el('div',
+      'flex:1;min-width:24px;height:3px;border-radius:2px;background:#26304199;' +
+      'outline:1px solid #05070d99;overflow:hidden;position:relative');
+    const ultraFill = el('div',
+      `position:absolute;top:0;bottom:0;${borde};width:0%;background:${GOLD};` +
+      'transition:width .12s linear');
+    ultraTrack.append(ultraFill);
+    ultraWrap.append(ultraTag, ultraTrack, charge);
+
+    fila.append(damage, kos, lives, ultraWrap);
+    panel.append(head, riel, fila);
+    return {
+      team, color, panel, icono, riel, relleno, fantasma,
+      kos, damage, dots, pips, ultraFill, ultraTag, anotados: 0, dano: 0,
+    };
+  });
+
+  // El separador del medio. En Tekken y en Mortal Kombat hay algo ahí —un
+  // reloj, un emblema— y sin nada las dos barras se leen como una sola.
+  const centro = el('div',
+    'align-self:center;display:flex;flex-direction:column;align-items:center;gap:2px;' +
+    `color:${DIM};font:700 clamp(11px,2.8vw,18px)/1 ${MONO};letter-spacing:2px;` +
+    `text-shadow:${CONTORNO};flex:0 0 auto`, 'VS');
+  marcador.append(paneles[0].panel, centro, paneles[1].panel);
+
+  /* --- el mercado, abajo y entre las hogueras ------------------------- */
+  // Baja del borde de arriba al de abajo, al hueco que dejan la hoguera verde y
+  // la roja —`backdrop.ts` las planta en 0,16 y 0,84 del ancho—, así que el
+  // centro de abajo es justo donde no hay fuego. Sin caja ni borde: el mismo
+  // halo difuso que se usó para el marcador, para que las llamas se sigan
+  // viendo atrás en vez de quedar tapadas por un rectángulo.
+  //
+  // Y el logo va teñido mitad y mitad: BORDER en verde y BRAWLERS en rojo, que
+  // son los dos fuegos que lo flanquean. Ésa es la fusión.
   const bar = el('div',
-    'position:absolute;top:10px;left:10px;right:10px;display:flex;align-items:center;' +
-    'flex-wrap:wrap;gap:clamp(6px,1.8vw,14px);width:fit-content;max-width:calc(100% - 20px);' +
-    'padding:clamp(5px,1.5vw,8px) clamp(8px,2vw,12px);border-radius:8px;' +
-    'background:rgba(11,15,25,.75);' +
-    `border:1px solid #263041;font:clamp(9px,2.4vw,12px)/1.4 ${MONO};` +
-    'color:#e6edf3;user-select:none');
+    'position:absolute;left:50%;transform:translateX(-50%);' +
+    'bottom:calc(env(safe-area-inset-bottom,0px) + clamp(6px,1.6vh,16px));' +
+    'display:flex;align-items:center;justify-content:center;flex-wrap:wrap;' +
+    'gap:clamp(5px,1.6vw,14px);max-width:calc(100% - 16px);' +
+    'padding:clamp(4px,1.2vw,9px) clamp(12px,4vw,34px);' +
+    'background:radial-gradient(closest-side ellipse at 50% 50%,' +
+    'rgba(5,7,13,.88),rgba(5,7,13,.6) 58%,rgba(5,7,13,0) 100%);' +
+    `font:clamp(9px,2.3vw,12px)/1.4 ${MONO};color:#e6edf3;` +
+    `text-shadow:${CONTORNO};user-select:none;pointer-events:none;text-align:center`);
 
   const title = el('strong', 'letter-spacing:2px');
   title.innerHTML = `<span style="color:${BULL}">BORDER</span><span style="color:${BEAR}">BRAWLERS</span>`;
@@ -123,16 +273,6 @@ export function mountHud(
   const fps = el('span', `color:${DIM}`, '—');
   bar.append(title, symbolNode, price, status, sourceNode, trades, whales, fps);
 
-  /* --- marcador, cada bando sobre su hoguera ------------------------ */
-  // Sin contenedor: ni caja, ni borde, ni fondo. Lo que hacía falta para que se
-  // leyera igual es CONTORNO en el texto, no una caja atrás — y así el fuego de
-  // abajo queda a la vista en vez de tapado por un rectángulo.
-  const estilo = document.createElement('style');
-  estilo.textContent = ANIMACION;
-  document.head.append(estilo);
-
-  const CONTORNO = '0 2px 0 #05070d,0 -1px 0 #05070d,1px 0 0 #05070d,-1px 0 0 #05070d';
-
   /**
    * El título del final. Uno solo, que cambia de texto y de color.
    *
@@ -141,90 +281,12 @@ export function mountHud(
    * mundo se achica con la cámara justo cuando más grande tiene que estar.
    */
   const titulo = el('div',
-    'position:absolute;left:0;right:0;top:26%;display:none;text-align:center;' +
+    'position:absolute;left:0;right:0;top:36%;display:none;text-align:center;' +
     'pointer-events:none;user-select:none;' +
     `font:900 clamp(30px,10vw,104px)/1 ${MONO};` +
     'text-shadow:0 4px 0 #05070d,0 0 40px currentColor');
 
-  const panels = [TEAM_GREEN, TEAM_RED].map((team) => {
-    const verde = team === TEAM_GREEN;
-    const color = verde ? BULL : BEAR;
-    // Dos cosas que sólo se vieron con el juego andando y la primera versión
-    // puesta: el marcador queda ADENTRO de la hoguera, y ahí el verde sobre
-    // verde no se lee. Entonces sube por encima de la punta de las llamas —que
-    // miden 0,22 del alto de pantalla— y se apoya en un halo oscuro difuso.
-    //
-    // El halo no es un contenedor: no tiene borde, ni esquina, ni un lado donde
-    // termine. Es sombra. Una caja atrás del texto es justo lo que se sacó.
-    const panel = el('div',
-      `position:absolute;bottom:clamp(58px,16vh,140px);` +
-      `left:${(verde ? HOGUERA_VERDE : HOGUERA_ROJA) * 100}%;transform:translateX(-50%);` +
-      'display:flex;flex-direction:column;align-items:center;gap:3px;' +
-      'padding:clamp(8px,2vw,16px) clamp(14px,4vw,30px);' +
-      'background:radial-gradient(closest-side ellipse at 50% 50%,' +
-      'rgba(5,7,13,.82),rgba(5,7,13,.55) 55%,rgba(5,7,13,0) 100%);' +
-      `font:clamp(10px,2.6vw,13px)/1.2 ${MONO};color:#e6edf3;text-align:center;` +
-      'pointer-events:none;user-select:none;white-space:nowrap');
-
-    const head = el('div', 'display:flex;align-items:center;gap:clamp(4px,1.2vw,8px);' +
-      `color:${color};filter:drop-shadow(0 0 10px ${color}aa)`);
-    const icono = el('span', 'display:flex;transform-origin:50% 60%;font-size:1.35em');
-    icono.innerHTML = verde ? TORO : OSO;
-    const label = el('strong',
-      `letter-spacing:clamp(2px,.9vw,6px);font-size:clamp(14px,3.6vw,21px);` +
-      `text-shadow:${CONTORNO}`, verde ? 'BULLS' : 'BEARS');
-    // El toro mira a la pelea desde la izquierda y el oso desde la derecha, así
-    // que el icono va del lado de afuera en cada bando.
-    head.append(...(verde ? [icono, label] : [label, icono]));
-
-    const damage = el('div',
-      `font:700 clamp(32px,9.5vw,58px)/1 ${MONO};color:${color};` +
-      `text-shadow:${CONTORNO},0 0 26px ${color};` +
-      'font-variant-numeric:tabular-nums', '0%');
-
-    const kos = el('div',
-      `color:#9fb0c4;letter-spacing:2px;text-shadow:${CONTORNO}`, '0 KO');
-
-    const lives = el('div', 'display:flex;gap:5px;margin-top:2px');
-    const dots: HTMLElement[] = [];
-    for (let i = 0; i < FIGHTERS_PER_TEAM; i++) {
-      const dot = el('span',
-        'width:clamp(9px,2.4vw,13px);height:clamp(9px,2.4vw,13px);border-radius:50%;' +
-        'background:#1b2331;outline:2px solid #05070d');
-      dots.push(dot);
-      lives.append(dot);
-    }
-
-    const charge = el('div', 'display:flex;gap:3px');
-    const pips: HTMLElement[] = [];
-    for (let i = 0; i < GROWTH_MAX_STAGE; i++) {
-      const pip = el('span', 'width:13px;height:4px;border-radius:2px;background:#263041');
-      pips.push(pip);
-      charge.append(pip);
-    }
-
-    // La barra de ULTRA sin su cajita: una línea que se llena. El texto de al
-    // lado dice de quién es el turno, porque el ciclo por turnos sólo sirve si
-    // se puede anticipar.
-    const ultraWrap = el('div',
-      'display:flex;align-items:center;gap:6px;margin-top:3px;width:clamp(96px,22vw,150px)');
-    const ultraTag = el('span',
-      `color:#9fb0c4;letter-spacing:1px;font-size:clamp(9px,2.2vw,11px);` +
-      `text-shadow:${CONTORNO}`, 'ULTRA 1/3');
-    const ultraTrack = el('div',
-      'flex:1;height:4px;border-radius:3px;background:#26304199;' +
-      'outline:1px solid #05070d99;overflow:hidden');
-    const ultraFill = el('div',
-      `width:0%;height:100%;background:${GOLD};transition:width .12s linear`);
-    ultraTrack.append(ultraFill);
-    ultraWrap.append(ultraTag, ultraTrack);
-
-    panel.append(head, damage, kos, lives, charge, ultraWrap);
-    host.append(panel);
-    return { team, color, panel, icono, kos, damage, dots, pips, ultraFill, ultraTag, anotados: 0 };
-  });
-
-  host.append(bar, titulo);
+  host.append(marcador, bar, titulo);
 
   /** Qué título está puesto, para no reiniciar la animación en cada refresco. */
   let mostrando = -1;
@@ -236,7 +298,7 @@ export function mountHud(
     fps.textContent = `${perf.frameMs.toFixed(1)} ms`;
     fps.style.color = perf.frameMs <= 16.6 ? BULL : BEAR;
 
-    for (const p of panels) {
+    for (const p of paneles) {
       // `kos[equipo]` cuenta los que ESE bando volteó, así que subir es anotar.
       // Se mira por muestreo y no por evento a propósito: el HUD no se suscribe
       // a la simulación, y a 250 ms no hay forma de que entren dos KO en la
@@ -252,7 +314,24 @@ export function mountHud(
         p.icono.classList.add('bb-anota');
       }
       p.kos.textContent = `${anotados} KO`;
-      p.damage.textContent = `${Math.round(match.damage[p.team])}%`;
+
+      const dano = match.damage[p.team];
+      p.damage.textContent = `${Math.round(dano)}%`;
+      // La barra se vacía a medida que sube el daño. El `fantasma` lleva el
+      // mismo número pero con transición lenta, así que durante medio segundo se
+      // ve el pedazo que se acaba de perder.
+      const resistencia = Math.max(0, 1 - dano / DANO_MAXIMO);
+      p.relleno.style.width = `${(resistencia * 100).toFixed(1)}%`;
+      p.fantasma.style.width = `${(resistencia * 100).toFixed(1)}%`;
+      // En rojo cuando queda poco: el color del bando ya no alcanza para avisar.
+      p.relleno.style.filter = resistencia < 0.25 ? 'saturate(1.6) brightness(1.3)' : 'none';
+      if (dano > p.dano + 4) {
+        p.riel.classList.remove('bb-golpe');
+        void p.riel.offsetWidth;
+        p.riel.classList.add('bb-golpe');
+      }
+      p.dano = dano;
+
       // Los puntitos son el PLANTEL, no los que están parados en el escenario:
       // en torneo hay uno solo peleando y los otros dos esperan su turno, así
       // que `alive` diría siempre 1 y el marcador no contaría nada.
@@ -271,7 +350,11 @@ export function mountHud(
       p.ultraFill.style.width = `${Math.round(ultra * 100)}%`;
       // Llena, brilla: es el aviso de que el super sale en cualquier momento.
       p.ultraFill.style.boxShadow = ultra >= 1 ? `0 0 12px ${GOLD}` : 'none';
-      p.ultraTag.textContent = `ULTRA ${match.ultraTurn[p.team] + 1}/${FIGHTERS_PER_TEAM}`;
+      // El "n/3" es de quién es el TURNO entre los tres carriles, y en torneo hay
+      // un carril solo: el número cambiaría sin que cambie nada en pantalla.
+      p.ultraTag.textContent = match.torneo
+        ? 'ULTRA'
+        : `ULTRA ${match.ultraTurn[p.team] + 1}/${FIGHTERS_PER_TEAM}`;
       p.ultraTag.style.color = ultra >= 1 ? GOLD : DIM;
     }
 
@@ -298,7 +381,7 @@ export function mountHud(
       bar.remove();
       estilo.remove();
       titulo.remove();
-      for (const p of panels) p.panel.remove();
+      marcador.remove();
     },
     setStatus(next: string): void {
       status.textContent = `● ${next}`;

@@ -4,6 +4,7 @@ import { AdvancedBloomFilter } from 'pixi-filters/advanced-bloom';
 import { ShockwaveFilter } from 'pixi-filters/shockwave';
 import type { Match } from '../game/match';
 import {
+  EVENT_ESTALLIDO,
   EVENT_GROW,
   EVENT_HIT,
   EVENT_KO,
@@ -13,6 +14,8 @@ import {
   EVENT_SUPER,
   FIGHTER_HALF_HEIGHT,
   HITSTUN,
+  PODERES,
+  PODER_VIDA,
   PLATFORM_COUNT,
   STAGE_HALF_WIDTH,
   platformCenterX,
@@ -605,6 +608,20 @@ export async function startGame(
   const inkFx = new Graphics();
   world.addChild(inkFx);
 
+  /**
+   * Los poderes en vuelo se dibujan aparte de `fx`.
+   *
+   * `fx` es un sistema de partículas: cada chispa nace, envejece y muere sola.
+   * Un poder no es eso — es un objeto de la SIMULACIÓN que está en un lugar
+   * concreto del mundo y tiene que dibujarse donde está, cuadro a cuadro, hasta
+   * que estalle. Meterlo en el pool de partículas obligaría a sincronizar dos
+   * verdades sobre la misma cosa.
+   */
+  const poderGlow = new Graphics();
+  glowLayer.addChild(poderGlow);
+  const poderInk = new Graphics();
+  world.addChild(poderInk);
+
   const shockwave = new ShockwaveFilter({
     amplitude: 22,
     wavelength: 140,
@@ -691,6 +708,7 @@ export async function startGame(
     updateCamera(camera, match, dt, app.renderer.height / app.renderer.width);
     applyCamera(world, app, camera, match.shake);
     drawFighters(views, match, action, actionAge, suave, dtPelea, elapsed, cobrarGolpe);
+    dibujarPoderes(poderGlow, poderInk, match, elapsed);
     drawFx(fx, plainFx, glowFx, inkFx);
 
     /* --- fondo ------------------------------------------------------- */
@@ -881,6 +899,22 @@ export async function startGame(
           stop = Math.max(stop, HITSTOP_KO);
           camera.zoom = 1;
           break;
+        case EVENT_ESTALLIDO: {
+          // El poder llegó y revienta. Es el momento fuerte de la jugada, así
+          // que se le dan las tres capas: el fogonazo que tapa, la bola con sus
+          // rayos, y las esquirlas que salen para afuera.
+          const fuerza = Math.min(1, magnitude);
+          flash(target, x, y, 0.55 + fuerza * 0.4, 0.16, 0xffffff);
+          orb(target, x, y, 0.5 + fuerza * 0.55, 0.3, teamColor);
+          beams(target, x, y, 8, 1.4 + fuerza * 1.6, 0.34, teamColor);
+          burst(target, x, y, 10, 7 + fuerza * 5, 0.14, 0.62, teamColor);
+          wave(target, x, y, 1.6 + fuerza * 1.8, 0.42, teamColor);
+          stop = Math.max(stop, HITSTOP_SKILL);
+          // La cámara se acerca al impacto y no al que disparó: lo que hay que
+          // mirar es dónde reventó.
+          camera.zoom = Math.max(camera.zoom, 0.45 + fuerza * 0.3);
+          break;
+        }
         case EVENT_LAND:
           dust(target, x, y - FIGHTER_HALF_HEIGHT, Math.min(1.4, magnitude));
           break;
@@ -888,7 +922,7 @@ export async function startGame(
           // El anillo del gigantismo crecía con la magnitud sin tope y con una
           // ballena tapaba un quinto de la pantalla. El paso de gigantismo es
           // de uno a tres: eso es lo que tiene que decidir el tamaño.
-          orb(target, x, y, 0.55 + Math.min(3, magnitude) * 0.2, 0.5, GOLD);
+          orb(target, x, y, 0.42 + Math.min(3, magnitude) * 0.13, 0.38, GOLD);
           break;
         default:
           break;
@@ -1041,9 +1075,27 @@ interface Suavizado {
  * lo bastante rápido como para no mentir sobre hacia dónde está pegando.
  */
 const GIRO_POR_SEGUNDO = 9;
+/**
+ * Lo más angosto que se deja ver el dibujo mientras se da vuelta.
+ *
+ * Un dibujo plano NO TIENE PERFIL: llevar su ancho a cero no lo muestra de
+ * canto, lo borra. Como `giro` cruza el cero, había uno o dos cuadros en los
+ * que el peleador medía cero píxeles de ancho y desaparecía — que es
+ * exactamente el parpadeo que se ve al cambiar de lado.
+ *
+ * Entonces el ancho no baja de este piso y el SIGNO cruza de golpe: se angosta
+ * hasta un tercio, espeja, y se vuelve a abrir. Eso sí se lee como que gira, y
+ * es además lo que hace un juego de pelea de verdad, que espeja el sprite.
+ */
+const GIRO_MINIMO = 0.34;
 /** Cuánto aplasta el aterrizaje más fuerte, y en cuánto se apaga. */
 const GOLPE_PISO = 0.16;
 const GOLPE_PISO_DECAE = 5.5;
+
+/** El ancho con signo que le toca al dibujo para un `giro` de -1 a 1. */
+function anchoDelGiro(giro: number): number {
+  return (giro < 0 ? -1 : 1) * (GIRO_MINIMO + (1 - GIRO_MINIMO) * Math.min(1, Math.abs(giro)));
+}
 
 function drawFighters(
   views: FighterView[], match: Match,
@@ -1114,7 +1166,8 @@ function drawFighters(
     const stretch = Math.max(-0.22, Math.min(0.18,
       match.vy[i] * 0.014 - suave.golpePiso[i] * GOLPE_PISO));
     const scale = match.scale[i];
-    view.scale.x = scale * suave.giro[i] * (1 - stretch);
+    const ancho = anchoDelGiro(suave.giro[i]);
+    view.scale.x = scale * ancho * (1 - stretch);
     view.scale.y = scale * (1 + stretch);
     // El contenedor está en el CENTRO del cuerpo, así que estirarlo o aplastarlo
     // le despega los pies del piso: un personaje que aterriza se hundía y uno
@@ -1135,11 +1188,123 @@ function drawFighters(
       view.y -= Math.abs(Math.sin(fase)) * 0.36;
       view.rotation = Math.sin(fase * 0.5) * 0.18;
       const rebote = Math.cos(fase * 2) * 0.09;
-      view.scale.x = scale * suave.giro[i] * (1 - rebote);
+      view.scale.x = scale * ancho * (1 - rebote);
       view.scale.y = scale * (1 + rebote);
     } else if (view.rotation !== 0) {
       view.rotation = 0;
     }
+  }
+}
+
+/**
+ * Dibuja los poderes que están viajando por el escenario.
+ *
+ * Se dibuja como un COMETA y no como una bola: una bola en vuelo no se lee, se
+ * ve como una pelota flotando. Lo que dice "esto va a algún lado" es la cola,
+ * que apunta hacia atrás en el sentido en el que viaja, y que además le dice al
+ * que mira de dónde salió el disparo sin tener que haber estado mirando cuando
+ * salió.
+ *
+ * Va todo por geometría y no por partículas a propósito: la cola tiene que
+ * estar exactamente detrás de la cabeza en el cuadro en que se dibuja, y un
+ * pool de partículas da un rastro que se queda atrás cuando el poder acelera o
+ * cuando la pantalla va a 30 fps.
+ *
+ * Las tres capas son las mismas que usa el resto del juego: `glow` lleva Bloom
+ * y es donde va la energía, `ink` queda afuera y es lo que le pone el contorno
+ * negro que tienen los personajes y las llamas. Sin el contorno el poder se ve
+ * como una luz de motor gráfico y no como algo dibujado.
+ */
+function dibujarPoderes(
+  glow: Graphics, ink: Graphics, match: Match, elapsed: number,
+): void {
+  glow.clear();
+  ink.clear();
+  const p = match.poderes;
+  for (let k = 0; k < PODERES; k++) {
+    if (p.vida[k] <= 0) continue;
+    const px = p.x[k];
+    const py = -p.y[k];
+    // En pantalla el eje Y va al revés que en el mundo, así que la cola se
+    // orienta con la velocidad ya dada vuelta o apunta para el lado contrario.
+    const ang = Math.atan2(-p.vy[k], p.vx[k]);
+    const color = p.team[k] === TEAM_GREEN ? GREEN : RED;
+    const fuerza = Math.min(1, p.fuerza[k]);
+    const r = 0.26 + fuerza * 0.34;
+    // Late. Una bola de energía de tamaño fijo se ve como un sprite pegado a la
+    // pantalla; el latido es lo que la hace estar viva.
+    const pulso = 1 + Math.sin(elapsed * 26 + k * 1.7) * 0.09;
+    const cos = Math.cos(ang);
+    const sen = Math.sin(ang);
+
+    /* --- la cola: una gota que se afina hacia atrás -------------------- */
+    // Nace recién cuando el poder ya salió: los primeros centímetros de vuelo
+    // no pueden tener una estela de dos metros.
+    const salida = Math.min(1, (PODER_VIDA - p.vida[k]) * 6);
+    const largo = r * (5.5 + fuerza * 3.5) * salida;
+    if (largo > 0.01) {
+      const nx = -sen;
+      const ny = cos;
+      const bocaX = px + cos * r * 0.35;
+      const bocaY = py + sen * r * 0.35;
+      const colaX = px - cos * largo;
+      const colaY = py - sen * largo;
+      // Tres tramos de ancho decreciente y no un triángulo: la curva es lo que
+      // separa una llama de un cono.
+      glow.moveTo(bocaX + nx * r * 0.92, bocaY + ny * r * 0.92);
+      glow.quadraticCurveTo(
+        px - cos * largo * 0.45 + nx * r * 0.55,
+        py - sen * largo * 0.45 + ny * r * 0.55,
+        colaX, colaY,
+      );
+      glow.quadraticCurveTo(
+        px - cos * largo * 0.45 - nx * r * 0.55,
+        py - sen * largo * 0.45 - ny * r * 0.55,
+        bocaX - nx * r * 0.92, bocaY - ny * r * 0.92,
+      );
+      glow.fill({ color, alpha: 0.42 });
+      ink.moveTo(bocaX + nx * r * 0.92, bocaY + ny * r * 0.92);
+      ink.quadraticCurveTo(
+        px - cos * largo * 0.45 + nx * r * 0.55,
+        py - sen * largo * 0.45 + ny * r * 0.55,
+        colaX, colaY,
+      );
+      ink.quadraticCurveTo(
+        px - cos * largo * 0.45 - nx * r * 0.55,
+        py - sen * largo * 0.45 - ny * r * 0.55,
+        bocaX - nx * r * 0.92, bocaY - ny * r * 0.92,
+      );
+      ink.stroke({ width: 0.055, color: 0x05070d, alpha: 0.75 });
+    }
+
+    /* --- la cabeza ---------------------------------------------------- */
+    const rr = r * pulso;
+    // Aura, cuerpo del color del bando, y núcleo blanco. Los tres anillos son
+    // lo mismo que hace `FX_ORB`: es lo que le da el borde duro de dibujo en
+    // vez del degradé de una luz.
+    glow.circle(px, py, rr * 1.35);
+    glow.fill({ color, alpha: 0.3 });
+    glow.circle(px, py, rr);
+    glow.fill({ color, alpha: 0.95 });
+    glow.circle(px, py, rr * 0.5);
+    glow.fill({ color: 0xffffff, alpha: 0.95 });
+
+    // Adentro, una estrella de cuatro puntas girando. Es la "textura" del
+    // poder: sin nada adentro el núcleo es un círculo blanco plano, y un
+    // círculo blanco plano no se lee como energía comprimida.
+    const giro = elapsed * 5.5 + k;
+    for (let n = 0; n < 4; n++) {
+      const a = giro + (n * Math.PI) / 2;
+      const punta = rr * 0.86;
+      const ancho = rr * 0.16;
+      glow.moveTo(px + Math.cos(a) * punta, py + Math.sin(a) * punta);
+      glow.lineTo(px + Math.cos(a + 1.57) * ancho, py + Math.sin(a + 1.57) * ancho);
+      glow.lineTo(px + Math.cos(a - 1.57) * ancho, py + Math.sin(a - 1.57) * ancho);
+    }
+    glow.fill({ color: 0xffffff, alpha: 0.7 });
+
+    ink.circle(px, py, rr * 1.1);
+    ink.stroke({ width: 0.07, color: 0x05070d, alpha: 0.9 });
   }
 }
 

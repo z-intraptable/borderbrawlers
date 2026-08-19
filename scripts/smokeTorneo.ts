@@ -37,12 +37,18 @@ console.log('\n== el torneo manda de a uno ==');
 const m = createMatch(FIGHTERS_PER_TEAM, true);
 const trades = new TradeRingBuffer(64);
 
-/** Empuja órdenes de los dos lados y deja correr unos cuadros. */
-const alimentar = (): void => {
+/**
+ * Empuja órdenes de los dos lados y deja correr un segundo.
+ *
+ * Un segundo y no un puñado de cuadros: el relevo del torneo tiene una pausa a
+ * propósito para que el KO se vea, así que con ocho cuadros el siguiente de la
+ * plantilla todavía no salió y el test estaría midiendo la pausa, no el relevo.
+ */
+const alimentar = (cuadros = 60): void => {
   for (let n = 0; n < CAPACITY; n++) {
     trades.push(n, n % 2 === 0 ? 'buy' : 'sell', 100, 1, false, n);
   }
-  for (let n = 0; n < 8; n++) stepMatch(m, trades, stats, 1 / 60);
+  for (let n = 0; n < cuadros; n++) stepMatch(m, trades, stats, 1 / 60);
 };
 
 check('el carril es uno por bando aunque se pidan tres', m.lanes === 1, `${m.lanes}`);
@@ -52,6 +58,38 @@ check('sale uno de cada lado y nada más',
   activos(m, 0) === 1 && activos(m, FIGHTERS_PER_TEAM) === 1,
   `${activos(m, 0)} verde, ${activos(m, FIGHTERS_PER_TEAM)} rojo`);
 check('y arranca el primero de la plantilla', m.character[0] === 0, `${m.character[0]}`);
+
+console.log('\n== el relevo no espera al mercado ==');
+// El defecto que esto cubre: el alta la disparaba la cola de trades, así que un
+// tramo de mercado de un solo lado dejaba al otro bando SIN NADIE en pantalla.
+// Con tres carriles se disimulaba; en 1v1 el que falta es la mitad de la pelea.
+{
+  const solo = createMatch(FIGHTERS_PER_TEAM, true);
+  const cola = new TradeRingBuffer(64);
+  // Se mide POR BANDO y no "hay pelea": dos KO seguidos con medio segundo de
+  // diferencia dejan el escenario vacío la suma de las dos pausas, y eso es
+  // correcto. Lo que no puede pasar es que un bando con plantilla se quede
+  // afuera más de lo que dura su propia pausa.
+  const corrida = [0, 0];
+  const peor = [0, 0];
+  for (let paso = 0; paso < 3600; paso++) {
+    if (paso % 6 === 0) cola.push(paso, 'buy', 100, 1 + (paso % 5), false, paso);
+    stepMatch(solo, cola, stats, 1 / 60);
+    if (solo.ganador >= 0) { corrida[0] = corrida[1] = 0; continue; }
+    for (const team of [TEAM_GREEN, TEAM_RED]) {
+      const desde = team === TEAM_GREEN ? 0 : FIGHTERS_PER_TEAM;
+      const puede = solo.caidos[team] < FIGHTERS_PER_TEAM;
+      corrida[team] = puede && activos(solo, desde) === 0 ? corrida[team] + 1 : 0;
+      if (corrida[team] > peor[team]) peor[team] = corrida[team];
+    }
+  }
+  // 0,8 s es la pausa que se le deja al KO; más que eso es gente que falta.
+  check('con el mercado todo de un lado igual el otro bando sigue saliendo',
+    peor[TEAM_RED] <= 60,
+    `sin un solo trade rojo, el hueco más largo fue ${(peor[TEAM_RED] / 60).toFixed(2)} s`);
+  check('y el bando que sí recibe órdenes tampoco falta',
+    peor[TEAM_GREEN] <= 60, `${(peor[TEAM_GREEN] / 60).toFixed(2)} s`);
+}
 
 console.log('\n== el que cae no vuelve: entra el siguiente ==');
 for (let k = 0; k < FIGHTERS_PER_TEAM; k++) {
@@ -84,7 +122,7 @@ check('quietos y en el piso',
 
 // Los trades siguen llegando durante la ceremonia. Sin la guarda de `freeSlot`,
 // el bando que ya perdió sacaría un cuarto peleador en mitad del baile.
-alimentar();
+alimentar(8);
 check('no entra nadie más con el match terminado',
   activos(m, 0) === 0 && m.caidos[TEAM_GREEN] === FIGHTERS_PER_TEAM, `${activos(m, 0)}`);
 
