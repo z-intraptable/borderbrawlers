@@ -269,6 +269,26 @@ const CINE_BARRA = 0.11;
 /** A qué velocidad se pega la cámara al plano cerrado. Más rápida que la normal. */
 const CINE_LAMBDA = 9;
 
+/* --- el fotograma de impacto ----------------------------------------- */
+
+/**
+ * Cuánto dura el fogonazo que tapa la pantalla entera en un impacto grande.
+ *
+ * Es el *impact frame* de la animación japonesa: uno o dos cuadros en los que
+ * la imagen se va entera a un color plano. Sirve porque el ojo no alcanza a
+ * leerlos —a 60 Hz son 70 ms— pero sí registra el corte, y el golpe que viene
+ * después se siente más fuerte de lo que la animación en sí muestra. Es el
+ * truco más barato que existe en peso y el que más cambia cómo pega.
+ *
+ * El número está atado a cuadros y no al gusto: 0,07 s son cuatro cuadros a 60
+ * Hz y dos a 30 Hz. Más corto que eso y en una pantalla lenta no aparece nunca.
+ */
+const DESTELLO_TIEMPO = 0.07;
+/** El KO se lleva casi el doble: es lo último que pasa y conviene que tape. */
+const DESTELLO_KO = 0.12;
+/** A cuánto llega el fogonazo. En 1 taparía; en 0,82 se ve el mundo detrás. */
+const DESTELLO_ALFA = 0.82;
+
 interface Camera {
   x: number;
   y: number;
@@ -696,6 +716,26 @@ export async function startGame(
   const cineBarras = new Graphics();
   app.stage.addChild(cineBarras);
 
+  /**
+   * El fotograma de impacto. Va DESPUÉS de las barras de cine en el orden de
+   * dibujo porque tiene que taparlo todo, barras incluidas: si las barras
+   * quedaran encima, el cuadro tapado sería el del medio y no la pantalla, y
+   * entonces no es un fotograma de impacto, es un fogonazo con marco.
+   */
+  const destelloG = new Graphics();
+  app.stage.addChild(destelloG);
+  let destello = 0;
+  let destelloTotal = DESTELLO_TIEMPO;
+  let destelloColor = 0xffffff;
+
+  /** Pide un fotograma de impacto. Gana el más largo si ya había uno. */
+  function destellar(dura: number, color: number): void {
+    if (dura <= destello) return;
+    destello = dura;
+    destelloTotal = dura;
+    destelloColor = color;
+  }
+
   const fx = createFx();
 
   let accumulator = 0;
@@ -772,6 +812,11 @@ export async function startGame(
     drawFighters(views, match, action, actionAge, suave, dtPelea, elapsed, cobrarGolpe);
     dibujarPoderes(poderGlow, poderInk, match, elapsed);
     dibujarCine(cineBarras, app, camera.cine);
+    // Con el reloj de PANTALLA, no con el de la pelea: el fogonazo entra justo
+    // cuando empieza el hitstop, y si se apagara con el reloj congelado se
+    // quedaría clavado en pantalla todo lo que dure la congelada.
+    destello = Math.max(0, destello - dt);
+    dibujarDestello(destelloG, app, destello, destelloTotal, destelloColor);
     drawFx(fx, plainFx, glowFx, inkFx);
 
     /* --- fondo ------------------------------------------------------- */
@@ -853,6 +898,19 @@ export async function startGame(
       const alto = kind === ACT_PUNCH ? 0.16 : -0.1;
       impact(fx, x + hacia * PUNO_ALCANCE, y + alto,
         hacia > 0 ? 0 : Math.PI, kind === ACT_KICK ? 0.9 : 0.7, teamColor);
+      // Y el barrido del miembro que pega: el *smear frame* de la animación
+      // dibujada, que no dibuja el brazo sino el camino que hizo el brazo.
+      // Acá el barrido no se puede pintar sobre el personaje —el brazo viene de
+      // una hoja de sprites y no es una pieza que se pueda estirar—, así que se
+      // dibuja al lado, en la capa de efectos, con el arco que describió.
+      //
+      // Dura 0,1 s, la mitad que el impacto, y es angosto. La razón de que el
+      // cuerpo a cuerpo no llevara nada era el ruido de seis peleadores dando
+      // dieciocho golpes por segundo; un arco que se apaga antes del golpe
+      // siguiente no se acumula, que era el problema de verdad.
+      slash(fx, x + hacia * PUNO_ALCANCE * 0.75, y + alto * 0.5,
+        hacia > 0 ? 0 : Math.PI,
+        kind === ACT_KICK ? 0.95 : 0.72, 0.1, teamColor);
       return;
     }
 
@@ -883,6 +941,7 @@ export async function startGame(
     // contra el piso, esquirlas doradas, dos anillos y un fogonazo. Sale una vez
     // cada medio minuto largo, así que acá el exceso es el punto.
     flash(fx, x, y, 1.05, 0.2, teamColor);
+    destellar(DESTELLO_KO, 0xffffff);
     orb(fx, x, y, magnitude * 0.42, 0.42, teamColor);
     beams(fx, x, y, 10, magnitude * 1.15, 0.4, teamColor);
     wave(fx, x, y - FIGHTER_HALF_HEIGHT, magnitude * 1.6, 0.55, GOLD);
@@ -959,6 +1018,10 @@ export async function startGame(
           // Se va de pantalla: fogonazo grande, esquirlas del color del que lo
           // sacó y un anillo. Es el único efecto que conviene que tape.
           flash(target, x, y, 0.95, 0.22, teamColor);
+          // Y la pantalla entera del color del que lo sacó. Es el único
+          // fotograma de impacto teñido: en el KO importa QUIÉN ganó el
+          // intercambio, y en los demás importa el golpe y no el bando.
+          destellar(DESTELLO_KO, teamColor);
           orb(target, x, y, 1.1, 0.34, teamColor);
           shards(target, x, y, 10, 8, teamColor);
           burst(target, x, y, 12, 9, 0.16, 0.8, teamColor);
@@ -971,6 +1034,7 @@ export async function startGame(
           // rayos, y las esquirlas que salen para afuera.
           const fuerza = Math.min(1, magnitude);
           flash(target, x, y, 0.55 + fuerza * 0.4, 0.16, 0xffffff);
+          destellar(DESTELLO_TIEMPO, 0xffffff);
           orb(target, x, y, 0.5 + fuerza * 0.55, 0.3, teamColor);
           beams(target, x, y, 8, 1.4 + fuerza * 1.6, 0.34, teamColor);
           burst(target, x, y, 10, 7 + fuerza * 5, 0.14, 0.62, teamColor);
@@ -1417,6 +1481,27 @@ function dibujarPoderes(
  * —no un fundido— pero la vuelta a la pelea sí tiene que sentirse como que se
  * abre el cuadro.
  */
+/**
+ * El fotograma de impacto: la pantalla entera de un color por dos o tres
+ * cuadros.
+ *
+ * Se apaga con una curva y no en línea recta —`p * p`— porque en línea recta el
+ * fogonazo se ve como una transición de medio segundo mal hecha. Con el
+ * cuadrado sale casi todo el brillo en el primer cuadro y lo que queda es una
+ * cola corta, que es como se comporta la luz de verdad y como está dibujado en
+ * los originales.
+ */
+function dibujarDestello(
+  g: Graphics, app: Application, resta: number, total: number, color: number,
+): void {
+  g.clear();
+  if (resta <= 0 || total <= 0) return;
+  const p = resta / total;
+  const { ancho, alto } = pantalla(app);
+  g.rect(0, 0, ancho, alto);
+  g.fill({ color, alpha: DESTELLO_ALFA * p * p });
+}
+
 function dibujarCine(g: Graphics, app: Application, resta: number): void {
   g.clear();
   if (resta <= 0) return;
