@@ -274,7 +274,14 @@ const SHOCKWAVE_TIME = 0.85;
  * porque un corte de cámara es un corte, no un fundido; deslizando porque la
  * vuelta a la pelea sí tiene que sentirse como que se abre el cuadro.
  */
-const CINE_TIEMPO = 0.9;
+/**
+ * Subió de 0,9 a 1,3: capturas reales mostraron el burst de textura recién
+ * llegando a su tamaño pleno cuando la cámara ya estaba volviendo al plano
+ * general — el plano cerrado no alcanzaba a mostrar el efecto que existe
+ * para mostrar. Atado a las duraciones de `vfxSprites.burst` de más abajo:
+ * si una sube, la otra tiene que acompañar.
+ */
+const CINE_TIEMPO = 1.3;
 /**
  * Cuánto alto de mundo se ve durante el plano, en unidades.
  *
@@ -1015,8 +1022,8 @@ export async function startGame(
     beams(fx, x, y, 8, magnitude * 1.15, 0.4, teamColor);
     wave(fx, x, y - FIGHTER_HALF_HEIGHT, magnitude * 1.6, 0.55, GOLD);
     shards(fx, x, y, 8, 9, GOLD);
-    vfxSprites.burst('impacto', x, y, 1.1, 0.5, GOLD);
-    vfxSprites.burst('onda', x, y - FIGHTER_HALF_HEIGHT, 1.3, 0.55, GOLD);
+    vfxSprites.burst('impacto', x, y, 1.1, 0.75, GOLD);
+    vfxSprites.burst('onda', x, y - FIGHTER_HALF_HEIGHT, 1.3, 0.8, GOLD);
     hitstop = Math.max(hitstop, HITSTOP_SUPER);
     camera.cine = CINE_TIEMPO;
     camera.cineX = x;
@@ -1095,8 +1102,8 @@ export async function startGame(
           orb(target, x, y, 1.1, 0.34, teamColor);
           shards(target, x, y, 10, 8, teamColor);
           burst(target, x, y, 12, 9, 0.16, 0.8, teamColor);
-          vfxSprites.burst('impacto', x, y, 1.1, 0.45, teamColor);
-          vfxSprites.burst('esquirlas', x, y, 0.9, 0.4, teamColor);
+          vfxSprites.burst('impacto', x, y, 1.1, 0.65, teamColor);
+          vfxSprites.burst('esquirlas', x, y, 0.9, 0.6, teamColor);
           stop = Math.max(stop, HITSTOP_KO);
           camera.zoomTarget = 1;
           break;
@@ -1114,7 +1121,7 @@ export async function startGame(
           // El estallido del poder es exactamente el momento que se veía
           // pelado en las capturas: un círculo liso sin nada adentro. Acá va
           // la textura del impacto entero, escalada con la fuerza del golpe.
-          vfxSprites.burst('impacto', x, y, 0.7 + fuerza * 0.6, 0.34 + fuerza * 0.14, teamColor);
+          vfxSprites.burst('impacto', x, y, 0.7 + fuerza * 0.6, 0.5 + fuerza * 0.2, teamColor);
           stop = Math.max(stop, HITSTOP_SKILL);
           // La cámara se acerca al impacto y no al que disparó: lo que hay que
           // mirar es dónde reventó.
