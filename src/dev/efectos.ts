@@ -1,7 +1,6 @@
 import { Application, Container, Graphics, Text } from 'pixi.js';
 import { AdvancedBloomFilter } from 'pixi-filters/advanced-bloom';
 import { createBackdrop } from '../render/backdrop';
-import { loadFlames } from '../render/stage';
 import {
   beams, burst, createFx, drawFx, dust, flash, impact, orb, shards, slash,
   trail, updateFx, wave,
@@ -181,10 +180,7 @@ function paso(dt: number): void {
   app.renderer.background.color = backdrop.skyColor(0.58);
 }
 
-void loadFlames('verde').then(async (verdes) => {
-  const rojos = await loadFlames('rojo');
-  if (verdes !== null && rojos !== null) backdrop.useFlames(verdes, rojos);
-
+void (async () => {
   if (congelado) {
     // Paso fijo hasta la edad pedida: una captura headless tiene que dar
     // siempre el mismo cuadro, y con el reloj de pantalla no da.
@@ -205,4 +201,4 @@ void loadFlames('verde').then(async (verdes) => {
   }
   app.ticker.add(() => paso(Math.min(app.ticker.deltaMS / 1000, 0.05)));
   document.body.dataset.listo = '1';
-});
+})();

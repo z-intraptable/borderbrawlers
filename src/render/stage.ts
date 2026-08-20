@@ -1,4 +1,4 @@
-import { Assets, Rectangle, Sprite, Texture } from 'pixi.js';
+import { Assets, Sprite, Texture } from 'pixi.js';
 import { assetEmbedded, assetUrl } from '../art/assetUrl';
 
 /**
@@ -141,47 +141,6 @@ async function desdeCarpeta(carpeta: string): Promise<StagePlatforms | null> {
   ]);
   if (centro === null || lado === null) return null;
   return { centro, lado };
-}
-
-/**
- * Carga una tira de llamas, si está. La corta `scripts/hoja-fuego.py`.
- *
- * Devuelve los cuadros como sub-texturas de UNA sola fuente, igual que las hojas
- * de los personajes: las llamas de un lado son un draw call, no seis.
- *
- * Vale la misma regla que para todo el arte: que no esté no es un error. El
- * fondo se dibuja entonces con los cristales de polígonos de siempre.
- */
-export async function loadFlames(color: 'verde' | 'rojo'): Promise<Texture[] | null> {
-  const url = `/escenarios/fuego-${color}.json`;
-  let raw: unknown;
-  try {
-    const response = await fetch(assetUrl(url));
-    if (!response.ok) return null;
-    const type = response.headers.get('content-type') ?? '';
-    if (!type.includes('json')) return null;
-    raw = await response.json();
-  } catch {
-    return null;
-  }
-
-  const v = raw as { file?: unknown; cell?: unknown; frames?: unknown };
-  if (typeof v.file !== 'string' || typeof v.frames !== 'number'
-    || !Array.isArray(v.cell) || v.cell.length !== 2) return null;
-  const [ancho, alto] = v.cell as [number, number];
-  if (!(ancho > 0) || !(alto > 0) || !(v.frames > 0)) return null;
-
-  const base = await loadTexture(`/escenarios/${v.file}`);
-  if (base === null) return null;
-
-  const cuadros: Texture[] = [];
-  for (let i = 0; i < v.frames; i++) {
-    cuadros.push(new Texture({
-      source: base.source,
-      frame: new Rectangle(i * ancho, 0, ancho, alto),
-    }));
-  }
-  return cuadros;
 }
 
 export function createStage(texture: Texture): Stage {
