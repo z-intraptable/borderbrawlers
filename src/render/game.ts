@@ -52,7 +52,8 @@ import {
 } from './fx';
 import { createBackdrop } from './backdrop';
 import { createEnergyField } from './energyField';
-import { createStage, loadFlames, loadPlatforms, loadStage, stageNames, stageTint } from './stage';
+import { createStarfield } from './starfield';
+import { createStage, loadPlatforms, loadStage, stageNames, stageTint } from './stage';
 import type { StagePlatforms } from './stage';
 import { loadVfxTexturas } from './loadVfx';
 import { createVfxSprites } from './vfxSprites';
@@ -444,6 +445,8 @@ export async function startGame(
   window.visualViewport?.addEventListener('scroll', encuadrar, { passive: true });
   revisar();
 
+  const starfield = createStarfield();
+  app.stage.addChild(starfield.view);
   const backdrop = createBackdrop();
   const energyField = createEnergyField();
   backdrop.view.addChildAt(energyField.view, 0);
@@ -469,20 +472,8 @@ export async function startGame(
       ? Promise.resolve(null)
       : sinColgarse(loadPlatforms(rotation[0]), 'las losas'),
     hojas: sinColgarse(Promise.all(armatures.map((name) => loadSheets(name))), 'las hojas de sprites'),
-    fuegos: sinColgarse(
-      Promise.all([loadFlames('verde'), loadFlames('rojo')]), 'las hogueras'),
     vfx: sinColgarse(loadVfxTexturas(), 'las texturas de efectos'),
   };
-
-  // Las hogueras entran cuando llegan y nadie las espera: hasta entonces el
-  // fondo son los cristales de polígonos, que no necesitan cargar nada. Es la
-  // única carga de la pantalla que puede llegar tarde sin que se note, así que
-  // es la única que no bloquea el arranque.
-  void pedidos.fuegos.then((par) => {
-    if (par === null) return;
-    const [verdes, rojos] = par;
-    if (verdes !== null && rojos !== null) backdrop.useFlames(verdes, rojos);
-  });
 
   const stageTextures = (await pedidos.fondos ?? [])
     .filter((texture): texture is Texture => texture !== null);
@@ -871,6 +862,8 @@ export async function startGame(
     backdrop.update(greenShare, intensity, width, height, elapsed);
     energyField.resize(width, height);
     energyField.update(dt, greenShare);
+    starfield.resize(width, height);
+    starfield.update(dt, elapsed);
     const sky = backdrop.skyColor(greenShare);
     app.renderer.background.color = sky;
     stage?.update(width, height, stageTint(sky));
