@@ -51,6 +51,7 @@ import {
   trail, updateFx, wave,
 } from './fx';
 import { createBackdrop } from './backdrop';
+import { createEnergyField } from './energyField';
 import { createStage, loadFlames, loadPlatforms, loadStage, stageNames, stageTint } from './stage';
 import type { StagePlatforms } from './stage';
 import { loadVfxTexturas } from './loadVfx';
@@ -444,6 +445,8 @@ export async function startGame(
   revisar();
 
   const backdrop = createBackdrop();
+  const energyField = createEnergyField();
+  backdrop.view.addChildAt(energyField.view, 0);
   // El fondo pintado va debajo de los cristales de volumen, que son el dato.
   //
   // Con `?stage=` se fija uno y no se mueve: es el modo de mirar un escenario.
@@ -866,6 +869,8 @@ export async function startGame(
     const greenShare = total > 0 ? buy / total : 0.5;
     const intensity = Math.min(1, Math.log1p(total) / 12);
     backdrop.update(greenShare, intensity, width, height, elapsed);
+    energyField.resize(width, height);
+    energyField.update(dt, greenShare);
     const sky = backdrop.skyColor(greenShare);
     app.renderer.background.color = sky;
     stage?.update(width, height, stageTint(sky));
