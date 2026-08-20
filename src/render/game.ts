@@ -983,19 +983,26 @@ export async function startGame(
       return;
     }
 
-    // El super. Es el único momento en que vale gastar todo: onda de choque
-    // contra el piso, esquirlas doradas, dos anillos y un fogonazo. Sale una vez
-    // cada medio minuto largo, así que acá el exceso es el punto.
+    // El super. Onda de choque contra el piso, esquirlas doradas, un anillo y
+    // un fogonazo — pero YA NO los ocho a la vez encima del mismo punto.
+    //
+    // Antes iban acá `burst()` (12 chispas doradas) Y `shards()` (12 esquirlas
+    // doradas) Y las tres texturas de `vfxSprites` (impacto/onda/esquirlas),
+    // todo del mismo color, todo centrado en el mismo punto: ocho formas
+    // pisándose no se leen como ocho formas, se leen como una mancha amarilla
+    // —que es justo el efecto "decadente" que se veía en pantalla—. `shards()`
+    // y la textura `esquirlas` dibujan lo mismo (materia que salta) así que uno
+    // de los dos sobraba; `burst()` era una tercera fuente de chispas redundante
+    // con la primera. Se saca `burst()` entero y la textura `esquirlas`, y baja
+    // la cantidad de las que quedan para que se vean como formas y no como ruido.
     flash(fx, x, y, 1.05, 0.2, teamColor);
     destellar(DESTELLO_KO, 0xffffff);
     orb(fx, x, y, magnitude * 0.42, 0.42, teamColor);
-    beams(fx, x, y, 10, magnitude * 1.15, 0.4, teamColor);
+    beams(fx, x, y, 8, magnitude * 1.15, 0.4, teamColor);
     wave(fx, x, y - FIGHTER_HALF_HEIGHT, magnitude * 1.6, 0.55, GOLD);
-    shards(fx, x, y, 12, 9, GOLD);
-    burst(fx, x, y, 12, 11, 0.16, 0.7, GOLD);
-    vfxSprites.burst('impacto', x, y, 2.2, 0.5, GOLD);
-    vfxSprites.burst('onda', x, y - FIGHTER_HALF_HEIGHT, 2.6, 0.55, GOLD);
-    vfxSprites.burst('esquirlas', x, y, 1.8, 0.4, GOLD);
+    shards(fx, x, y, 8, 9, GOLD);
+    vfxSprites.burst('impacto', x, y, 2.0, 0.5, GOLD);
+    vfxSprites.burst('onda', x, y - FIGHTER_HALF_HEIGHT, 2.4, 0.55, GOLD);
     hitstop = Math.max(hitstop, HITSTOP_SUPER);
     camera.cine = CINE_TIEMPO;
     camera.cineX = x;
