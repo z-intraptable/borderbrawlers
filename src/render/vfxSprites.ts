@@ -28,17 +28,17 @@ const RAFAGAS = 10;
  * a las otras.
  */
 /**
- * Bajaron dos veces. Primero ~35% (`impacto` de 2.6 a 1.7, `onda` de 3.2 a
- * 2.1, etc.) porque el burst tapaba al personaje entero en un celular en
- * vertical. Después, al pasar las seis texturas a render fotorrealista
- * (20/08/2026), bajaron de nuevo: el arte plano de antes dejaba mucho margen
- * transparente alrededor del núcleo —era un relleno con degradé simple—,
- * pero el render realista llena el cuadrado casi entero (rayos, humo y
- * esquirlas que llegan hasta el borde de los 1024 px), así que el MISMO
- * `ESCALA` de antes se ve bastante más grande en pantalla con el arte nuevo,
- * aunque el número no haya cambiado. El personaje sigue arriba de todas las
- * capas de VFX (ver `game.ts`), así que esto es puramente el tamaño de la
- * mancha.
+ * Bajaron dos veces. Primero ~35% porque el burst tapaba al personaje entero
+ * en un celular en vertical. Después, al pasar las seis texturas primero a
+ * render fotorrealista y después (mismo día, 20/08/2026) a cel-shading estilo
+ * Dragon Ball FighterZ / Marvel vs Capcom, bajaron de nuevo: el arte plano
+ * original dejaba mucho margen transparente alrededor del núcleo, pero tanto
+ * el fotorrealismo como el cel-shading llenan el cuadrado casi entero (rayos,
+ * humo y esquirlas hasta el borde de los 1024 px), así que el MISMO `ESCALA`
+ * de antes se ve bastante más grande en pantalla con cualquiera de los dos
+ * artes nuevos, aunque el número no haya cambiado. El personaje sigue arriba
+ * de todas las capas de VFX (ver `game.ts`), así que esto es puramente el
+ * tamaño de la mancha.
  */
 const ESCALA: Record<VfxNombre, number> = {
   impacto: 1.2,
