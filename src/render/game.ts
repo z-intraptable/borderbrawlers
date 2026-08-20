@@ -45,6 +45,7 @@ import { loadSheets, unloadSheets } from '../art/loadSheets';
 import type { FighterSheets } from '../art/loadSheets';
 import { UMBRAL_GIRO_FRENTE, createSpriteFighterView } from '../art/spriteFighter';
 import { ROSTER, characterFor } from '../game/roster';
+import { detectLowQuality } from '../quality';
 import {
   beams, burst, createFx, drawFx, dust, flash, impact, orb, shards, slash,
   trail, updateFx, wave,
@@ -660,13 +661,19 @@ export async function startGame(
   const glowFx = new Graphics();
   const glowLayer = new Container();
   glowLayer.addChild(glowFx);
-  glowLayer.filters = [new AdvancedBloomFilter({
-    threshold: 0.35,
-    bloomScale: 1.25,
-    brightness: 1.05,
-    blur: 5,
-    quality: 4,
-  })];
+  // El Bloom es el filtro más caro del render: recompone la capa entera por
+  // cuadro. `detectLowQuality()` existía para saltearlo en gama media/baja
+  // pero nadie la llamaba — quedó como código muerto del pivot a Pixi y el
+  // Bloom corría siempre, sin importar el hardware.
+  if (!detectLowQuality()) {
+    glowLayer.filters = [new AdvancedBloomFilter({
+      threshold: 0.35,
+      bloomScale: 1.25,
+      brightness: 1.05,
+      blur: 5,
+      quality: 4,
+    })];
+  }
   world.addChild(glowLayer);
 
   /**

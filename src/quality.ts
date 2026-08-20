@@ -1,9 +1,10 @@
 /**
- * El modo de baja calidad se resuelve UNA vez, en el montaje. Cambiar
- * `MeshToonMaterial` por `MeshBasicMaterial` en caliente fuerza compilar y
- * linkear un `WebGLProgram` nuevo y produce un freeze visible, así que el
- * toggle de la UI remonta la escena entera con una `key` en vez de mutar
- * materiales existentes.
+ * Se resuelve UNA vez, al montar `startGame` (`src/render/game.ts`), y decide
+ * si se agrega el filtro `AdvancedBloomFilter` a `glowLayer` o no — es el
+ * filtro más caro del render y en gama media/baja se nota. No hay toggle de
+ * UI ni remontaje en caliente: Pixi no tiene el costo de recompilar
+ * `WebGLProgram` que tenía cambiar de material en three.js, así que no hace
+ * falta.
  */
 export function detectLowQuality(): boolean {
   if (typeof navigator === 'undefined') return false;
