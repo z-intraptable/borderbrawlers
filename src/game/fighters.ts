@@ -276,6 +276,16 @@ export const MAX_KNOCKBACK = 9.5;
 /** Daño que suma un empujón, escalado por el peso del que pega. */
 export const HIT_DAMAGE = 6;
 /**
+ * Puño y patada alternan (`lastBlow`) pero pegaban exactamente igual: mismo
+ * daño, mismo empuje, sólo cambiaba el dibujo. La patada pega más fuerte y
+ * más lejos —tiene más recorrido, es el golpe "grande" del combo de dos—; el
+ * puño es el rápido y barato. El promedio de los dos se mantiene igual a
+ * `HIT_DAMAGE` para no correr el ritmo de daño acumulado que ya está ajustado
+ * contra el resto de la pelea.
+ */
+export const PUNCH_DAMAGE_MULT = 0.8;
+export const KICK_DAMAGE_MULT = 1.2;
+/**
  * Cada cuánto puede entrar un golpe cuerpo a cuerpo, en segundos de SIMULACIÓN.
  *
  * Bajó de 0,35 a 0,25 al entrar `RITMO`. La pelea corre a 0,72 de velocidad para
@@ -322,9 +332,13 @@ export const STUN_BASE = 0.12;
 export const STUN_POR_EMPUJE = 0.045;
 export const STUN_MAX = 0.6;
 
-/** Daño de un empujón. Un peso pesado lastima más. */
-export function hitDamage(attackerWeight: number): number {
-  return HIT_DAMAGE * attackerWeight;
+/**
+ * Daño de un empujón. Un peso pesado lastima más, y la patada (`esPatada`)
+ * más que el puño — ver `PUNCH_DAMAGE_MULT`/`KICK_DAMAGE_MULT`.
+ */
+export function hitDamage(attackerWeight: number, esPatada: boolean): number {
+  const mult = esPatada ? KICK_DAMAGE_MULT : PUNCH_DAMAGE_MULT;
+  return HIT_DAMAGE * mult * attackerWeight;
 }
 
 /* ------------------------------------------------------------------ */
@@ -563,12 +577,14 @@ function clamp01(v: number): number {
  */
 
 /**
- * Cuánto carga la barra de equipo un trade del tamaño de la mediana. Mucho menos
- * que la personal: hacen falta unos 55 trades para llenarla, que a ritmo de
- * mercado normal es un ultra por equipo cada medio minuto largo. Un super que
- * sale cada diez segundos deja de ser un super.
+ * Cuánto carga la barra de equipo un trade del tamaño de la mediana. Bajó de
+ * 0,018 a 0,011 —hacen falta unos 90 en vez de 55— porque con mercado movido
+ * (varios cientos de trades en pocos minutos) el super salía cada pocos
+ * segundos y dejaba de leerse como el momento excepcional que es. A ritmo de
+ * mercado normal ahora es un ultra por equipo cerca del minuto; en mercado
+ * movido sigue siendo más frecuente, pero nunca al punto de sentirse spameado.
  */
-const ULTRA_PER_MEDIAN = 0.018;
+const ULTRA_PER_MEDIAN = 0.011;
 
 /**
  * A partir de acá el elegido deja de gastar en golpes y especiales: está

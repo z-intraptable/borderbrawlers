@@ -27,13 +27,22 @@ const RAFAGAS = 10;
  * factor sirve para las seis sin que ninguna quede desproporcionada respecto
  * a las otras.
  */
+/**
+ * Bajaron todas ~35% (`impacto` de 2.6 a 1.7, `onda` de 3.2 a 2.1, etc.).
+ * A los valores viejos, el burst del super tapaba al personaje entero en un
+ * celular en vertical —el punto era verse grande, terminó siendo verse
+ * SOLO—: en un viewport angosto la textura ya no tiene con qué compararse y
+ * lo que en desktop se leía como "impacto enorme" ahí se lee como una mancha
+ * que se come la pantalla. El personaje sigue arriba de todas las capas de
+ * VFX (ver `game.ts`), así que esto es puramente el tamaño de la mancha.
+ */
 const ESCALA: Record<VfxNombre, number> = {
-  impacto: 2.6,
-  orbe: 2.2,
-  tajo: 2.4,
-  onda: 3.2,
-  humo: 2.0,
-  esquirlas: 2.2,
+  impacto: 1.7,
+  orbe: 1.5,
+  tajo: 1.6,
+  onda: 2.1,
+  humo: 1.4,
+  esquirlas: 1.5,
 };
 
 interface Rafaga {

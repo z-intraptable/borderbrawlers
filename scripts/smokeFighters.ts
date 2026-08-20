@@ -151,7 +151,9 @@ console.log('\n== knockback estilo Smash ==');
     knockback(99_999, 0.1, 5).toFixed(2));
   check('un peso cero no divide por cero', Number.isFinite(knockback(100, 0, 1)));
   check('el daño de un golpe escala con el peso del que pega',
-    hitDamage(2) > hitDamage(1) && hitDamage(1) > 0);
+    hitDamage(2, false) > hitDamage(1, false) && hitDamage(1, false) > 0);
+  check('la patada pega más fuerte que el puño',
+    hitDamage(1, true) > hitDamage(1, false));
 }
 
 console.log('\n== peso desde el tamaño del trade ==');

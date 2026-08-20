@@ -968,16 +968,16 @@ export function stepMatch(
       // en hurt, que lo resuelve la capa de render con el hitstun que ya existe.
       if (golpeaI) {
         m.energy[i] -= COST_MELEE;
-        m.damage[j] += hitDamage(m.weight[i]);
-        m.hitstun[j] = now - HITSTUN + MELEE_STUN;
         m.lastBlow[i] = m.lastBlow[i] === 0 ? 1 : 0;
+        m.damage[j] += hitDamage(m.weight[i], m.lastBlow[i] === 1);
+        m.hitstun[j] = now - HITSTUN + MELEE_STUN;
         emit(m.events, EVENT_MELEE, m.x[i], m.y[i], m.lastBlow[i], m.team[i], i);
       }
       if (golpeaJ) {
         m.energy[j] -= COST_MELEE;
-        m.damage[i] += hitDamage(m.weight[j]);
-        m.hitstun[i] = now - HITSTUN + MELEE_STUN;
         m.lastBlow[j] = m.lastBlow[j] === 0 ? 1 : 0;
+        m.damage[i] += hitDamage(m.weight[j], m.lastBlow[j] === 1);
+        m.hitstun[i] = now - HITSTUN + MELEE_STUN;
         emit(m.events, EVENT_MELEE, m.x[j], m.y[j], m.lastBlow[j], m.team[j], j);
       }
 
