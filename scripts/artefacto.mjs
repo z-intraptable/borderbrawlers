@@ -79,9 +79,13 @@ def poner(ruta, datos, mime):
 # --- personajes: se reescalan al alto con el que se dibujan ---
 for carpeta in sorted((publico / 'art').iterdir()):
     if not carpeta.is_dir(): continue
-    manifiestos = list(carpeta.glob('*.json'))
-    if not manifiestos: continue
-    m = json.loads(manifiestos[0].read_text())
+    # El manifiesto del personaje se llama como la carpeta (kor/kor.json);
+    # 'hojas.json' vive al lado y no trae 'parts'. glob()[0] no está
+    # ordenado por el sistema de archivos, así que agarrar "el primer .json"
+    # a veces traía hojas.json y explotaba con KeyError: 'parts'.
+    manifiesto = carpeta / f'{carpeta.name}.json'
+    if not manifiesto.exists(): continue
+    m = json.loads(manifiesto.read_text())
     # El alto de figura en pixeles es unit * 104 (las unidades de rig que mide).
     # El factor de reescalado sale de llevar eso a ALTO_FIGURA.
     alto_px = m['unit'] * 104
@@ -98,7 +102,7 @@ for carpeta in sorted((publico / 'art').iterdir()):
         poner(f'art/{carpeta.name}/{parte["file"]}', buf.getvalue(), 'image/png')
     # unit baja con la imagen: es px por unidad de rig, y la imagen encogió.
     m['unit'] = m['unit'] * factor
-    poner(f'art/{carpeta.name}/{manifiestos[0].name}',
+    poner(f'art/{carpeta.name}/{manifiesto.name}',
           json.dumps(m).encode(), 'application/json')
 
     # --- y la hoja de sprites, si el personaje la tiene ---
