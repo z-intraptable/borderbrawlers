@@ -210,6 +210,13 @@ const CAMERA_LAMBDA = 3.2;
 const ZOOM_CLAVE = 0.3;
 const ZOOM_DECAE = 1.9;
 /**
+ * A qué velocidad `zoom` alcanza a `zoomTarget`. Separado de `CAMERA_LAMBDA`
+ * porque el acercamiento de momento clave tiene que sentirse más decidido que
+ * el paneo de encuadre normal — más lento que un salto instantáneo, más
+ * rápido que seguir la pelea.
+ */
+const ZOOM_LAMBDA = 9;
+/**
  * Hasta dónde puede subir y bajar la mirada de la cámara, como fracción del alto
  * visible. Con 0,55 el piso del escenario queda a poco más de tres cuartos de
  * pantalla: abajo del centro, arriba del marcador.
@@ -299,8 +306,15 @@ interface Camera {
   x: number;
   y: number;
   halfWidth: number;
-  /** Cuánto del acercamiento de momento clave queda puesto, de 0 a 1. */
+  /** Cuánto del acercamiento de momento clave queda puesto, de 0 a 1. Sigue a `zoomTarget` con lambda propia. */
   zoom: number;
+  /**
+   * A dónde apunta el acercamiento. Los golpes escriben ACÁ con `Math.max`, nunca
+   * en `zoom` directo — si un golpe entrando a mitad de una racha pisara `zoom` de
+   * una, el encuadre pegaría un salto en vez de acelerar la llegada. Con el target
+   * separado, la cámara siempre LLEGA en curva, aunque el destino cambie de golpe.
+   */
+  zoomTarget: number;
   /** Segundos que le quedan al plano cerrado del super. Cero es pelea normal. */
   cine: number;
   /** A quién encuadra ese plano. */
@@ -733,7 +747,7 @@ export async function startGame(
   let shockwaveX = 0;
   let shockwaveY = 0;
 
-  const camera: Camera = { x: 0, y: 2.5, halfWidth: MAX_HALF_WIDTH, zoom: 0,
+  const camera: Camera = { x: 0, y: 2.5, halfWidth: MAX_HALF_WIDTH, zoom: 0, zoomTarget: 0,
     cine: 0,
     cineX: 0,
     cineY: 0,
@@ -1061,7 +1075,7 @@ export async function startGame(
           // El super sí; la habilidad no. Si entrara con las dos, la cámara
           // estaría entrando y saliendo todo el tiempo y el acercamiento
           // dejaría de significar "esto importa".
-          if (kind === EVENT_SUPER) camera.zoom = Math.max(camera.zoom, 0.85);
+          if (kind === EVENT_SUPER) camera.zoomTarget = Math.max(camera.zoomTarget, 0.85);
           break;
         case EVENT_KO:
           // Se va de pantalla: fogonazo grande, esquirlas del color del que lo
@@ -1077,7 +1091,7 @@ export async function startGame(
           vfxSprites.burst('impacto', x, y, 2, 0.45, teamColor);
           vfxSprites.burst('esquirlas', x, y, 1.6, 0.4, teamColor);
           stop = Math.max(stop, HITSTOP_KO);
-          camera.zoom = 1;
+          camera.zoomTarget = 1;
           break;
         case EVENT_ESTALLIDO: {
           // El poder llegó y revienta. Es el momento fuerte de la jugada, así
@@ -1097,7 +1111,7 @@ export async function startGame(
           stop = Math.max(stop, HITSTOP_SKILL);
           // La cámara se acerca al impacto y no al que disparó: lo que hay que
           // mirar es dónde reventó.
-          camera.zoom = Math.max(camera.zoom, 0.45 + fuerza * 0.3);
+          camera.zoomTarget = Math.max(camera.zoomTarget, 0.45 + fuerza * 0.3);
           break;
         }
         case EVENT_SALTO:
@@ -1721,8 +1735,12 @@ function updateCamera(camera: Camera, match: Match, dt: number, aspect: number):
   const techo = Math.min(MAX_HALF_WIDTH, topeAlto);
   const piso = Math.min(MIN_HALF_WIDTH, techo);
   targetHalf = Math.max(piso, Math.min(techo, targetHalf));
-  // Y recién acá el primer plano, por encima del mínimo.
-  camera.zoom = Math.max(0, camera.zoom - dt * ZOOM_DECAE);
+  // Y recién acá el primer plano, por encima del mínimo. El target decae en
+  // línea recta —así se sentía antes—, pero lo que de verdad mueve la cámara
+  // es `zoom`, que lo persigue en curva: eso saca el salto que había cuando un
+  // golpe entraba a mitad de la vuelta de otro.
+  camera.zoomTarget = Math.max(0, camera.zoomTarget - dt * ZOOM_DECAE);
+  camera.zoom += (camera.zoomTarget - camera.zoom) * (1 - Math.exp(-ZOOM_LAMBDA * dt));
   targetHalf *= 1 - ZOOM_CLAVE * camera.zoom;
 
   const k = 1 - Math.exp(-CAMERA_LAMBDA * dt);
