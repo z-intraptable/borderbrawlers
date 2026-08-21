@@ -207,13 +207,14 @@ const CAMERA_LAMBDA = 3.2;
  * dura el hitstop de un KO más el tiempo de leer qué pasó.
  */
 /**
- * Bajó de 0,3 a 0,16. En pantalla ancha el 30% de acercamiento se notaba y
- * nada más, pero en un teléfono vertical el encuadre YA viene apretado por
- * `MAX_HALF_HEIGHT` antes de este acercamiento — los dos achican el mismo
- * ancho visible, uno multiplicado sobre el otro, y el resultado era una
- * ráfaga de VFX de pared a pared sin un peleador a la vista.
+ * Bajó de 0,3 a 0,16 y después a 0,1. El primer recorte fue para el teléfono
+ * vertical, que ya no es el objetivo (el juego se usa en horizontal). En
+ * horizontal el problema era otro: aun sin el apriete de `MAX_HALF_HEIGHT`,
+ * el acercamiento de un KO o un super seguía sintiéndose demasiado pegado al
+ * personaje — golpes y poderes "se acercan demasiado", que es distinto de
+ * "tapan al personaje" (ya resuelto aparte, en el tamaño de los VFX).
  */
-const ZOOM_CLAVE = 0.16;
+const ZOOM_CLAVE = 0.1;
 const ZOOM_DECAE = 1.9;
 /**
  * A qué velocidad `zoom` alcanza a `zoomTarget`. Separado de `CAMERA_LAMBDA`
@@ -1063,7 +1064,7 @@ export async function startGame(
           // El super sí; la habilidad no. Si entrara con las dos, la cámara
           // estaría entrando y saliendo todo el tiempo y el acercamiento
           // dejaría de significar "esto importa".
-          if (kind === EVENT_SUPER) camera.zoomTarget = Math.max(camera.zoomTarget, 0.85);
+          if (kind === EVENT_SUPER) camera.zoomTarget = Math.max(camera.zoomTarget, 0.6);
           break;
         case EVENT_KO:
           // Sacado el anillo, las esquirlas y las texturas: por más que se
@@ -1074,7 +1075,7 @@ export async function startGame(
           flash(target, x, y, 0.65, 0.18, teamColor);
           destellar(DESTELLO_KO, teamColor);
           stop = Math.max(stop, HITSTOP_KO);
-          camera.zoomTarget = 1;
+          camera.zoomTarget = 0.7;
           break;
         case EVENT_ESTALLIDO: {
           // Mismo criterio: sin bola, rayos, esquirlas ni onda — sólo el
@@ -1085,7 +1086,7 @@ export async function startGame(
           stop = Math.max(stop, HITSTOP_SKILL);
           // La cámara se acerca al impacto y no al que disparó: lo que hay que
           // mirar es dónde reventó.
-          camera.zoomTarget = Math.max(camera.zoomTarget, 0.45 + fuerza * 0.3);
+          camera.zoomTarget = Math.max(camera.zoomTarget, 0.3 + fuerza * 0.2);
           break;
         }
         case EVENT_SALTO:

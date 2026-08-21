@@ -111,7 +111,7 @@ if (duo !== null) {
 /** Lo escribe el bucle de render, lo muestrea el HUD. */
 const perf = { frameMs: 0 };
 
-const hud = mountHud(host, client.stats, match.state, symbol, source, perf);
+const hud = mountHud(host, client.stats, match.state, symbol);
 
 let mock: MockFeedHandle | null = null;
 if (source === 'mock') {
