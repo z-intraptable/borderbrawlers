@@ -1317,7 +1317,26 @@ function drawFighters(
   for (let i = 0; i < views.length; i++) {
     const view = views[i];
     if (match.slot[i] !== SLOT_ACTIVE) {
-      view.visible = false;
+      // `views` está indexado por SLOT pero las instancias son por ARMADURA
+      // (`viewByArmature`, más arriba): con seis peleadores nada más, dos
+      // slots pueden apuntar al mismo `FighterView` si uno de ellos nunca se
+      // activó. En torneo eso pasa siempre a partir del segundo relevo: el
+      // slot 1 y el slot 2 arrancan mirando a Mako y Asuri por defecto y
+      // JAMÁS se activan (en torneo sólo entra el slot 0 de cada bando), así
+      // que cuando el slot 0 relevado pasa a ser Mako, este mismo bucle —en
+      // la vuelta que le toca al slot 1, que sigue "inactivo" pero comparte
+      // la vista de Mako— la volvía a ocultar en el mismo cuadro en que el
+      // slot 0 la acababa de mostrar. Resultado: el segundo y tercer
+      // peleador del plantel casi nunca se veían. Antes de apagar una vista,
+      // hay que confirmar que ningún OTRO slot activo la esté usando ahora.
+      let enUsoPorOtro = false;
+      for (let j = 0; j < views.length; j++) {
+        if (j !== i && match.slot[j] === SLOT_ACTIVE && views[j] === view) {
+          enUsoPorOtro = true;
+          break;
+        }
+      }
+      if (!enUsoPorOtro) view.visible = false;
       // Un slot que vuelve a entrar no puede heredar la patada del anterior,
       // ni darse vuelta desde donde quedó el que se fue.
       action[i] = ACT_NONE;

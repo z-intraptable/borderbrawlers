@@ -84,6 +84,21 @@ eran círculos con glow, se leían como burbujas genéricas, no como fuego).
    funciones `orb`/`beams`/`shards` de `fx.ts` quedan sin usar en
    `game.ts` pero no se borraron de `fx.ts` por si se retoma más adelante
    con otro enfoque (menos tamaño, no cero efecto).
+8. **Bug de visibilidad entre relevos, separado del pivot de VFX**
+   (`src/render/game.ts`, `drawFighters`) — el usuario reportó que "casi
+   siempre el que pierde el round no se visualiza en el siguiente", y un
+   video mostró tramos largos de plataforma completamente vacía. Causa real:
+   `views` está indexado por SLOT pero las instancias de `FighterView` son
+   por ARMADURA (un `Map` en `viewByArmature`, seis peleadores = seis vistas
+   nada más). En torneo sólo se activa el slot 0 de cada bando; los slots 1
+   y 2 quedan para siempre "inactivos" mirando a Mako/Asuri (o WuShang/Dusk)
+   por default y nunca se tocan. Cuando el relevo hace que el slot 0 pase a
+   ser Mako, ese mismo cuadro el slot 1 —que sigue "inactivo" pero comparte
+   la misma instancia de vista— la volvía a ocultar. Resultado: el segundo y
+   tercer peleador del plantel casi nunca se veían, sólo el primero (que no
+   colisiona con ningún slot inactivo). Se corrigió comprobando, antes de
+   ocultar la vista de un slot inactivo, que ningún OTRO slot activo la esté
+   usando en este cuadro.
 6. **La bola de energía a mano, otra vuelta más** (`src/render/fx.ts`,
    `orb()`) — el paso 5 sólo achicó `vfxSprites.burst()` (las texturas) y el
    personaje siguió tapado en un video nuevo del usuario. La causa real era
