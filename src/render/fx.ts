@@ -295,6 +295,16 @@ export function dust(fx: Fx, x: number, y: number, strength: number): void {
  * siempre blanco caliente. Ésa es la regla nueva de toda esta capa: el poder se
  * dibuja igual para los seis y lo que dice de quién es, es el borde.
  */
+/**
+ * OJO al llamar: el diámetro real en pantalla es `radius * ~3.1`, no
+ * `radius * 2`. `drawFx` (más abajo, caso `FX_ORB`) dibuja seis anillos de
+ * degradé hasta `1.55 * radius` —el halo que necesita el Bloom para no
+ * cortar de golpe— más cuatro púas hasta `1.5 * radius`. Un radio de 1.1
+ * pasado sin hacer esta cuenta es un orbe de 3.4 unidades de mundo, más de
+ * tres veces el alto de un peleador (1.04) — fue justo el bug que tapaba al
+ * personaje en súper/KO/estallido: `vfxSprites.burst()` ya se había achicado
+ * pero esta bola de acá, la geometría a mano, seguía en el tamaño viejo.
+ */
 export function orb(fx: Fx, x: number, y: number, radius: number, life: number, color: number): void {
   spawn(fx, FX_ORB, x, y, 0, 0, radius, life, color, Math.random() * Math.PI);
 }

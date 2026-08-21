@@ -72,6 +72,18 @@ eran círculos con glow, se leían como burbujas genéricas, no como fuego).
    onda, tajo, orbe, esquirlas, en super/KO/estallido/especial) a bien por
    debajo de un cuerpo de diámetro. Pendiente de confirmar con capturas
    nuevas del usuario.
+6. **La bola de energía a mano, otra vuelta más** (`src/render/fx.ts`,
+   `orb()`) — el paso 5 sólo achicó `vfxSprites.burst()` (las texturas) y el
+   personaje siguió tapado en un video nuevo del usuario. La causa real era
+   otra: `orb()` —la bola dibujada a mano con `Graphics`, no una textura—
+   nunca se había tocado, y su diámetro real en pantalla es `radio × ~3,1`
+   (seis anillos de degradé hasta 1,55× el radio más las púas), no `radio ×
+   2` como parecía a simple vista. Con los números viejos (radio 1,1 en el
+   KO, hasta 1,05 en el estallido) el orbe solo medía 3-3,4 unidades de
+   mundo, tres veces el alto del peleador. Se bajaron todos los radios de
+   `orb()`/`wave()` en super/KO/estallido/especial/gigantismo a bien por
+   debajo de un cuerpo, y quedó un comentario en `fx.ts` con la cuenta para
+   no repetir el error. Pendiente de confirmar con video nuevo.
 
 ## Qué falta (lo grande)
 

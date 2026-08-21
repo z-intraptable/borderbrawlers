@@ -998,12 +998,12 @@ export async function startGame(
       const variante = magnitude >= 0.5;
       flash(fx, x, y, 0.62, 0.16, teamColor);
       if (variante) {
-        orb(fx, x + hacia * 0.3, y, 0.62, 0.3, teamColor);
+        orb(fx, x + hacia * 0.3, y, 0.22, 0.3, teamColor);
         slash(fx, x + hacia * 0.35, y, hacia > 0 ? 0 : Math.PI, 1.25, 0.24, teamColor);
         burst(fx, x, y, 8, 6.5, 0.1, 0.42, teamColor);
         vfxSprites.burst('tajo', x + hacia * 0.35, y, 0.5, 0.3, teamColor, hacia > 0 ? 0 : Math.PI);
       } else {
-        orb(fx, x, y, 0.95, 0.34, teamColor);
+        orb(fx, x, y, 0.24, 0.34, teamColor);
         beams(fx, x, y, 6, 2.1, 0.28, teamColor);
         shards(fx, x, y, 6, 5.5, teamColor);
         vfxSprites.burst('orbe', x, y, 0.5, 0.34, teamColor);
@@ -1025,9 +1025,13 @@ export async function startGame(
     // la cantidad de las que quedan para que se vean como formas y no como ruido.
     flash(fx, x, y, 1.05, 0.2, teamColor);
     destellar(DESTELLO_KO, 0xffffff);
-    orb(fx, x, y, magnitude * 0.42, 0.42, teamColor);
+    // `orb()` dibuja seis anillos de degradé hasta 1,55 veces el radio pedido
+    // —el halo del Bloom necesita ese derrame para no cortar de golpe—, así
+    // que el diámetro real en pantalla es ~radio×3,1, no ~radio×2. Con el
+    // 0,42 de antes el orbe solo ya medía más de un cuerpo entero.
+    orb(fx, x, y, magnitude * 0.22, 0.42, teamColor);
     beams(fx, x, y, 8, magnitude * 1.15, 0.4, teamColor);
-    wave(fx, x, y - FIGHTER_HALF_HEIGHT, magnitude * 1.6, 0.55, GOLD);
+    wave(fx, x, y - FIGHTER_HALF_HEIGHT, magnitude * 0.45, 0.55, GOLD);
     shards(fx, x, y, 8, 9, GOLD);
     // El burst mide ESCALA*size*1.25 de diámetro en unidades de mundo; el
     // peleador mide 1.04 de alto (FIGHTER_HALF_HEIGHT*2). El impacto solo ya
@@ -1113,7 +1117,7 @@ export async function startGame(
           // fotograma de impacto teñido: en el KO importa QUIÉN ganó el
           // intercambio, y en los demás importa el golpe y no el bando.
           destellar(DESTELLO_KO, teamColor);
-          orb(target, x, y, 1.1, 0.34, teamColor);
+          orb(target, x, y, 0.24, 0.34, teamColor);
           shards(target, x, y, 10, 8, teamColor);
           burst(target, x, y, 12, 9, 0.16, 0.8, teamColor);
           vfxSprites.burst('impacto', x, y, 0.5, 0.65, teamColor);
@@ -1128,10 +1132,10 @@ export async function startGame(
           const fuerza = Math.min(1, magnitude);
           flash(target, x, y, 0.55 + fuerza * 0.4, 0.16, 0xffffff);
           destellar(DESTELLO_TIEMPO, 0xffffff);
-          orb(target, x, y, 0.5 + fuerza * 0.55, 0.3, teamColor);
+          orb(target, x, y, 0.16 + fuerza * 0.12, 0.3, teamColor);
           beams(target, x, y, 8, 1.4 + fuerza * 1.6, 0.34, teamColor);
           burst(target, x, y, 10, 7 + fuerza * 5, 0.14, 0.62, teamColor);
-          wave(target, x, y, 1.6 + fuerza * 1.8, 0.42, teamColor);
+          wave(target, x, y, 0.5 + fuerza * 0.4, 0.42, teamColor);
           // El estallido del poder es exactamente el momento que se veía
           // pelado en las capturas: un círculo liso sin nada adentro. Acá va
           // la textura del impacto entero, escalada con la fuerza del golpe.
@@ -1177,7 +1181,7 @@ export async function startGame(
           // El anillo del gigantismo crecía con la magnitud sin tope y con una
           // ballena tapaba un quinto de la pantalla. El paso de gigantismo es
           // de uno a tres: eso es lo que tiene que decidir el tamaño.
-          orb(target, x, y, 0.42 + Math.min(3, magnitude) * 0.13, 0.38, GOLD);
+          orb(target, x, y, 0.22 + Math.min(3, magnitude) * 0.08, 0.38, GOLD);
           break;
         default:
           break;
