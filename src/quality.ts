@@ -19,5 +19,14 @@ export function detectLowQuality(): boolean {
 
   if (cores <= 4) return true;
   if (pixels > 4_000_000 && cores < 8) return true;
+  // Un iPhone reciente pasa las dos cuentas de arriba limpio —seis núcleos,
+  // viewport CSS chico— y por eso se subestimaba: `hardwareConcurrency` en
+  // Safari cuenta núcleos, no el presupuesto real de GPU compartido con
+  // batería y temperatura, que en un teléfono siempre es mucho más chico que
+  // en el escritorio con el mismo número de núcleos. `pointer: coarse` es
+  // "esto se toca con el dedo", que en la práctica es "es un teléfono o una
+  // tablet": ahí el filtro extra sobra aunque el conteo de arriba diga que no.
+  if (typeof window.matchMedia === 'function'
+    && window.matchMedia('(pointer: coarse)').matches) return true;
   return false;
 }

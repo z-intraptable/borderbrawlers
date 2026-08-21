@@ -476,8 +476,13 @@ export async function startGame(
   const starfield = createStarfield();
   app.stage.addChild(starfield.view);
   const backdrop = createBackdrop();
-  const energyField = createEnergyField();
-  backdrop.view.addChildAt(energyField.view, 0);
+  // Dos pasadas de shader (ruido + rayos) sobre la pantalla ENTERA, todos los
+  // cuadros: en gama media/baja se suma al costo de Bloom y hace caer el
+  // framerate, que es lo que se ve como "todo se mueve raro" —no es un solo
+  // movimiento roto, es que el juego entero deja de mantener el ritmo. Mismo
+  // gate que Bloom en vez de uno propio: son los mismos dispositivos.
+  const energyField = detectLowQuality() ? null : createEnergyField();
+  if (energyField !== null) backdrop.view.addChildAt(energyField.view, 0);
   // El fondo pintado va debajo de los cristales de volumen, que son el dato.
   //
   // Con `?stage=` se fija uno y no se mueve: es el modo de mirar un escenario.
@@ -888,8 +893,10 @@ export async function startGame(
     const greenShare = total > 0 ? buy / total : 0.5;
     const intensity = Math.min(1, Math.log1p(total) / 12);
     backdrop.update(greenShare, intensity, width, height, elapsed);
-    energyField.resize(width, height);
-    energyField.update(dt, greenShare);
+    if (energyField !== null) {
+      energyField.resize(width, height);
+      energyField.update(dt, greenShare);
+    }
     starfield.resize(width, height);
     starfield.update(dt, elapsed);
     const sky = backdrop.skyColor(greenShare);
