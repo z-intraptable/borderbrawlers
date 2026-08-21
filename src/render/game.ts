@@ -47,7 +47,7 @@ import { UMBRAL_GIRO_FRENTE, createSpriteFighterView } from '../art/spriteFighte
 import { ROSTER, characterFor } from '../game/roster';
 import { detectLowQuality } from '../quality';
 import {
-  beams, burst, createFx, drawFx, dust, flash, impact, orb, shards, slash,
+  burst, createFx, drawFx, dust, flash, impact, slash,
   trail, updateFx, wave,
 } from './fx';
 import { createBackdrop } from './backdrop';
@@ -80,7 +80,6 @@ import { createVfxSprites } from './vfxSprites';
 
 const GREEN = 0x00ff66;
 const RED = 0xff0055;
-const GOLD = 0xffd700;
 /**
  * Grosor DIBUJADO de las losas: la central y las ocho laterales.
  *
@@ -955,7 +954,6 @@ export async function startGame(
     const kind = golpeKind[slot];
     if (kind === 0) return;
     golpeKind[slot] = 0;
-    const magnitude = golpeMagnitud[slot];
     const teamColor = golpeEquipo[slot] === TEAM_GREEN ? GREEN : RED;
     // Hacia dónde mira el que pega. Es lo que orienta el tajo y manda las
     // chispas para adelante en vez de en círculo.
@@ -987,69 +985,27 @@ export async function startGame(
     }
 
     if (kind === ACT_SKILL) {
-      // La especial: una descarga que revienta en el lugar. Anillo —acá sí,
-      // porque es una onda de verdad y sale cada dos segundos y medio—, un
-      // fogonazo blanco al centro y un tajo ancho en la dirección en que la
-      // tiró. `magnitude` es 0 o 1: cuál de las dos le tocó, así que las dos
-      // se ven distintas.
-      // La A es un TAJO: bola chica y medialuna ancha en la dirección del golpe.
-      // La B es una DESCARGA: bola grande, rayos y esquirlas. Que se vean
-      // distintas es lo que hace que alternarlas sirva de algo.
-      const variante = magnitude >= 0.5;
-      flash(fx, x, y, 0.62, 0.16, teamColor);
-      if (variante) {
-        orb(fx, x + hacia * 0.3, y, 0.22, 0.3, teamColor);
-        slash(fx, x + hacia * 0.35, y, hacia > 0 ? 0 : Math.PI, 1.25, 0.24, teamColor);
-        burst(fx, x, y, 8, 6.5, 0.1, 0.42, teamColor);
-        vfxSprites.burst('tajo', x + hacia * 0.35, y, 0.5, 0.3, teamColor, hacia > 0 ? 0 : Math.PI);
-      } else {
-        orb(fx, x, y, 0.24, 0.34, teamColor);
-        beams(fx, x, y, 6, 2.1, 0.28, teamColor);
-        shards(fx, x, y, 6, 5.5, teamColor);
-        vfxSprites.burst('orbe', x, y, 0.5, 0.34, teamColor);
-      }
+      // La especial ya NO lleva bola de energía, rayos ni esquirlas: por más
+      // que se les bajó el tamaño dos veces, seguían tapando al personaje
+      // (ver docs/pendiente-estilo-realista.md). Se deja lo mismo que un
+      // golpe de cuerpo a cuerpo — un fogonazo corto y el tajo direccional —
+      // así que el poder se ve pero no cubre a nadie.
+      impact(fx, x, y, hacia > 0 ? 0 : Math.PI, 0.9, teamColor);
       return;
     }
 
-    // El super. Onda de choque contra el piso, esquirlas doradas, un anillo y
-    // un fogonazo — pero YA NO los ocho a la vez encima del mismo punto.
-    //
-    // Antes iban acá `burst()` (12 chispas doradas) Y `shards()` (12 esquirlas
-    // doradas) Y las tres texturas de `vfxSprites` (impacto/onda/esquirlas),
-    // todo del mismo color, todo centrado en el mismo punto: ocho formas
-    // pisándose no se leen como ocho formas, se leen como una mancha amarilla
-    // —que es justo el efecto "decadente" que se veía en pantalla—. `shards()`
-    // y la textura `esquirlas` dibujan lo mismo (materia que salta) así que uno
-    // de los dos sobraba; `burst()` era una tercera fuente de chispas redundante
-    // con la primera. Se saca `burst()` entero y la textura `esquirlas`, y baja
-    // la cantidad de las que quedan para que se vean como formas y no como ruido.
-    flash(fx, x, y, 1.05, 0.2, teamColor);
+    // El super: mismo criterio que la especial. Antes tenía onda de choque,
+    // esquirlas, anillo, fogonazo grande, tres texturas y un filtro de
+    // distorsión de pantalla — todo centrado en el personaje, que es
+    // justo lo que lo tapaba. Ahora sólo un fogonazo corto (el mismo que
+    // marca cualquier golpe fuerte) y el hitstop/cámara que ya marcan que
+    // pasó algo importante.
+    flash(fx, x, y, 0.65, 0.18, teamColor);
     destellar(DESTELLO_KO, 0xffffff);
-    // `orb()` dibuja seis anillos de degradé hasta 1,55 veces el radio pedido
-    // —el halo del Bloom necesita ese derrame para no cortar de golpe—, así
-    // que el diámetro real en pantalla es ~radio×3,1, no ~radio×2. Con el
-    // 0,42 de antes el orbe solo ya medía más de un cuerpo entero.
-    orb(fx, x, y, magnitude * 0.22, 0.42, teamColor);
-    beams(fx, x, y, 8, magnitude * 1.15, 0.4, teamColor);
-    wave(fx, x, y - FIGHTER_HALF_HEIGHT, magnitude * 0.45, 0.55, GOLD);
-    shards(fx, x, y, 8, 9, GOLD);
-    // El burst mide ESCALA*size*1.25 de diámetro en unidades de mundo; el
-    // peleador mide 1.04 de alto (FIGHTER_HALF_HEIGHT*2). El impacto solo ya
-    // salía más grande que el propio cuerpo y centrado en su misma posición
-    // —capturas reales mostraron el personaje totalmente tapado, aun estando
-    // dibujado encima en la capa Z—: un blob de luz con Bloom más grande que
-    // el cuerpo lo domina visualmente aunque el orden de dibujo sea correcto.
-    // El tamaño baja a bien por debajo de un cuerpo de diámetro.
-    vfxSprites.burst('impacto', x, y, 0.5, 0.75, GOLD);
-    vfxSprites.burst('onda', x, y - FIGHTER_HALF_HEIGHT, 0.5, 0.8, GOLD);
     hitstop = Math.max(hitstop, HITSTOP_SUPER);
     camera.cine = CINE_TIEMPO;
     camera.cineX = x;
     camera.cineY = y;
-    shockwaveTime = 0;
-    shockwaveX = x;
-    shockwaveY = y;
-    world.filters = [shockwave];
     // Y se cambia de escenario. Cambiar una textura no reconstruye nada —el
     // sprite es el mismo y el encaje se recalcula en el mismo frame, más
     // abajo—, así que el corte cae dentro del hitstop del super y no se ve un
@@ -1110,36 +1066,22 @@ export async function startGame(
           if (kind === EVENT_SUPER) camera.zoomTarget = Math.max(camera.zoomTarget, 0.85);
           break;
         case EVENT_KO:
-          // Se va de pantalla: fogonazo grande, esquirlas del color del que lo
-          // sacó y un anillo. Es el único efecto que conviene que tape.
-          flash(target, x, y, 0.95, 0.22, teamColor);
-          // Y la pantalla entera del color del que lo sacó. Es el único
-          // fotograma de impacto teñido: en el KO importa QUIÉN ganó el
-          // intercambio, y en los demás importa el golpe y no el bando.
+          // Sacado el anillo, las esquirlas y las texturas: por más que se
+          // les bajó el tamaño dos veces, seguían tapando al personaje (ver
+          // docs/pendiente-estilo-realista.md). Queda el mismo fogonazo corto
+          // que marca cualquier golpe fuerte, más el tinte de pantalla que
+          // dice de qué bando fue el KO.
+          flash(target, x, y, 0.65, 0.18, teamColor);
           destellar(DESTELLO_KO, teamColor);
-          orb(target, x, y, 0.24, 0.34, teamColor);
-          shards(target, x, y, 10, 8, teamColor);
-          burst(target, x, y, 12, 9, 0.16, 0.8, teamColor);
-          vfxSprites.burst('impacto', x, y, 0.5, 0.65, teamColor);
-          vfxSprites.burst('esquirlas', x, y, 0.4, 0.6, teamColor);
           stop = Math.max(stop, HITSTOP_KO);
           camera.zoomTarget = 1;
           break;
         case EVENT_ESTALLIDO: {
-          // El poder llegó y revienta. Es el momento fuerte de la jugada, así
-          // que se le dan las tres capas: el fogonazo que tapa, la bola con sus
-          // rayos, y las esquirlas que salen para afuera.
+          // Mismo criterio: sin bola, rayos, esquirlas ni onda — sólo el
+          // fogonazo, igual que un golpe cuerpo a cuerpo fuerte.
           const fuerza = Math.min(1, magnitude);
-          flash(target, x, y, 0.55 + fuerza * 0.4, 0.16, 0xffffff);
+          flash(target, x, y, 0.55 + fuerza * 0.2, 0.16, 0xffffff);
           destellar(DESTELLO_TIEMPO, 0xffffff);
-          orb(target, x, y, 0.16 + fuerza * 0.12, 0.3, teamColor);
-          beams(target, x, y, 8, 1.4 + fuerza * 1.6, 0.34, teamColor);
-          burst(target, x, y, 10, 7 + fuerza * 5, 0.14, 0.62, teamColor);
-          wave(target, x, y, 0.5 + fuerza * 0.4, 0.42, teamColor);
-          // El estallido del poder es exactamente el momento que se veía
-          // pelado en las capturas: un círculo liso sin nada adentro. Acá va
-          // la textura del impacto entero, escalada con la fuerza del golpe.
-          vfxSprites.burst('impacto', x, y, 0.35 + fuerza * 0.25, 0.5 + fuerza * 0.2, teamColor);
           stop = Math.max(stop, HITSTOP_SKILL);
           // La cámara se acerca al impacto y no al que disparó: lo que hay que
           // mirar es dónde reventó.
@@ -1178,10 +1120,8 @@ export async function startGame(
           dust(target, x, y - FIGHTER_HALF_HEIGHT, 1.1);
           break;
         case EVENT_GROW:
-          // El anillo del gigantismo crecía con la magnitud sin tope y con una
-          // ballena tapaba un quinto de la pantalla. El paso de gigantismo es
-          // de uno a tres: eso es lo que tiene que decidir el tamaño.
-          orb(target, x, y, 0.22 + Math.min(3, magnitude) * 0.08, 0.38, GOLD);
+          // Sin anillo: el propio cambio de tamaño del peleador ya avisa que
+          // está creciendo, no hace falta una bola de luz encima.
           break;
         default:
           break;

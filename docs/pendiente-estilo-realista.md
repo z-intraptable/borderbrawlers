@@ -72,6 +72,18 @@ eran círculos con glow, se leían como burbujas genéricas, no como fuego).
    onda, tajo, orbe, esquirlas, en super/KO/estallido/especial) a bien por
    debajo de un cuerpo de diámetro. Pendiente de confirmar con capturas
    nuevas del usuario.
+7. **Se sacaron los efectos de poder enteros** (`src/render/game.ts`,
+   `src/render/fx.ts`) — dos días de achicar tamaños (pasos 4-6) y el
+   personaje siguió tapado en video nuevo. El usuario cortó por lo sano:
+   "quitarle los efectos visuales y correr el juego solo con golpes y
+   patadas". Especial, súper, KO y estallido quedaron con el MISMO fogonazo
+   corto que ya llevaba un golpe de cuerpo a cuerpo fuerte —nada de bola de
+   energía, rayos, esquirlas, onda, texturas de `vfxSprites` ni el filtro de
+   distorsión de pantalla del súper—. El cuerpo a cuerpo (golpe y patada) no
+   se tocó: es lo único que queda con efecto propio. `ShockwaveFilter` y las
+   funciones `orb`/`beams`/`shards` de `fx.ts` quedan sin usar en
+   `game.ts` pero no se borraron de `fx.ts` por si se retoma más adelante
+   con otro enfoque (menos tamaño, no cero efecto).
 6. **La bola de energía a mano, otra vuelta más** (`src/render/fx.ts`,
    `orb()`) — el paso 5 sólo achicó `vfxSprites.burst()` (las texturas) y el
    personaje siguió tapado en un video nuevo del usuario. La causa real era
