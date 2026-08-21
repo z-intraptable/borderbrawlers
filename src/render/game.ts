@@ -1001,12 +1001,12 @@ export async function startGame(
         orb(fx, x + hacia * 0.3, y, 0.62, 0.3, teamColor);
         slash(fx, x + hacia * 0.35, y, hacia > 0 ? 0 : Math.PI, 1.25, 0.24, teamColor);
         burst(fx, x, y, 8, 6.5, 0.1, 0.42, teamColor);
-        vfxSprites.burst('tajo', x + hacia * 0.35, y, 1.1, 0.3, teamColor, hacia > 0 ? 0 : Math.PI);
+        vfxSprites.burst('tajo', x + hacia * 0.35, y, 0.5, 0.3, teamColor, hacia > 0 ? 0 : Math.PI);
       } else {
         orb(fx, x, y, 0.95, 0.34, teamColor);
         beams(fx, x, y, 6, 2.1, 0.28, teamColor);
         shards(fx, x, y, 6, 5.5, teamColor);
-        vfxSprites.burst('orbe', x, y, 1.1, 0.34, teamColor);
+        vfxSprites.burst('orbe', x, y, 0.5, 0.34, teamColor);
       }
       return;
     }
@@ -1029,8 +1029,15 @@ export async function startGame(
     beams(fx, x, y, 8, magnitude * 1.15, 0.4, teamColor);
     wave(fx, x, y - FIGHTER_HALF_HEIGHT, magnitude * 1.6, 0.55, GOLD);
     shards(fx, x, y, 8, 9, GOLD);
-    vfxSprites.burst('impacto', x, y, 1.1, 0.75, GOLD);
-    vfxSprites.burst('onda', x, y - FIGHTER_HALF_HEIGHT, 1.3, 0.8, GOLD);
+    // El burst mide ESCALA*size*1.25 de diámetro en unidades de mundo; el
+    // peleador mide 1.04 de alto (FIGHTER_HALF_HEIGHT*2). El impacto solo ya
+    // salía más grande que el propio cuerpo y centrado en su misma posición
+    // —capturas reales mostraron el personaje totalmente tapado, aun estando
+    // dibujado encima en la capa Z—: un blob de luz con Bloom más grande que
+    // el cuerpo lo domina visualmente aunque el orden de dibujo sea correcto.
+    // El tamaño baja a bien por debajo de un cuerpo de diámetro.
+    vfxSprites.burst('impacto', x, y, 0.5, 0.75, GOLD);
+    vfxSprites.burst('onda', x, y - FIGHTER_HALF_HEIGHT, 0.5, 0.8, GOLD);
     hitstop = Math.max(hitstop, HITSTOP_SUPER);
     camera.cine = CINE_TIEMPO;
     camera.cineX = x;
@@ -1109,8 +1116,8 @@ export async function startGame(
           orb(target, x, y, 1.1, 0.34, teamColor);
           shards(target, x, y, 10, 8, teamColor);
           burst(target, x, y, 12, 9, 0.16, 0.8, teamColor);
-          vfxSprites.burst('impacto', x, y, 1.1, 0.65, teamColor);
-          vfxSprites.burst('esquirlas', x, y, 0.9, 0.6, teamColor);
+          vfxSprites.burst('impacto', x, y, 0.5, 0.65, teamColor);
+          vfxSprites.burst('esquirlas', x, y, 0.4, 0.6, teamColor);
           stop = Math.max(stop, HITSTOP_KO);
           camera.zoomTarget = 1;
           break;
@@ -1128,7 +1135,7 @@ export async function startGame(
           // El estallido del poder es exactamente el momento que se veía
           // pelado en las capturas: un círculo liso sin nada adentro. Acá va
           // la textura del impacto entero, escalada con la fuerza del golpe.
-          vfxSprites.burst('impacto', x, y, 0.7 + fuerza * 0.6, 0.5 + fuerza * 0.2, teamColor);
+          vfxSprites.burst('impacto', x, y, 0.35 + fuerza * 0.25, 0.5 + fuerza * 0.2, teamColor);
           stop = Math.max(stop, HITSTOP_SKILL);
           // La cámara se acerca al impacto y no al que disparó: lo que hay que
           // mirar es dónde reventó.

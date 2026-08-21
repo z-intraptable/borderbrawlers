@@ -59,6 +59,19 @@ eran círculos con glow, se leían como burbujas genéricas, no como fuego).
    con una curva exponencial, y se bajaron los tamaños de burst y
    `ZOOM_CLAVE`. No forma parte del pivot de estilo, pero se corrigió el
    mismo día por la misma tanda de capturas.
+5. **Burst de VFX, otra vuelta** (`src/render/game.ts`) — una tanda nueva de
+   capturas (formato apaisado, distinto del teléfono portrait de la vuelta
+   anterior) mostró el personaje totalmente tapado en los 5 casos, con el
+   pedido explícito de "siempre se vean los personajes, quitamos todos los
+   efectos si es necesario". El z-order ya era correcto (el cuerpo se
+   reinserta al tope de `world` después de las capas de VFX), así que no era
+   un bug de orden de dibujo: el burst medía 1,6-2,4 veces el alto del propio
+   personaje y salía centrado en su misma posición — un blob con Bloom más
+   grande que el cuerpo lo domina visualmente aunque el cuerpo esté dibujado
+   encima. Se bajaron TODOS los `size` de `vfxSprites.burst()` (impacto,
+   onda, tajo, orbe, esquirlas, en super/KO/estallido/especial) a bien por
+   debajo de un cuerpo de diámetro. Pendiente de confirmar con capturas
+   nuevas del usuario.
 
 ## Qué falta (lo grande)
 
