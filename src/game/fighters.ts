@@ -272,7 +272,24 @@ export function shouldBrakeAtLedge(groundAhead: boolean, dx: number, dir: number
  */
 export const BASE_KNOCKBACK = 2.4;
 export const DAMAGE_SCALE = 0.022;
-export const MAX_KNOCKBACK = 9.5;
+/**
+ * Subió de 9,5 a 16 el 22/08. Hasta acá era el tope de la especial y el
+ * super, y el cuerpo a cuerpo no lanzaba nunca —"Lanzar es trabajo de las
+ * especiales y del super", quedó dicho en `stepMatch`—, así que 9,5 sólo
+ * tenía que mandar a alguien lejos de vez en cuando, con toda la pelea
+ * empujando en la misma ráfaga.
+ *
+ * Con `PODERES_ACTIVOS` en falso, el cuerpo a cuerpo pasó a ser la ÚNICA
+ * fuente de empuje, y ahí 9,5 se quedaba corto: en un 1 contra 1 real —el
+ * modo por defecto en su recta final— con daño subiendo parejo de los dos
+ * lados, medido en `y` mínimo alcanzado en 30 s de pelea sostenida, nadie
+ * llegaba ni cerca del borde del escenario (`y` no bajaba de -0,34, contra
+ * los -11 de `BLAST.minY`) por más que el daño acumulado pasara del 700%: el
+ * salto extra y el aterrizaje rápido recuperaban antes de que el empuje
+ * alcanzara a sacar a nadie. Con 16 el mismo 1 contra 1 sí termina en un KO
+ * dentro de un minuto y medio, y el torneo vuelve a poder decidir un match.
+ */
+export const MAX_KNOCKBACK = 16;
 /** Daño que suma un empujón, escalado por el peso del que pega. */
 export const HIT_DAMAGE = 6;
 /**
@@ -297,6 +314,35 @@ export const KICK_DAMAGE_MULT = 1.2;
  * esto vuelve a 0,35.
  */
 export const HIT_COOLDOWN = 0.25;
+
+/**
+ * Los combos: cadenas fijas de golpe(0)/patada(1) que reemplazan la pura
+ * alternancia de `lastBlow`. No usan ningún dibujo nuevo —el golpe 0 sigue
+ * siendo `attack_punch` y el 1 `attack_kick`— lo que cambia es el ORDEN, y que
+ * el último golpe de la cadena pega con `COMBO_FINISHER_MULT` de más. Es lo
+ * que hace que una racha se sienta como una racha (jab-jab-cruzado) y no como
+ * una moneda alternando en cada contacto.
+ */
+export const COMBO_CHAINS: readonly (readonly number[])[] = [
+  [0, 0, 1], // dos jabs y una patada de cierre
+  [1, 1, 0], // dos patadas y un puño que corta
+  [0, 1, 1], // jab de entrada y patada doble
+];
+/**
+ * Cuánto pega de más el último golpe de una cadena. El cuerpo a cuerpo SÍ
+ * lanza (ver `stepMatch`, el bloque "empujones": `knockback` + `stunFor`,
+ * escalados por el daño acumulado), así que el finisher ya sale más fuerte y
+ * aturde más por esa misma cuenta — no hace falta un número aparte para eso.
+ */
+export const COMBO_FINISHER_MULT = 1.4;
+/**
+ * Si pasó más que esto desde el último golpe CONECTADO, la cadena se cortó: el
+ * próximo golpe arranca una nueva desde el paso 0 (rotando cuál, para no
+ * repetir siempre la misma). Tres veces `HIT_COOLDOWN` porque dos golpes
+ * seguidos en un forcejeo activo siempre entran dentro de la ventana; lo que
+ * la corta es dejar de pegar, no la cadencia normal del cuerpo a cuerpo.
+ */
+export const COMBO_WINDOW = HIT_COOLDOWN * 3;
 
 /**
  * La regla que hace que una pelea escale: el empujón crece con el daño que ya

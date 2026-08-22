@@ -1,6 +1,9 @@
 import type { FeedStats, TradeRingBuffer } from '../net/feedCore';
 import type { MatchState, Skyline } from './fighters';
 import {
+  COMBO_CHAINS,
+  COMBO_FINISHER_MULT,
+  COMBO_WINDOW,
   COST_MELEE,
   COST_SKILL,
   COST_SUPER,
@@ -156,11 +159,6 @@ const LOOKAHEAD = 0.7;
 /** Cuánto queda sin control tras recibir un lanzamiento. */
 export const HITSTUN = 0.34;
 /**
- * El cuerpo a cuerpo aturde mucho menos: si aturdiera como una especial, dos
- * peleadores en contacto se paralizarían mutuamente y no pasaría nada más.
- */
-const MELEE_STUN = 0.12;
-/**
  * Separación del cuerpo a cuerpo, en unidades por segundo POR SEGUNDO.
  *
  * Es una aceleración y no un impulso, y el cambio importa. Como impulso
@@ -205,18 +203,31 @@ const CONTACT = 0.85;
  * Distancia de guardia. Apenas menor que `CONTACT` para que el cuerpo a cuerpo
  * siga saltando: si fuera mayor se quedarían mirándose sin llegar a pegarse.
  */
-const ENGAGE_RANGE = 0.78;
+const ENGAGE_RANGE = 0.7;
 /**
  * A qué distancia se vuelve a SALIR de combate.
  *
  * Que entrar y salir tengan umbrales distintos —histéresis— no es un lujo: con
- * un umbral solo, un peleador parado justo en 0,78 alterna entre "cerrar
+ * un umbral solo, un peleador parado justo en el borde alterna entre "cerrar
  * distancia" y "pelear acá" en cuadros consecutivos, y son dos velocidades
  * distintas. El resultado era un peleador vibrando en el lugar, y como el
  * dibujo se espejea según el signo de la velocidad, además parpadeaba mirando
  * a un lado y al otro. Es el ruido que se veía en los movimientos.
+ *
+ * **Bajó de 1,35 a 0,95.** Con 1,35 "enganchado" significaba cualquier cosa
+ * entre 0,85 (`CONTACT`) y 1,35: medio cuerpo de aire donde el peleador ya
+ * dejó de cerrar —`closing` se apaga acá— pero todavía no llegó a golpear. Sin
+ * un compañero cerca que lo empuje (`spread` en `separation`, que es lo único
+ * que lo mueve una vez enganchado) esa franja no tiene NINGUNA fuerza que lo
+ * saque: se queda plantado a centímetros de pegar y no pega nunca. En 3v3 casi
+ * no se notaba —siempre hay un tercero empujando— pero el torneo 1v1, que es
+ * el modo por defecto, se queda con exactamente dos peleadores en la mitad
+ * del match: confirmado con un 1 contra 1 aislado que se trababa así a los 9
+ * golpes y no volvía a conectar en 150 s simulados. Con 0,95 la franja mide
+ * un décimo de unidad en vez de medio cuerpo, y "enganchado" es casi
+ * literalmente "a distancia de golpe".
  */
-const DISENGAGE_RANGE = 1.35;
+const DISENGAGE_RANGE = 0.95;
 /**
  * Cuánto puede cambiar la velocidad horizontal por segundo.
  *
@@ -255,6 +266,25 @@ const FACE_DEADZONE = 0.32;
 const TARGET_SWITCH = 0.75;
 /** Cuánto manda la separación cuando ya no hay que cerrar distancia. */
 const SPACING_GAIN = 0.55;
+/**
+ * El goteo que mantiene enganchados a dos peleadores sin compañeros cerca.
+ *
+ * El forcejeo (`MELEE_NUDGE`, más abajo) empuja para AFUERA todo el tiempo que
+ * dura el contacto, y no tiene freno propio: nada tira para adentro salvo
+ * `spread`, que sale de `separation()` y mide distancia a los DEL PROPIO
+ * equipo. Sin un compañero cerca —el 1v1 del torneo, que es el modo por
+ * defecto, se queda con exactamente dos peleadores en la mitad de cada
+ * match— `spread` da cero, y con `desired` en cero el forcejeo tiene vía
+ * libre: empuja hasta juntito afuera de `CONTACT` y ahí se queda, sin nada
+ * que lo vuelva a acercar. Confirmado con un 1 contra 1 aislado que se
+ * trababa así a los pocos golpes y no volvía a conectar en 150 s simulados.
+ *
+ * Chico a propósito —una fracción de `RUN_SPEED`, no un cierre de distancia
+ * de verdad— para no reabrir el vaivén que resuelve la histéresis de
+ * `ENGAGE_RANGE`/`DISENGAGE_RANGE`: alcanza para ganarle al margen de
+ * `MELEE_NUDGE`, no para correr hacia el rival.
+ */
+const HOLD_PULL = 0.08;
 /** Polvo mínimo de un aterrizaje, y a qué velocidad de caída se satura. */
 const LANDING_SOFT = 0.35;
 const LANDING_FULL = 18;
@@ -517,8 +547,12 @@ export interface Match {
   energy: Float32Array;
   /** Cuál usó la última vez: se alternan. */
   lastSkill: Uint8Array;
-  /** Golpe o patada: también se alternan, contacto a contacto. */
+  /** Golpe o patada: sale de la cadena de combo activa. Ver `nextBlow`. */
   lastBlow: Uint8Array;
+  /** En qué paso de `COMBO_CHAINS[comboChain[i]]` está. Ver `nextBlow`. */
+  comboStep: Uint8Array;
+  /** Qué cadena de `COMBO_CHAINS` le toca. Rota cada vez que arranca una nueva. */
+  comboChain: Uint8Array;
 
   /**
    * A quién le toca cobrar el próximo trade de cada bando.
@@ -624,6 +658,10 @@ export function createMatch(
     energy: new Float32Array(CAPACITY),
     lastSkill: new Uint8Array(CAPACITY),
     lastBlow: new Uint8Array(CAPACITY),
+    comboStep: new Uint8Array(CAPACITY),
+    // Arranca repartido y no todos en la cadena 0: si los seis empezaran
+    // sincronizados, el primer intercambio de cada uno se ve idéntico.
+    comboChain: Uint8Array.from({ length: CAPACITY }, (_, i) => i % COMBO_CHAINS.length),
     chargeCursor: new Int8Array(2),
     ultra: new Float32Array(2),
     ultraTurn: new Uint8Array(2),
@@ -791,7 +829,7 @@ export function stepMatch(
       m.engaged[i] = closing ? 0 : 1;
       const desired = brake ? 0
         : closing ? (dir + spread * 0.5) * RUN_SPEED * boost
-          : spread * RUN_SPEED * SPACING_GAIN;
+          : (spread * SPACING_GAIN + dir * HOLD_PULL) * RUN_SPEED;
 
       if (grounded) {
         // Acelera hacia lo que quiere, no salta a ello. Ver `GROUND_ACCEL`.
@@ -949,15 +987,11 @@ export function stepMatch(
 
       const nx = distance > 1e-6 ? dx / distance : 1;
 
-      // El cuerpo a cuerpo NO lanza: acumula daño y separa apenas. Lanzar es
-      // trabajo de las especiales y del super. Es la regla de Smash, y es lo
-      // que hace que el daño acumulado signifique algo: sin ella, cada roce
-      // manda a volar y no hay nada que construir.
-      //
-      // El FORCEJEO —separarse— es gratis y pasa todos los cuadros: dos cuerpos
-      // no pueden ocupar el mismo lugar, y empujar no es pegar. Es además lo
-      // único que queda pasando cuando el libro está muerto y nadie tiene con
-      // qué golpear.
+      // El FORCEJEO —separarse— es gratis y pasa todos los cuadros, conecte o
+      // no un golpe: dos cuerpos no pueden ocupar el mismo lugar, y empujar no
+      // es pegar. Es además lo único que queda pasando cuando el libro está
+      // muerto y nadie tiene con qué golpear. El lanzamiento de verdad, más
+      // abajo (`golpeaI`/`golpeaJ`), sólo pasa si el golpe conecta.
       const empuje = nx * MELEE_NUDGE * dt;
       m.vx[j] += empuje;
       m.vx[i] -= empuje;
@@ -973,25 +1007,55 @@ export function stepMatch(
       const golpeaJ = m.energy[j] >= COST_MELEE && !guardando(m, j);
       if (!golpeaI && !golpeaJ) continue;
 
+      // Cuánto pasó desde el último golpe CONECTADO de cada uno, antes de pisar
+      // `lastHit` — es lo que decide si la cadena de combo sigue o se cortó.
+      // Ver `nextBlow`.
+      const sinceI = now - m.lastHit[i];
+      const sinceJ = now - m.lastHit[j];
+
       // Recién acá se gasta el turno: el reloj del cuerpo a cuerpo lo mueve un
       // golpe que existió, no un roce.
       m.lastHit[i] = now;
       m.lastHit[j] = now;
 
-      // Cada uno tira su golpe, alternando puño y patada. El que recibe queda
-      // en hurt, que lo resuelve la capa de render con el hitstun que ya existe.
+      // Cada uno tira su golpe, siguiendo su cadena de combo (`nextBlow`). El
+      // empuje sale de la MISMA fórmula que especiales y super —`knockback` +
+      // `stunFor`, la regla de Smash ya declarada en CLAUDE.md— y no de un
+      // aturdimiento fijo como antes.
+      //
+      // El cuerpo a cuerpo no lanzaba a propósito: para eso estaban las
+      // especiales y el super, y que el golpe chico no lance es lo que hace
+      // que el daño acumulado signifique algo. Pero con los dos apagados
+      // (`PODERES_ACTIVOS`) el cuerpo a cuerpo pasó a ser la ÚNICA fuente de
+      // empuje que queda — sin esto ningún golpe saca a nadie del escenario y
+      // ningún match termina nunca. Se confirmó con un 1 contra 1 aislado que
+      // llegó a 6000% de daño acumulado sin que pasara absolutamente nada.
+      // La fórmula de `knockback` ya está pensada para esto: al principio
+      // (`BASE_KNOCKBACK`) empuja poco, y recién con daño acumulado empuja
+      // fuerte — el mismo "golpe chico no lanza" de antes, pero ganado con
+      // números en vez de con un bando aparte del sistema.
       if (golpeaI) {
         m.energy[i] -= COST_MELEE;
-        m.lastBlow[i] = m.lastBlow[i] === 0 ? 1 : 0;
-        m.damage[j] += hitDamage(m.weight[i], m.lastBlow[i] === 1);
-        m.hitstun[j] = now - HITSTUN + MELEE_STUN;
+        const { blow, esFinisher } = nextBlow(m, i, sinceI);
+        m.lastBlow[i] = blow;
+        const force = knockback(m.damage[j], m.weight[j], m.weight[i]);
+        m.vx[j] = nx * force;
+        m.vy[j] = force * 0.5;
+        m.grounded[j] = 0;
+        m.damage[j] += hitDamage(m.weight[i], blow === 1) * (esFinisher ? COMBO_FINISHER_MULT : 1);
+        m.hitstun[j] = now - HITSTUN + stunFor(force);
         emit(m.events, EVENT_MELEE, m.x[i], m.y[i], m.lastBlow[i], m.team[i], i);
       }
       if (golpeaJ) {
         m.energy[j] -= COST_MELEE;
-        m.lastBlow[j] = m.lastBlow[j] === 0 ? 1 : 0;
-        m.damage[i] += hitDamage(m.weight[j], m.lastBlow[j] === 1);
-        m.hitstun[i] = now - HITSTUN + MELEE_STUN;
+        const { blow, esFinisher } = nextBlow(m, j, sinceJ);
+        m.lastBlow[j] = blow;
+        const force = knockback(m.damage[i], m.weight[i], m.weight[j]);
+        m.vx[i] = -nx * force;
+        m.vy[i] = force * 0.5;
+        m.grounded[i] = 0;
+        m.damage[i] += hitDamage(m.weight[j], blow === 1) * (esFinisher ? COMBO_FINISHER_MULT : 1);
+        m.hitstun[i] = now - HITSTUN + stunFor(force);
         emit(m.events, EVENT_MELEE, m.x[j], m.y[j], m.lastBlow[j], m.team[j], j);
       }
 
@@ -1288,6 +1352,24 @@ function charge(m: Match, team: number, amount: number): void {
 function guardando(m: Match, i: number): boolean {
   const team = m.team[i];
   return m.growing[team] === i && m.ultra[team] >= ULTRA_HOLD;
+}
+
+/**
+ * Qué golpe sale y si es el finisher, según la cadena de combo de `i`.
+ *
+ * Si pasó más de `COMBO_WINDOW` desde el último golpe que conectó (`sinceLast`,
+ * calculado ANTES de pisar `lastHit`), la cadena se cortó: arranca una nueva
+ * —rotando cuál, para no repetir siempre la misma— desde el paso 0.
+ */
+function nextBlow(m: Match, i: number, sinceLast: number): { blow: number; esFinisher: boolean } {
+  if (sinceLast > COMBO_WINDOW) {
+    m.comboChain[i] = (m.comboChain[i] + 1) % COMBO_CHAINS.length;
+    m.comboStep[i] = 0;
+  }
+  const chain = COMBO_CHAINS[m.comboChain[i]];
+  const step = m.comboStep[i];
+  m.comboStep[i] = (step + 1) % chain.length;
+  return { blow: chain[step], esFinisher: step === chain.length - 1 };
 }
 
 /**
