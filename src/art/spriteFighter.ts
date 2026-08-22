@@ -143,6 +143,19 @@ export function createSpriteFighterView(sheets: FighterSheets): FighterView {
 
   const sprite = new Sprite();
   rig.addChild(sprite);
+  /**
+   * El cuadro SIGUIENTE del ciclo, superpuesto con alfa, para mezclar entre
+   * los dos y no saltar de uno a otro.
+   *
+   * Sólo se usa en `run`/`idle`/`jump` — el arco continuo, donde el cuadro
+   * real es una fracción entre dos poses. En golpes (`ACT_PUNCH` y el resto)
+   * NO se usa a propósito: `ritmo()`, más abajo, ya explica por qué con dos o
+   * tres cuadros por acción la mezcla no suma nada y lo que pesa es cuánto se
+   * sostiene cada pose, no un intermedio inventado entre ellas.
+   */
+  const sprite2 = new Sprite();
+  sprite2.visible = false;
+  rig.addChild(sprite2);
 
   /** Píxeles de hoja a unidades de rig. */
   const scale = 1 / sheets.unit;
@@ -194,11 +207,51 @@ export function createSpriteFighterView(sheets: FighterSheets): FighterView {
     sprite.y = HALF - animation.ground;
   }
 
-  /** El cuadro de un ciclo que se repite, con el índice envuelto. */
+  /** Envuelve un índice de cuadro al rango del ciclo. */
+  function wrap(i: number, n: number): number {
+    const m = i % n;
+    return m < 0 ? m + n : m;
+  }
+
+  /**
+   * Dos cuadros contiguos con alfa cruzado, en vez de uno solo. `sprite`
+   * lleva el de abajo siempre opaco; `sprite2` el de arriba, con `mix` de
+   * transparencia — en `mix` 0 no se ve, y no cuesta nada tenerlo montado.
+   *
+   * Los dos cuadros pueden traer su propio centroide (`anchorX`/`anchorY`,
+   * ver `show`) y no siempre coincide entre cuadros vecinos; mezclarlos por
+   * alfa en vez de saltar de uno a otro reparte ese desajuste en el tiempo
+   * de la mezcla en lugar de mostrarlo de golpe, que es la mitad del punto.
+   */
+  function showBlended(animation: SheetAnimation, i0: number, i1: number, mix: number): void {
+    show(animation, i0);
+    sprite.alpha = 1;
+    if (mix <= 0.001 || i1 === i0) {
+      sprite2.visible = false;
+      return;
+    }
+    const frames = animation.frames;
+    const frame = frames[Math.max(0, Math.min(frames.length - 1, i1))];
+    if (frame === undefined) {
+      sprite2.visible = false;
+      return;
+    }
+    sprite2.texture = frame.texture;
+    sprite2.anchor.set(frame.anchorX, frame.anchorY);
+    sprite2.scale.set(scale);
+    sprite2.x = sprite.x;
+    sprite2.y = HALF - animation.ground;
+    sprite2.alpha = mix;
+    sprite2.visible = true;
+  }
+
+  /** El cuadro de un ciclo que se repite, mezclado con el siguiente. */
   function cycle(animation: SheetAnimation, phase: number): void {
     const n = animation.frames.length;
-    const i = Math.floor(phase * n) % n;
-    show(animation, i < 0 ? i + n : i);
+    const raw = phase * n;
+    const i0 = Math.floor(raw);
+    const mix = raw - i0;
+    showBlended(animation, wrap(i0, n), wrap(i0 + 1, n), mix);
   }
 
   /**
@@ -210,12 +263,20 @@ export function createSpriteFighterView(sheets: FighterSheets): FighterView {
    * distancia con el mismo factor. El ancho va al revés que el alto porque un
    * cuerpo que se estira se afina: es lo que hace que se lea como volumen y no
    * como un zoom.
+   *
+   * Se aplica a los dos cuadros de la mezcla — si sólo respirara el de abajo,
+   * la respiración se apagaría a mitad de cada cruce de cuadro.
    */
   function respirar(animation: SheetAnimation, fase: number): void {
     const aire = Math.sin(fase * Math.PI * 2) * RESPIRO;
-    sprite.scale.y = scale * (1 + aire);
-    sprite.scale.x = scale * (1 - aire * 0.5);
-    sprite.y = HALF - animation.ground * (1 + aire);
+    aplicarRespiro(sprite, animation, aire);
+    if (sprite2.visible) aplicarRespiro(sprite2, animation, aire);
+  }
+
+  function aplicarRespiro(target: Sprite, animation: SheetAnimation, aire: number): void {
+    target.scale.y = scale * (1 + aire);
+    target.scale.x = scale * (1 - aire * 0.5);
+    target.y = HALF - animation.ground * (1 + aire);
   }
 
   /** Cuánto se recorrió, para que la carrera avance con la distancia. */
@@ -229,6 +290,11 @@ export function createSpriteFighterView(sheets: FighterSheets): FighterView {
     const dt = Math.max(0, Math.min(0.1, elapsed - lastElapsed));
     lastElapsed = elapsed;
     travelled += Math.abs(vx) * dt;
+
+    // Por defecto no hay mezcla. Sólo `run`/`idle`/`jump`, más abajo, la
+    // prenden; `gira`, golpeado y las acciones son un solo cuadro duro y
+    // vuelven antes de llegar ahí.
+    sprite2.visible = false;
 
     // El giro pasa a mostrar el cuadro de FRENTE en vez de seguir angostando
     // el de perfil. Va antes que golpeado y que la acción a propósito: un
@@ -274,7 +340,10 @@ export function createSpriteFighterView(sheets: FighterSheets): FighterView {
       // vertical elige el cuadro directamente.
       const n = jump.frames.length;
       const subiendo = Math.max(-1, Math.min(1, vy / 9));
-      show(jump, Math.round((1 - subiendo) * 0.5 * (n - 1)));
+      const raw = (1 - subiendo) * 0.5 * (n - 1);
+      const i0 = Math.max(0, Math.min(n - 1, Math.floor(raw)));
+      const i1 = Math.max(0, Math.min(n - 1, i0 + 1));
+      showBlended(jump, i0, i1, raw - i0);
       return;
     }
 

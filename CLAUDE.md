@@ -222,10 +222,12 @@ Pipeline en capas, en orden de cuánto detalle necesita cada acción:
    instante, sobre todo con fondo pintado detrás. La solución fue un frame de
    FRENTE real para el instante del cruce, generado con Kling + Nano Banana
    Pro a partir del propio sprite del juego e inyectado con
-   `scripts/inyectar-giro.py`. **Kor, Ragnir y Mako** lo tienen generado;
-   **Asuri, WuShang y Dusk** no lo necesitaron porque su `idle` ya mira de
-   frente a cámara. `src/art/spriteFighter.ts` decide cuál mostrar según el
-   umbral de giro (`UMBRAL_GIRO_FRENTE`).
+   `scripts/inyectar-giro.py`. **Los seis** lo tienen generado — este párrafo
+   decía que Asuri, WuShang y Dusk no lo necesitaban por tener el `idle` ya de
+   frente, pero `public/art/*/hojas.json` confirma la acción `gira` presente
+   en los seis; quedó desactualizado, corregido el 2026-08-22.
+   `src/art/spriteFighter.ts` decide cuál mostrar según el umbral de giro
+   (`UMBRAL_GIRO_FRENTE`).
 
 `public/art/deadpool/` existe en disco pero **no está en el roster** —
 `src/game/roster.ts` tiene exactamente seis entradas (Kor/Mako/Asuri verdes,

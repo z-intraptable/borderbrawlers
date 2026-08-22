@@ -808,6 +808,40 @@ export async function startGame(
   let hitstop = 0;
   let elapsed = 0;
 
+  /**
+   * Interpolación de render: sin esto, `drawFighters` pinta siempre la
+   * posición del ÚLTIMO paso de física ya terminado, y como la simulación
+   * corre a pasos fijos de 1/60 s (más lento todavía escalada por `ritmo`)
+   * mientras la pantalla puede refrescar a otro ritmo, el cuerpo salta de
+   * posición en vez de deslizarse. La técnica es la de siempre en paso fijo
+   * — Glenn Fiedler, "Fix Your Timestep!" — guardar dónde estaba el
+   * peleador ANTES del último paso y mezclarlo con dónde quedó DESPUÉS,
+   * según cuánto del siguiente paso ya pasó (`accumulator / FIXED_DT`).
+   *
+   * `match.x`/`match.y` siguen siendo la verdad de la simulación — golpes,
+   * hitboxes y `cobrarGolpe` la usan tal cual — esto es sólo lo que se
+   * DIBUJA.
+   */
+  const prevX = new Float64Array(match.slot.length);
+  const prevY = new Float64Array(match.slot.length);
+  const renderX = new Float64Array(match.slot.length);
+  const renderY = new Float64Array(match.slot.length);
+  prevX.set(match.x);
+  prevY.set(match.y);
+
+  /**
+   * Lo mismo, para los poderes en vuelo. Viajan rápido —es la mecánica: salen
+   * disparados y recién estallan al llegar— así que sin esto el salto entre
+   * pasos de física se nota TODAVÍA más que en el cuerpo, que se mueve más
+   * despacio.
+   */
+  const prevPX = new Float64Array(PODERES);
+  const prevPY = new Float64Array(PODERES);
+  const renderPX = new Float64Array(PODERES);
+  const renderPY = new Float64Array(PODERES);
+  prevPX.set(match.poderes.x);
+  prevPY.set(match.poderes.y);
+
   const tick = (): void => {
     const started = performance.now();
     const frameMs = app.ticker.deltaMS;
@@ -837,6 +871,12 @@ export async function startGame(
       accumulator += Math.min(frameMs, 250) / 1000 * ritmo;
       let steps = 0;
       while (accumulator >= FIXED_DT && steps < MAX_STEPS) {
+        // Dónde estaba ANTES de este paso: es el extremo de abajo de la
+        // interpolación de más adelante.
+        prevX.set(match.x);
+        prevY.set(match.y);
+        prevPX.set(match.poderes.x);
+        prevPY.set(match.poderes.y);
         stepMatch(match, client.trades, client.stats, FIXED_DT);
         accumulator -= FIXED_DT;
         steps++;
@@ -847,6 +887,20 @@ export async function startGame(
     }
 
     if (hitstop > HITSTOP_MAX) hitstop = HITSTOP_MAX;
+
+    // La fracción del PRÓXIMO paso que ya transcurrió. En 0 se dibuja
+    // exactamente el último paso terminado (`prev === match.x`, mezcla da lo
+    // mismo); en 1 estaría en el paso siguiente, que es lo que evita el tope
+    // del bucle de arriba.
+    const alpha = Math.min(1, accumulator / FIXED_DT);
+    for (let i = 0; i < renderX.length; i++) {
+      renderX[i] = prevX[i] + (match.x[i] - prevX[i]) * alpha;
+      renderY[i] = prevY[i] + (match.y[i] - prevY[i]) * alpha;
+    }
+    for (let k = 0; k < PODERES; k++) {
+      renderPX[k] = prevPX[k] + (match.poderes.x[k] - prevPX[k]) * alpha;
+      renderPY[k] = prevPY[k] + (match.poderes.y[k] - prevPY[k]) * alpha;
+    }
 
     // Estelas: sólo el que va rápido de verdad, y siempre — también durante el
     // hitstop, porque congelar los efectos delataría la pausa.
@@ -875,8 +929,8 @@ export async function startGame(
     else placeStage(platformSprites, match);
     updateCamera(camera, match, dt, app.renderer.height / app.renderer.width);
     applyCamera(world, app, camera, match.shake);
-    drawFighters(views, match, action, actionAge, suave, dtPelea, elapsed, cobrarGolpe);
-    dibujarPoderes(poderGlow, poderInk, match, elapsed);
+    drawFighters(views, match, renderX, renderY, action, actionAge, suave, dtPelea, elapsed, cobrarGolpe);
+    dibujarPoderes(poderGlow, poderInk, match, renderPX, renderPY, elapsed);
     dibujarCine(cineBarras, app, camera.cine);
     // Con el reloj de PANTALLA, no con el de la pelea: el fogonazo entra justo
     // cuando empieza el hitstop, y si se apagara con el reloj congelado se
@@ -1310,6 +1364,7 @@ function anchoDelGiro(giro: number): number {
 
 function drawFighters(
   views: FighterView[], match: Match,
+  renderX: Float64Array, renderY: Float64Array,
   action: Uint8Array, actionAge: Float32Array,
   suave: Suavizado,
   dt: number, elapsed: number,
@@ -1346,8 +1401,12 @@ function drawFighters(
       continue;
     }
     view.visible = true;
-    view.x = match.x[i];
-    view.y = -match.y[i];
+    // La posición INTERPOLADA, no la del último paso de física a secas —
+    // ver el comentario de `prevX`/`prevY` en `startGame`. `cobrarGolpe`,
+    // más abajo, sigue usando `match.x`/`match.y`: el golpe tiene que salir
+    // donde la simulación dice que conectó, no donde el dibujo lo suaviza.
+    view.x = renderX[i];
+    view.y = -renderY[i];
 
     // La acción corre con el reloj de pantalla, no con el de la simulación: es
     // una animación, y tiene que seguir avanzando durante el hitstop o el golpe
@@ -1459,15 +1518,19 @@ function drawFighters(
  * como una luz de motor gráfico y no como algo dibujado.
  */
 function dibujarPoderes(
-  glow: Graphics, ink: Graphics, match: Match, elapsed: number,
+  glow: Graphics, ink: Graphics, match: Match,
+  renderPX: Float64Array, renderPY: Float64Array, elapsed: number,
 ): void {
   glow.clear();
   ink.clear();
   const p = match.poderes;
   for (let k = 0; k < PODERES; k++) {
     if (p.vida[k] <= 0) continue;
-    const px = p.x[k];
-    const py = -p.y[k];
+    // Posición interpolada, no la del último paso a secas — igual razón que
+    // `renderX`/`renderY` de los peleadores, y acá pesa más: un poder viaja
+    // rápido de punta a punta de la pantalla.
+    const px = renderPX[k];
+    const py = -renderPY[k];
     // En pantalla el eje Y va al revés que en el mundo, así que la cola se
     // orienta con la velocidad ya dada vuelta o apunta para el lado contrario.
     const ang = Math.atan2(-p.vy[k], p.vx[k]);

@@ -5,6 +5,13 @@ de animación sirve, antes de portar las cinco mil líneas de simulación que ya
 funcionan en la versión de Pixi. Si el método no convence, se descarta esta
 carpeta y no se perdió nada más que un día.
 
+**Fecha límite: 2026-08-29** (una semana desde que se puso esta fecha). Si para
+entonces no hay un veredicto claro de que el rigging por huesos (Método A) se ve
+mejor que el corte en piezas que ya corre en producción, esta carpeta se archiva
+sin más discusión y el esfuerzo de arte se concentra en la tubería de Pixi
+existente. No es una fecha para terminar el rig de los seis — alcanza con
+decidir sobre Asuri, que ya tiene rig de prueba armado.
+
 ## Por qué existe
 
 En la versión de Pixi los personajes se cortaban en seis piezas y se colgaban de
