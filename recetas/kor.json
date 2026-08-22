@@ -1,122 +1,122 @@
 {
-  "_": "Kor. Kit generado en fila con el prompt de recetas/PROMPT-KIT-PARTES.md y escrito por scripts/receta.py midiendo la hoja: las seis cajas son componentes del alfa, no estimaciones. Las piezas ya vienen rectas y verticales.",
+  "_": "Kor. Kit generado en fila con el prompt de recetas/PROMPT-KIT-PARTES.md y escrito por scripts/receta.py midiendo la hoja: las seis cajas son componentes del alfa, no estimaciones. Las piezas ya vienen rectas y verticales. Regenerado el 22/08 (kor-kit-v2) para sacarle el defecto de mano/pie sueltos que arrastraba el kit original desde la primera tanda.",
   "_esqueleto": "Los hombros y las caderas NO salen de dónde cayó cada pieza en la hoja —están en fila, esa posición no dice nada— sino de proporciones sobre el torso medido. Verificar con scripts/armar.py antes de dar por bueno.",
-  "_unit": "41.99: el alto de figura medido (4367 px, cabeza + torso + las dos de pierna) dividido por las 104.0 unidades de rig que mide Asuri, para que todos entren a la pelea del mismo tamaño.",
-  "source": "arte-crudo/kor-kit-alfa.png",
+  "_unit": "25.125: el alto de figura medido (2613 px, cabeza + torso + las dos de pierna) dividido por las 104.0 unidades de rig que mide Asuri, para que todos entren a la pelea del mismo tamaño.",
+  "source": "arte-crudo/kor-kit-v2-alfa.png",
   "armature": "Kor",
-  "unit": 41.99,
+  "unit": 25.125,
   "scale": 1,
   "origin": [
-    2073,
-    1784
+    940,
+    864
   ],
   "shoulders": [
     [
-      1440,
-      2052
+      676,
+      1002
     ],
     [
-      2706,
-      2052
+      1204,
+      1002
     ]
   ],
   "hips": [
     [
-      1776,
-      2757
+      816,
+      1365
     ],
     [
-      2370,
-      2757
+      1064,
+      1365
     ]
   ],
   "parts": {
     "head": {
       "box": [
-        355,
-        937,
-        1010,
-        1078
+        133,
+        522,
+        488,
+        461
       ],
       "joint": [
-        860,
-        2015
+        377,
+        983
       ]
     },
     "torso": {
       "box": [
-        1513,
-        863,
-        1120,
-        1216
+        706,
+        413,
+        467,
+        626
       ],
       "joint": [
-        2073,
-        863
+        940,
+        413
       ]
     },
     "armUpper": {
       "box": [
-        2794,
-        982,
-        350,
-        793
+        1268,
+        397,
+        220,
+        629
       ],
       "from": [
-        2969,
-        982
+        1378,
+        397
       ],
       "to": [
-        2969,
-        1775
+        1378,
+        1026
       ]
     },
     "armLower": {
       "box": [
-        3325,
-        972,
-        412,
-        1351
+        1592,
+        401,
+        240,
+        801
       ],
       "from": [
-        3531,
-        972
+        1712,
+        401
       ],
       "to": [
-        3531,
-        2323
+        1712,
+        1202
       ]
     },
     "legUpper": {
       "box": [
-        3975,
-        970,
-        407,
-        693
+        1943,
+        404,
+        277,
+        736
       ],
       "from": [
-        4178,
-        970
+        2082,
+        404
       ],
       "to": [
-        4178,
-        1663
+        2082,
+        1140
       ]
     },
     "legLower": {
       "box": [
-        4566,
-        970,
-        573,
-        1380
+        2319,
+        405,
+        299,
+        790
       ],
       "from": [
-        4852,
-        970
+        2468,
+        405
       ],
       "to": [
-        4852,
-        2350
+        2468,
+        1195
       ]
     }
   }

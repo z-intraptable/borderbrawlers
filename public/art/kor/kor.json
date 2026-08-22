@@ -1,60 +1,59 @@
 {
   "armature": "Kor",
-  "unit": 41.99,
+  "unit": 25.125,
   "rig": {
-    "armUpper": 18.885,
-    "armLower": 32.174,
-    "legUpper": 16.504,
-    "legLower": 32.865,
-    "shoulderX": 15.075,
-    "shoulderY": 6.382,
-    "hipX": 7.073,
-    "hipY": 23.172,
-    "headY": 5.501
+    "armUpper": 25.035,
+    "armLower": 31.881,
+    "legUpper": 29.294,
+    "legLower": 31.443,
+    "shoulderX": 10.507,
+    "shoulderY": 5.493,
+    "hipX": 4.935,
+    "hipY": 19.94,
+    "headY": 4.736
   },
   "parts": {
     "head": {
       "file": "head.png",
       "pivot": [
         0.5,
-        0.9353796445880452
+        1.0
       ]
     },
     "torso": {
       "file": "torso.png",
       "pivot": [
-        0.5,
-        0.05813953488372093
+        0.5011,
+        0.0
       ]
     },
     "armUpper": {
       "file": "armupper.png",
       "pivot": [
         0.5,
-        0.08394543546694648
+        0.0
       ]
     },
     "armLower": {
       "file": "armlower.png",
       "pivot": [
         0.5,
-        0.05294506949040371
+        0.0
       ]
     },
     "legUpper": {
       "file": "legupper.png",
       "pivot": [
-        0.49913862433862444,
-        0.09378663540445487
+        0.5018,
+        0.0
       ]
     },
     "legLower": {
       "file": "leglower.png",
       "pivot": [
-        0.49929645293315145,
-        0.05194805194805195
+        0.4983,
+        0.0
       ]
     }
-  },
-  "_contorno": "Piezas con contorno horneado de 1.9 unidades de rig (80 px acá), por scripts/contorno.py. Volver a pasar cortar.py lo borra: primero cortar, después contornear."
+  }
 }
