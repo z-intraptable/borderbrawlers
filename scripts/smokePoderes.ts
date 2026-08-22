@@ -1,10 +1,13 @@
 /*
  * Smoke test de los poderes a distancia.
  *
- * La regla del sistema: la especial ya no estalla encima del que la tira, sale
- * disparada, viaja, y recién estalla al llegar. Lo que se prueba es eso — que
- * sale, que se mueve, que le pega al rival lejano y no al compañero, y que no
- * se queda ninguna ranura del pool trabada.
+ * Con `PODERES_ACTIVOS = false` en match.ts, el sistema está apagado: se pidió
+ * que la pelea sea sólo de avance e impacto cuerpo a cuerpo. Lo que se prueba
+ * acá es eso — que ninguna especial sale, ninguna estalla, y el pool de
+ * poderes en vuelo se queda vacío todo el partido. Si el día de mañana se
+ * reactiva el flag, este archivo es el primero que hay que volver a escribir
+ * (las viejas aserciones — sale, viaja lejos, no le pega a un compañero — están
+ * en el historial de git de este mismo archivo).
  */
 import { TradeRingBuffer } from '../src/net/feedCore';
 import type { FeedStats } from '../src/net/feedCore';
@@ -32,7 +35,7 @@ const enVuelo = (m: ReturnType<typeof createMatch>): number => {
   return n;
 };
 
-console.log('\n== el poder sale, viaja y estalla ==');
+console.log('\n== con los poderes apagados, nadie tira ==');
 const m = createMatch(FIGHTERS_PER_TEAM, false);
 const trades = new TradeRingBuffer(256);
 for (let n = 0; n < CAPACITY; n++) {
@@ -42,43 +45,27 @@ for (let n = 0; n < 12; n++) stepMatch(m, trades, stats, 1 / 60);
 
 let disparos = 0;
 let estallidos = 0;
-let maxDistancia = 0;
 let masEnVuelo = 0;
-/** Dónde estaba el que disparó, para medir cuán lejos estalló su poder. */
-const desde = new Map<number, { x: number; y: number }>();
 
 for (let paso = 0; paso < 3600; paso++) {
-  // Órdenes de los dos lados, para que las barras se carguen y salgan poderes.
+  // Las mismas órdenes que antes hacían salir poderes: si algo se coló sin
+  // pasar por `PODERES_ACTIVOS`, este volumen lo va a disparar igual.
   if (paso % 4 === 0) {
     trades.push(paso, paso % 8 === 0 ? 'buy' : 'sell', 100, 2 + (paso % 4), false, paso);
   }
   stepMatch(m, trades, stats, 1 / 60);
   for (let e = 0; e < m.events.count; e++) {
-    if (m.events.kind[e] === EVENT_SKILL) {
-      disparos++;
-      desde.set(m.events.slot[e], { x: m.events.x[e], y: m.events.y[e] });
-    }
-    if (m.events.kind[e] === EVENT_ESTALLIDO) {
-      estallidos++;
-      const o = desde.get(m.events.slot[e]);
-      if (o) {
-        maxDistancia = Math.max(maxDistancia,
-          Math.hypot(m.events.x[e] - o.x, m.events.y[e] - o.y));
-      }
-    }
+    if (m.events.kind[e] === EVENT_SKILL) disparos++;
+    if (m.events.kind[e] === EVENT_ESTALLIDO) estallidos++;
   }
   masEnVuelo = Math.max(masEnVuelo, enVuelo(m));
   // Los eventos los drena el render; acá se drenan a mano.
   m.events.count = 0;
 }
 
-check('salen poderes', disparos > 0, `${disparos} en 60 s`);
-check('y estallan contra alguien', estallidos > 0, `${estallidos} impactos`);
-// El punto de todo el cambio: que el poder haga camino. Media unidad sería un
-// estallido pegado al cuerpo, o sea la especial vieja con otro nombre.
-check('el estallido es LEJOS de quien disparó', maxDistancia > 3,
-  `el más lejano viajó ${maxDistancia.toFixed(1)} unidades`);
-check('el pool no se satura', masEnVuelo < PODERES,
+check('no sale ningún poder', disparos === 0, `${disparos} en 60 s`);
+check('y no estalla ninguno', estallidos === 0, `${estallidos} impactos`);
+check('el pool se queda vacío', masEnVuelo === 0,
   `nunca hubo más de ${masEnVuelo} de ${PODERES} en vuelo`);
 
 console.log('\n== no le pega a los suyos ==');

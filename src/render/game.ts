@@ -1129,7 +1129,11 @@ export async function startGame(
           flash(target, x, y, 0.65, 0.18, teamColor);
           destellar(DESTELLO_KO, teamColor);
           stop = Math.max(stop, HITSTOP_KO);
-          camera.zoomTarget = 0.7;
+          // Sin acercamiento: con los poderes apagados (`PODERES_ACTIVOS` en
+          // match.ts) el KO queda como único gatillo de `zoomTarget`, y un
+          // salto de plano en cada caída es la cámara "cazando" la pelea en
+          // vez de quedarse fija mirándola. El fogonazo y el hitstop ya
+          // marcan que pasó algo; no hace falta que la cámara se mueva.
           break;
         case EVENT_ESTALLIDO: {
           // Mismo criterio: sin bola, rayos, esquirlas ni onda — sólo el

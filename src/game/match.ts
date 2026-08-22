@@ -186,6 +186,19 @@ const MELEE_NUDGE = 7;
  * Con dos segundos y medio de por medio la barra llega arriba, la especial pega
  * como corresponde, y entre una y otra lo que se ve es la pelea.
  */
+/**
+ * Si hay pelea a distancia. En falso, nadie tira poderes ni junta el ultra del
+ * equipo (ver más abajo, `aTiro` y el bucle "el ultra: la barra del equipo").
+ *
+ * Se pidió sacarlo para que la pelea sea de avance e impacto: con la especial
+ * disponible el que tenía barra se plantaba a tirar en vez de cerrar distancia
+ * (`aTiro` más abajo), y el elegido para el ultra dejaba de pegar apenas
+ * `m.ultra` pasaba `ULTRA_HOLD` (`guardando`, más abajo) para esperar el
+ * remate. Las dos cosas paraban la pelea; apagado esto, todos cierran y pegan
+ * siempre. La barra de energía sigue existiendo y sigue gastándose en
+ * cuerpo a cuerpo (`COST_MELEE`) exactamente igual.
+ */
+const PODERES_ACTIVOS = false;
 const SKILL_COOLDOWN = 2.5;
 const CONTACT = 0.85;
 /**
@@ -772,7 +785,7 @@ export function stepMatch(
       // No se traba: la especial gasta la barra ENTERA y tiene enfriamiento, así
       // que `aTiro` se apaga solo apenas dispara. Y si los dos se plantan a la
       // vez, el primero que se queda sin barra vuelve a avanzar.
-      const aTiro = target >= 0 && m.energy[i] >= COST_SKILL
+      const aTiro = PODERES_ACTIVOS && target >= 0 && m.energy[i] >= COST_SKILL
         && Math.abs(dx) <= ALCANCE * 0.8;
       const closing = Math.abs(dx) > rango && !aTiro;
       m.engaged[i] = closing ? 0 : 1;
@@ -848,6 +861,7 @@ export function stepMatch(
 
   /* --- especiales: se pagan con la barra ------------------------------- */
   for (let i = 0; i < CAPACITY; i++) {
+    if (!PODERES_ACTIVOS) continue;
     if (m.slot[i] !== SLOT_ACTIVE) continue;
     if (m.energy[i] < COST_SKILL) continue;
     if (now - m.hitstun[i] < HITSTUN) continue;
@@ -1022,6 +1036,7 @@ export function stepMatch(
 
   /* --- el ultra: la barra del equipo ---------------------------------- */
   for (let team = 0; team < 2; team++) {
+    if (!PODERES_ACTIVOS) continue;
     // A quién le toca. Si el elegido está caído le toca al siguiente vivo, pero
     // el turno NO se pierde: el ciclo es de tres y se respeta, que es lo que
     // hace que el ultra sea previsible en vez de una lotería.
@@ -1101,10 +1116,15 @@ export function stepMatch(
     drained++;
     const team = trade.side === 'buy' ? TEAM_GREEN : TEAM_RED;
     charge(m, team, chargeFromTrade(trade.size, stats.tradeMedian));
-    m.ultra[team] = addCharge(
-      m.ultra[team],
-      ultraGain(trade.size, stats.tradeMedian, team === TEAM_GREEN ? greenShare : redShare),
-    );
+    // Con los poderes apagados nadie tira el ultra (ver `PODERES_ACTIVOS`), así
+    // que cargarlo igual sólo dejaría la mecha del HUD llena para siempre sin
+    // que nada la gaste — más confuso que una barra que se queda en cero.
+    if (PODERES_ACTIVOS) {
+      m.ultra[team] = addCharge(
+        m.ultra[team],
+        ultraGain(trade.size, stats.tradeMedian, team === TEAM_GREEN ? greenShare : redShare),
+      );
+    }
 
     if (spawned >= MAX_SPAWNS_PER_STEP) continue;
     const slot = freeSlot(m, team);
