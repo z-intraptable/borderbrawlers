@@ -338,12 +338,17 @@ export function createSpriteFighterView(sheets: FighterSheets): FighterView {
       // El salto no cicla: se recorre según en qué parte del arco está. Subir es
       // la primera mitad de la hoja y caer la segunda, así que la velocidad
       // vertical elige el cuadro directamente.
+      //
+      // SIN blend acá, a propósito — se probó (`showBlended`, como en
+      // `cycle`) y se sacó: los cuadros del salto no son un ciclo con poses
+      // vecinas parecidas, son un arco amplio con los brazos en posiciones
+      // bien distintas de un extremo al otro. Mezclarlos por alfa no suaviza
+      // nada, deja un puño fantasma flotando cerca del hombro mientras
+      // cambia de cuadro — visto en captura, cuadro por cuadro, con
+      // `scripts/demo-video.mjs`.
       const n = jump.frames.length;
       const subiendo = Math.max(-1, Math.min(1, vy / 9));
-      const raw = (1 - subiendo) * 0.5 * (n - 1);
-      const i0 = Math.max(0, Math.min(n - 1, Math.floor(raw)));
-      const i1 = Math.max(0, Math.min(n - 1, i0 + 1));
-      showBlended(jump, i0, i1, raw - i0);
+      show(jump, Math.round((1 - subiendo) * 0.5 * (n - 1)));
       return;
     }
 
