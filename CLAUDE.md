@@ -362,16 +362,29 @@ No hay TODOs ni FIXMEs en `src/`. Lo que sigue abierto, a nivel de commits y
 del banco de Godot en curso:
 
 1. **El banco de Godot** (`godot/`) — decidir si el rigging por huesos
-   reemplaza el corte en piezas, y si conviene portar la simulación.
-2. **Correr contra Binance de verdad, de punta a punta, en un entorno con
-   salida de red real** — no se pudo ejercitar en este sandbox.
+   reemplaza el corte en piezas, y si conviene portar la simulación. Sigue sin
+   arrancar: `godot/personajes/asuri/` sólo tiene el dibujo de referencia
+   (`asuri.png`), no hay `asuri.tscn` — ver `godot/LEEME.md`.
+2. ~~Correr contra Binance de verdad, de punta a punta~~ — **hecho el
+   2026-08-23**, en local (Windows, `npm run dev` sin `?source=mock`): conecta
+   sin errores contra `wss://data-stream.binance.vision`. El sandbox de
+   Claude Code on the web sigue sin salida de red real (proxy de la sesión
+   devuelve 403 a `data-stream.binance.vision` y `api.binance.com`), así que
+   esto necesita seguir probándose desde una máquina o VPS sin ese proxy.
 3. **`server/` (grabador/replay)** no tiene commits desde que se implementó
    (`6bb017a`, `67f857a`); sigue sin haber corrido contra Binance real ni
-   contra disco real, por la misma razón que el punto 2.
+   contra disco real, por la misma razón de red que tenía el punto 2 (mismo
+   camino para probarlo: local o VPS, no este sandbox).
 4. Medir el presupuesto de frame en una GPU real — los números de este
    sandbox salen de SwiftShader por software y sólo valen para comparar draw
    calls, no fps.
-5. `web/` sin confirmar si está actualizado (ver arriba).
+5. ~~`web/` sin confirmar si está actualizado~~ — **hecho el 2026-08-23**:
+   estaba desactualizado (18/08, previo al HUD compacto, a apagar los poderes
+   a distancia y a la regeneración del arte de Kor), regenerado con
+   `scripts/artefacto.mjs`. De paso se corrigieron dos bugs del script: las
+   hojas `.webp` se reescribían siempre como PNG (deshacía la compresión de
+   `6252154`) y el bundle de esbuild no definía `import.meta.env`, así que el
+   artefacto crasheaba entero al arrancar.
 
 ## Nota legal
 
