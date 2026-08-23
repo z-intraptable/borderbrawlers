@@ -276,6 +276,114 @@ export function shouldBrakeToTurn(
 }
 
 /* ------------------------------------------------------------------ */
+/* El plan: qué hacer, no cómo moverse                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Capa de planificación, arriba de las primitivas de movimiento de más
+ * arriba (`pickTarget`, `separation`, `wantsJump`, `shouldBrakeAtLedge`,
+ * `shouldBrakeToTurn`). Esas siguen ejecutando el plan vigente cuadro a
+ * cuadro — quién sigue siendo "cómo moverse". Esto es "qué hacer": cada
+ * tanto (`REPLAN_INTERVAL` en match.ts, no cada cuadro — sería carísimo
+ * para seis unidades a 60 fps y además se vería nervioso) se evalúan un
+ * puñado de acciones candidatas y se elige la de mejor puntaje, mirando un
+ * paso adelante para las dos que exponen (especial y super): qué le
+ * conviene contestar al rival, y cuánto le resta a la apuesta.
+ *
+ * Reemplaza al viejo `aTiro` —una sola condición si/no calculada cada
+ * cuadro— por una decisión explícita, deliberada, y que compara alternativas
+ * en vez de responder a un único umbral. Sigue sin haber azar: empates se
+ * resuelven por el orden de `CANDIDATAS`, siempre el mismo.
+ */
+export const ACCION_ACERCAR = 0;
+export const ACCION_RETIRAR = 1;
+export const ACCION_SOSTENER = 2;
+export const ACCION_ESPECIAL = 3;
+export const ACCION_SUPER = 4;
+
+const CANDIDATAS = [
+  ACCION_ACERCAR, ACCION_RETIRAR, ACCION_SOSTENER, ACCION_ESPECIAL, ACCION_SUPER,
+] as const;
+
+/** Lo que un peleador ve de sí mismo (o del rival, para el paso 1-ply) al planear. */
+export interface PlanContext {
+  /** Distancia horizontal absoluta al rival. */
+  distancia: number;
+  /** Barra propia, 0 a 1. */
+  energia: number;
+  /** Alcance de la especial (`ALCANCE` en match.ts). */
+  alcance: number;
+  /** Si retirarse lo manda al vacío: no hay piso detrás. */
+  cercaDelBorde: boolean;
+  /** % de daño acumulado propio y del rival. */
+  dañoPropio: number;
+  dañoRival: number;
+}
+
+/**
+ * Puntaje de UNA acción candidata para el contexto dado. Más alto es mejor;
+ * `-Infinity` es "no se puede" (sin barra, sin alcance, al borde del vacío).
+ */
+export function puntajeAccion(accion: number, ctx: PlanContext): number {
+  switch (accion) {
+    case ACCION_SUPER:
+      if (ctx.energia < COST_SUPER) return -Infinity;
+      // Más que el techo de la especial (4 + 1×2 = 6, con la barra llena):
+      // con las dos listas a la vez, gana el remate. Conviene todavía más
+      // cuanto más daño acumuló el rival: el super lo manda lejos con menos
+      // empuje si ya viene golpeado.
+      return 7 + ctx.dañoRival * 0.02;
+    case ACCION_ESPECIAL:
+      if (ctx.energia < COST_SKILL || ctx.distancia > ctx.alcance) return -Infinity;
+      // Cuanto más cargada, más vale la pena tirarla ya en vez de acercarse.
+      return 4 + ctx.energia * 2;
+    case ACCION_RETIRAR:
+      if (ctx.cercaDelBorde) return -Infinity;
+      // Conviene retirarse cuando uno mismo acumuló más daño que el rival:
+      // el próximo golpe que se reciba duele más que el que se da.
+      return (ctx.dañoPropio - ctx.dañoRival) * 0.03;
+    case ACCION_SOSTENER:
+      return 0.5;
+    case ACCION_ACERCAR:
+    default:
+      return 1;
+  }
+}
+
+/**
+ * El árbol de decisión completo: puntúa las candidatas y devuelve la mejor.
+ *
+ * El "1-ply" del minimax simple: a especial y super, que exponen al que las
+ * tira (quieto un instante, la barra a cero después), se les resta lo mejor
+ * que el rival podría contestar ahora mismo con SU contexto (`ctxRival`) —
+ * no lo que el rival vaya a hacer de verdad, sino el techo de lo que podría,
+ * que es lo que un rival racional puede aprovechar. Si esa resta lo empareja
+ * o le gana a `ACCION_ACERCAR`, no vale la pena abrir el juego.
+ */
+export function planear(ctx: PlanContext, ctxRival: PlanContext): number {
+  let mejor = ACCION_ACERCAR;
+  let mejorPuntaje = -Infinity;
+  for (const accion of CANDIDATAS) {
+    let puntaje = puntajeAccion(accion, ctx);
+    if (puntaje === -Infinity) continue;
+    if (accion === ACCION_ESPECIAL || accion === ACCION_SUPER) {
+      const contraEspecial = puntajeAccion(ACCION_ESPECIAL, ctxRival);
+      const contraSuper = puntajeAccion(ACCION_SUPER, ctxRival);
+      const respuesta = Math.max(
+        contraEspecial === -Infinity ? 0 : contraEspecial,
+        contraSuper === -Infinity ? 0 : contraSuper,
+      );
+      puntaje -= respuesta * 0.3;
+    }
+    if (puntaje > mejorPuntaje) {
+      mejorPuntaje = puntaje;
+      mejor = accion;
+    }
+  }
+  return mejor;
+}
+
+/* ------------------------------------------------------------------ */
 /* Golpes                                                              */
 /* ------------------------------------------------------------------ */
 

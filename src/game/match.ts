@@ -2,10 +2,15 @@ import type { FeedStats, TradeRingBuffer } from '../net/feedCore';
 import type { MatchState, Skyline } from './fighters';
 import { characterFor } from './roster';
 import {
+  ACCION_ACERCAR,
+  ACCION_ESPECIAL,
+  ACCION_RETIRAR,
+  ACCION_SUPER,
   COMBO_CHAINS,
   COMBO_FINISHER_MULT,
   COMBO_WINDOW,
   COST_SKILL,
+  COST_SUPER,
   HIT_COOLDOWN,
   SLOT_ACTIVE,
   SLOT_FREE,
@@ -23,6 +28,7 @@ import {
   knockback,
   momentumBoost,
   pickTarget,
+  planear,
   separation,
   shouldBrakeAtLedge,
   shouldBrakeToTurn,
@@ -34,6 +40,7 @@ import {
   teamMomentum,
   wantsJump,
 } from './fighters';
+import type { PlanContext } from './fighters';
 import type { MoveResult } from './physics';
 import { createMoveResult, step as physicsStep } from './physics';
 
@@ -179,6 +186,13 @@ const MELEE_NUDGE = 7;
  * como corresponde, y entre una y otra lo que se ve es la pelea.
  */
 const SKILL_COOLDOWN = 2.5;
+/**
+ * Cada cuánto se vuelve a evaluar el plan (`planear` en fighters.ts), en
+ * segundos de simulación. Evaluarlo cada cuadro sería carísimo para seis
+ * unidades a 60 fps y además se vería nervioso -- un peleador cambiando de
+ * plan constantemente no se lee como una decisión, se lee como un tic.
+ */
+const REPLAN_INTERVAL = 0.4;
 const CONTACT = 0.85;
 /**
  * Distancia de guardia. Apenas menor que `CONTACT` para que el cuerpo a cuerpo
@@ -517,6 +531,15 @@ export interface Match {
   lastTurn: Float32Array;
   /** Cuándo tiró su última especial. Ver `SKILL_COOLDOWN`. */
   lastSkillAt: Float32Array;
+  /**
+   * El plan vigente (`ACCION_*` en fighters.ts) y cuándo se decidió.
+   * `REPLAN_INTERVAL` marca cada cuánto se vuelve a evaluar — no cada
+   * cuadro, sería carísimo para seis unidades a 60 fps y además se vería
+   * nervioso. Entre una replanificación y la siguiente, el bloque de
+   * movimiento ejecuta el plan con las mismas primitivas de siempre.
+   */
+  plan: Uint8Array;
+  lastPlan: Float32Array;
   hitstun: Float32Array;
   whale: Uint8Array;
   /**
@@ -630,6 +653,8 @@ export function createMatch(
     engaged: new Uint8Array(CAPACITY),
     lastTurn: new Float32Array(CAPACITY),
     lastSkillAt: new Float32Array(CAPACITY),
+    plan: new Uint8Array(CAPACITY).fill(ACCION_ACERCAR),
+    lastPlan: new Float32Array(CAPACITY),
     hitstun: new Float32Array(CAPACITY),
     whale: new Uint8Array(CAPACITY),
     scale: new Float32Array(CAPACITY).fill(1),
@@ -754,21 +779,49 @@ export function stepMatch(
       // `DISENGAGE_RANGE`. Con un umbral solo esto es un control de todo o nada
       // y el peleador oscila alrededor de la frontera.
       const rango = m.engaged[i] === 1 ? DISENGAGE_RANGE : ENGAGE_RANGE;
-      // **Con el poder cargado y el rival a tiro, no va a buscarlo.** Se planta
-      // y lo castiga de lejos.
-      //
-      // Es el cambio de flujo que pedía el 1v1: con la especial pegada al cuerpo
-      // el único plan posible era correr hacia el otro, así que los dos se
-      // pasaban el match encimados y saltando. Ahora el que tiene barra elige
-      // distancia, tira, se queda en cero, y recién entonces vuelve a entrar. Ese
-      // ida y vuelta es la pelea; el forcejeo permanente no lo era.
-      //
-      // No se traba: la especial gasta la barra ENTERA y tiene enfriamiento, así
-      // que `aTiro` se apaga solo apenas dispara. Y si los dos se plantan a la
-      // vez, el primero que se queda sin barra vuelve a avanzar.
-      const aTiro = target >= 0 && m.energy[i] >= COST_SKILL
-        && Math.abs(dx) <= ALCANCE * 0.8;
-      const closing = Math.abs(dx) > rango && !aTiro;
+
+      // **El plan.** Se re-evalúa cada `REPLAN_INTERVAL`, no cada cuadro (ver
+      // su comentario) — entre una vuelta y la siguiente, el peleador sigue
+      // ejecutando lo último que decidió. Sin rival no hay nada que planear:
+      // se cae de vuelta en ACERCAR, que con `target < 0` ya vale "caminar
+      // hacia el centro" más abajo, en `desired`.
+      if (target >= 0 && now - m.lastPlan[i] >= REPLAN_INTERVAL) {
+        const ctx: PlanContext = {
+          distancia: Math.abs(dx),
+          energia: m.energy[i],
+          alcance: ALCANCE,
+          cercaDelBorde: !hasGroundAhead(m.skyline, m.x[i], -dir, LOOKAHEAD),
+          dañoPropio: m.damage[i],
+          dañoRival: m.damage[target],
+        };
+        const ctxRival: PlanContext = {
+          distancia: ctx.distancia,
+          energia: m.energy[target],
+          alcance: ALCANCE,
+          cercaDelBorde: !hasGroundAhead(m.skyline, m.x[target], dir, LOOKAHEAD),
+          dañoPropio: m.damage[target],
+          dañoRival: m.damage[i],
+        };
+        m.plan[i] = planear(ctx, ctxRival);
+        m.lastPlan[i] = now;
+      } else if (target < 0) {
+        m.plan[i] = ACCION_ACERCAR;
+      }
+
+      // Ejecutar el plan con energía DE AHORA, no la de cuando se planeó: si
+      // ya se gastó la barra en este mismo paso (ver el bucle de especiales
+      // más abajo, que corre después) o el enfriamiento no dejó, `aTiro`
+      // tiene que apagarse aunque el plan siga diciendo ESPECIAL hasta la
+      // próxima vuelta. Mismo criterio para el super.
+      const aTiro = m.plan[i] === ACCION_ESPECIAL && target >= 0
+        && m.energy[i] >= COST_SKILL && Math.abs(dx) <= ALCANCE * 0.8;
+      const tirandoSuper = m.plan[i] === ACCION_SUPER && m.energy[i] >= COST_SUPER;
+      // Con el super listo tampoco se acerca ni tira la especial: se planta
+      // igual que `aTiro`, sólo que a esperar su propio turno de descargarlo
+      // (ver el bloque del super, más abajo).
+      const retirando = m.plan[i] === ACCION_RETIRAR;
+      const moveDir = retirando ? -dir : dir;
+      const closing = m.plan[i] === ACCION_ACERCAR && Math.abs(dx) > rango;
       m.engaged[i] = closing ? 0 : 1;
       // Frena antes de girar en vez de acelerar para el otro lado ya: sin esto
       // `vx` cruzaba al signo nuevo antes de que `TURN_COOLDOWN` dejara girar
@@ -776,10 +829,10 @@ export function stepMatch(
       // atrás. Sólo aplica fuera del cuerpo a cuerpo -- ver el comentario de
       // `mira`, ahí la mirada ya no sigue a `vx`.
       const turning = m.engaged[i] !== 1
-        && shouldBrakeToTurn(m.vx[i], m.facing[i], dir, TURN_BRAKE_SPEED);
+        && shouldBrakeToTurn(m.vx[i], m.facing[i], moveDir, TURN_BRAKE_SPEED);
       const desired = brake || turning ? 0
-        : closing ? (dir + spread * 0.5) * RUN_SPEED * boost
-          : (spread * SPACING_GAIN + dir * HOLD_PULL) * RUN_SPEED;
+        : closing ? (moveDir + spread * 0.5) * RUN_SPEED * boost
+          : (spread * SPACING_GAIN + moveDir * HOLD_PULL) * RUN_SPEED;
 
       if (grounded) {
         // Acelera hacia lo que quiere, no salta a ello. Ver `GROUND_ACCEL`.
@@ -797,18 +850,17 @@ export function stepMatch(
       // vueltas -- así el giro del dibujo nunca llega después que la velocidad.
       const mira = m.engaged[i] === 1 && target >= 0
         ? (Math.abs(dx) > FACE_DEADZONE ? dir : m.facing[i])
-        : Math.abs(m.vx[i]) <= TURN_BRAKE_SPEED ? dir
+        : Math.abs(m.vx[i]) <= TURN_BRAKE_SPEED ? moveDir
           : m.facing[i];
       if (mira !== m.facing[i] && now - m.lastTurn[i] >= TURN_COOLDOWN) {
         m.facing[i] = mira;
         m.lastTurn[i] = now;
       }
 
-      // El que está por tirar tampoco salta: el poder viaja recto y en el aire
-      // no se puede corregir la puntería. Además es la otra mitad de lo que se
-      // veía como *"se la pasan saltando"* — la mitad de los saltos eran para
-      // alcanzar en altura a alguien al que ahora le puede disparar.
-      const jump = !aTiro
+      // El que está por tirar (especial o super) tampoco salta: el poder
+      // viaja recto y en el aire no se puede corregir la puntería, y el
+      // super pierde alcance si sale de un salto a medias.
+      const jump = !aTiro && !tirandoSuper
         && wantsJump({ grounded, dy, dx, groundAhead, sinceJump: now - m.lastJump[i] });
       // Recuperación: cayéndose por debajo del escenario gasta el salto extra.
       // Sin esto el primer empujón es siempre KO y no hay pelea.
@@ -848,19 +900,29 @@ export function stepMatch(
     }
   }
 
-  // El super (`unleash`, más abajo, usa `COST_SUPER`) ya no depende del
-  // gigantismo por turnos de equipo, que se sacó con el pivot de 2026-08-23
-  // (ver CLAUDE.md). Todavía no lo dispara nadie: probé darle prioridad
-  // sobre la especial acá mismo y el resultado fue un super cada vez que la
-  // barra pasaba 0,6 —bastaba UN trade grande— sin dejar pasar nunca ni una
-  // especial ni un golpe, todo el partido volando por el aire. Decidir
-  // CUÁNDO conviene esperar el super en vez de la especial es justamente el
-  // trabajo de la IA con planificación de la Fase 2; hasta que exista, el
-  // super queda cableado (`unleash`, `COST_SUPER`) pero sin quién lo tire.
-
-  /* --- especiales: se pagan con la barra ------------------------------- */
+  /* --- super: lo dispara el plan, no un umbral suelto ------------------- */
+  // Ya no depende del gigantismo por turnos de equipo (sacado con el pivot
+  // de 2026-08-23, ver CLAUDE.md). La primera versión de esto disparaba
+  // apenas `energy >= COST_SUPER`, sin mirar nada más, y el resultado fue un
+  // super cada vez que la barra cruzaba 0,6 -- bastaba UN trade grande --
+  // sin dejar pasar nunca ni una especial ni un golpe. `planear` es lo que
+  // arregla eso: sólo elige `ACCION_SUPER` cuando el puntaje le gana a
+  // acercarse, sostener o tirar la especial, así que dispara cuando
+  // conviene y no en cuanto es posible.
   for (let i = 0; i < CAPACITY; i++) {
     if (m.slot[i] !== SLOT_ACTIVE) continue;
+    if (m.plan[i] !== ACCION_SUPER) continue;
+    if (m.energy[i] < COST_SUPER) continue;
+    if (now - m.hitstun[i] < HITSTUN) continue;
+    const spent = m.energy[i];
+    m.energy[i] = 0;
+    unleash(m, i, now, spent);
+  }
+
+  /* --- especiales: las dispara el plan, se pagan con la barra ---------- */
+  for (let i = 0; i < CAPACITY; i++) {
+    if (m.slot[i] !== SLOT_ACTIVE) continue;
+    if (m.plan[i] !== ACCION_ESPECIAL) continue;
     if (m.energy[i] < COST_SKILL) continue;
     if (now - m.hitstun[i] < HITSTUN) continue;
     if (now - m.lastSkillAt[i] < SKILL_COOLDOWN) continue;
@@ -1268,6 +1330,10 @@ function activate(m: Match, slot: number, team: number, now: number): void {
   // La barra arranca vacía: un peleador que acaba de entrar todavía no tiene
   // órdenes atrás. Las primeras que lleguen de su lado se la cargan.
   m.energy[slot] = 0;
+  // Sin plan heredado del que ocupaba el slot antes: entra a acercarse, y
+  // que decida de nuevo apenas tenga rival.
+  m.plan[slot] = ACCION_ACERCAR;
+  m.lastPlan[slot] = 0;
 
   // Repartidos por carril: los tres apareciendo en el mismo punto caen uno
   // encima del otro y arrancan la pelea amontonados.
@@ -1285,14 +1351,10 @@ function activate(m: Match, slot: number, team: number, now: number): void {
 /**
  * El super. No usa el knockback normal a propósito: tiene que sacar del
  * escenario aunque el rival esté con 0% de daño, o no se distingue de un
- * empujón cualquiera.
- *
- * Exportada sin uso todavía dentro de este archivo: nadie la llama desde el
- * pivot de 2026-08-23 (ver CLAUDE.md) hasta que la Fase 2 -- la IA con
- * planificación -- decida cuándo conviene tirar el super. `export` es sólo
- * para que el compilador no la marque como código muerto mientras tanto.
+ * empujón cualquiera. Lo dispara `planear` (Fase 2, ver CLAUDE.md) al elegir
+ * `ACCION_SUPER`, no un umbral suelto -- ver el bloque "super" en `stepMatch`.
  */
-export function unleash(m: Match, self: number, now: number, spent: number): void {
+function unleash(m: Match, self: number, now: number, spent: number): void {
   // Lo que se gastó gradúa el remate: al mínimo pega poco más que el super de
   // antes, con la barra llena pega un tercio más.
   const power = 0.6 + spent * 0.7;
