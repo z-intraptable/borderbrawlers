@@ -28,6 +28,7 @@ import {
   pickTarget,
   separation,
   shouldBrakeAtLedge,
+  shouldBrakeToTurn,
   skillDamage,
   skillForce,
   stunFor,
@@ -238,12 +239,19 @@ const DISENGAGE_RANGE = 0.95;
  */
 const GROUND_ACCEL = 34;
 /**
- * Velocidad mínima para darse vuelta, y cuánto tiene que pasar entre una vuelta
- * y la siguiente. El que está peleando ni siquiera mira su velocidad: mira a su
- * rival, que es lo que hace un peleador.
+ * Cuánto tiene que pasar entre una vuelta y la siguiente. El que está
+ * peleando ni siquiera mira su velocidad: mira a su rival, que es lo que hace
+ * un peleador.
  */
-const TURN_SPEED = 1.2;
 const TURN_COOLDOWN = 0.4;
+/**
+ * Por debajo de esta velocidad se considera "frenado" y puede dar la vuelta.
+ * Ver `shouldBrakeToTurn`: sin este freno `vx` cruzaba al signo nuevo antes de
+ * que `TURN_COOLDOWN` dejara girar el dibujo, y el peleador caminaba para
+ * atrás. Chica a propósito: frenar y girar son dos pasos separados, no el
+ * mismo umbral leído dos veces.
+ */
+const TURN_BRAKE_SPEED = 0.3;
 /**
  * Cuánto tiene que estar corrido el rival para que valga la pena darse vuelta.
  *
@@ -827,7 +835,14 @@ export function stepMatch(
         && Math.abs(dx) <= ALCANCE * 0.8;
       const closing = Math.abs(dx) > rango && !aTiro;
       m.engaged[i] = closing ? 0 : 1;
-      const desired = brake ? 0
+      // Frena antes de girar en vez de acelerar para el otro lado ya: sin esto
+      // `vx` cruzaba al signo nuevo antes de que `TURN_COOLDOWN` dejara girar
+      // el dibujo, y el que estaba yendo a algún lado se veía caminando para
+      // atrás. Sólo aplica fuera del cuerpo a cuerpo -- ver el comentario de
+      // `mira`, ahí la mirada ya no sigue a `vx`.
+      const turning = m.engaged[i] !== 1
+        && shouldBrakeToTurn(m.vx[i], m.facing[i], dir, TURN_BRAKE_SPEED);
+      const desired = brake || turning ? 0
         : closing ? (dir + spread * 0.5) * RUN_SPEED * boost
           : (spread * SPACING_GAIN + dir * HOLD_PULL) * RUN_SPEED;
 
@@ -842,11 +857,12 @@ export function stepMatch(
       // **A quién mira.** El que está peleando mira a su rival y punto: en el
       // forcejeo la velocidad cambia de signo constantemente y el dibujo se
       // espejea con ella, así que atarle la mirada a `vx` lo dejaba parpadeando.
-      // El que está yendo hacia algún lado sí mira hacia donde va, pero con una
-      // zona muerta y un tiempo mínimo entre vueltas.
+      // El que está yendo hacia algún lado mira hacia donde va, pero recién
+      // cuando ya frenó (ver `turning` arriba) y con un tiempo mínimo entre
+      // vueltas -- así el giro del dibujo nunca llega después que la velocidad.
       const mira = m.engaged[i] === 1 && target >= 0
         ? (Math.abs(dx) > FACE_DEADZONE ? dir : m.facing[i])
-        : Math.abs(m.vx[i]) > TURN_SPEED ? (m.vx[i] >= 0 ? 1 : -1)
+        : Math.abs(m.vx[i]) <= TURN_BRAKE_SPEED ? dir
           : m.facing[i];
       if (mira !== m.facing[i] && now - m.lastTurn[i] >= TURN_COOLDOWN) {
         m.facing[i] = mira;

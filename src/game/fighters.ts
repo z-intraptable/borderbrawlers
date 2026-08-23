@@ -259,6 +259,22 @@ export function shouldBrakeAtLedge(groundAhead: boolean, dx: number, dir: number
   return Math.sign(dx) !== dir || Math.abs(dx) < 0.4;
 }
 
+/**
+ * ¿Frena en vez de acelerar para el otro lado?
+ *
+ * `GROUND_ACCEL` revierte `vx` en una fracción de segundo, pero girar el
+ * dibujo tiene su propio enfriamiento (`TURN_COOLDOWN`) para no parpadear. Sin
+ * este freno, `vx` cruza al signo nuevo ANTES de que el cooldown deje girar el
+ * sprite, y el peleador se ve caminando para atrás: corriendo hacia un lado
+ * con el dibujo todavía mirando el otro. Frenando hasta `brakeSpeed` antes de
+ * dejar acelerar de nuevo, la velocidad nunca le gana la carrera al dibujo.
+ */
+export function shouldBrakeToTurn(
+  vx: number, facing: number, dir: number, brakeSpeed: number,
+): boolean {
+  return dir !== facing && Math.abs(vx) > brakeSpeed;
+}
+
 /* ------------------------------------------------------------------ */
 /* Golpes                                                              */
 /* ------------------------------------------------------------------ */

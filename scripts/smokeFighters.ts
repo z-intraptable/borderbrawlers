@@ -32,6 +32,7 @@ import {
   platformIndexAt,
   separation,
   shouldBrakeAtLedge,
+  shouldBrakeToTurn,
   teamMomentum,
   TEAMMATE_SPACING,
   weightFor,
@@ -134,6 +135,16 @@ console.log('\n== frenar en el borde ==');
   check('frena si el rival está para el otro lado', shouldBrakeAtLedge(false, -5, 1));
   check('se tira al vacío si el rival está del otro lado', !shouldBrakeAtLedge(false, 5, 1));
   check('frena si el rival está encima suyo', shouldBrakeAtLedge(false, 0.1, 1));
+}
+
+console.log('\n== frenar antes de girar, no caminar para atrás ==');
+{
+  check('mirando para donde va, no frena', !shouldBrakeToTurn(3, 1, 1, 0.3));
+  check('quieto y quiere girar, no hace falta frenar más', !shouldBrakeToTurn(0.1, 1, -1, 0.3));
+  check('corriendo rápido para un lado y el objetivo cambió de lado: frena',
+    shouldBrakeToTurn(3, 1, -1, 0.3));
+  check('el signo de vx no importa, sólo si mira para donde va',
+    shouldBrakeToTurn(-3, 1, -1, 0.3));
 }
 
 console.log('\n== knockback estilo Smash ==');
