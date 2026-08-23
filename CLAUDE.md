@@ -22,7 +22,7 @@ React, three ni Rapier en `src/`.
 
 ## Estado
 
-`tsc --noEmit` limpio en strict, `npm test` en verde (7 suites, ~130 asserts,
+`tsc --noEmit` limpio en strict, `npm test` en verde (10 suites,
 sin red ni browser), `npm run build` sin errores.
 
 | Capa | Archivos | Qué hace |
@@ -117,6 +117,12 @@ tipeado terminaba abriendo un WebSocket a la URL literal `undefined`.
   vendedor. Por eso `roster.ts` viene partido al medio con el bando fijo por
   personaje, y nada se tiñe en runtime.
 - **Hosting**: sitio estático, destino previsto Vercel.
+- **Pivot de 2026-08-23: la pelea ya no depende del mercado, salvo la barra
+  de fuerza de especial/super.** Decisión nueva sobre las viejas de spawn
+  por trade, peso por tamaño de trade, y gigantismo/plataformas por
+  liquidez del libro — el detalle punto por punto está en "El juego", más
+  abajo. Sigue sin haber azar: `planear` (la IA con planificación nueva)
+  es tan determinista como el resto de la simulación.
 
 ---
 
@@ -148,24 +154,63 @@ min) se simula en microsegundos en los tests, sin esperar de verdad.
 
 ## El juego
 
-- **Los trades hacen aparecer peleadores y les dan peso.** El tamaño del trade
-  define el peso del golpe; una ballena entra como peso pesado. El flujo
-  agresor acumulado carga la barra de fuerza de cada equipo — de ahí salen
-  los golpes de cuerpo a cuerpo y las especiales, no de un reloj con azar.
-- **Gigantismo y super.** Cuando la liquidez de un lado pasa el 56% del libro,
-  ese equipo agranda a UNO de los suyos en tres pasos; al tercero descarga un
-  super que despide a todo rival en el radio y vuelve a tamaño normal. De a
-  uno: con los tres creciendo a la vez no se entiende qué pasó. La cámara
-  corta al que lo tira durante el super (`845e13d`).
+- **Pivot de 2026-08-23: la pelea ya no depende del mercado, salvo la barra
+  de maná.** Decisión nueva sobre una vieja — ver el detalle punto por punto
+  más abajo. Lo único que el feed de Binance sigue alimentando es la barra
+  de fuerza que habilita especiales y super; spawn, peso, gigantismo y
+  plataformas dejaron de estar atados al libro. El motivo: llevar el juego a
+  su techo de calidad requiere dos peleadores siempre en cancha gobernados
+  por una IA con planificación real, no un visualizador que aparece y
+  desaparece según el flujo — ver la auditoría de Smash/Brawlhalla en el
+  historial de esta conversación para el razonamiento completo.
+- **Los seis están siempre en cancha, sin esperar ningún trade.** Antes un
+  trade puntual disparaba el alta (`activate`); ahora `relevar` llena
+  cualquier slot libre apenas hay lugar, en torneo y en melé por igual. El
+  peso es un stat FIJO por personaje (`ROSTER[].weight`, parejo en 1 por
+  ahora — placeholder a ajustar jugando), no algo que trae el trade.
+- **Sin gigantismo.** Existió: cuando la liquidez de un lado pasaba el 56%
+  del libro, ese equipo agrandaba a uno de los suyos en tres pasos y al
+  tercero descargaba el super. Se sacó entero —`growthScale`, `bookShare`,
+  `shouldGrow`, la barra de equipo (`ultra`/`ultraTurn`)— junto con la
+  dependencia del libro. `m.scale[]` sigue existiendo en 1 fijo porque el
+  render y la física ya lo multiplican al tamaño del cuerpo.
+- **El super lo dispara la IA con planificación, no el gigantismo ni un
+  umbral suelto.** Cada peleador tiene su barra personal (la misma que paga
+  la especial); al llegar a `COST_SUPER` el super queda DISPONIBLE, pero
+  recién sale cuando `planear` (`fighters.ts`) lo elige por sobre acercarse,
+  sostener o tirar la especial — ver "La IA con planificación" más abajo. La
+  primera versión, que lo disparaba apenas cruzaba el umbral, terminaba en
+  super-spam: bastaba un trade grande para que nadie pudiera pegar ni tirar
+  una especial en todo el partido.
+- **El golpe básico (puño/patada) es gratis.** Ya no gasta la barra de
+  fuerza — sale de un cooldown propio, sin mirar el mercado. La barra
+  queda 100% para especial y super, que es literalmente lo único que el
+  mercado sigue decidiendo en la pelea.
 - **El daño es la regla de Smash**: cuanto más acumulado, más lejos sale el
   empujón — sin eso la pelea es plana.
-- **El libro es el escenario.** Losa central ancha (`CENTER_HALF_WIDTH`) más
-  dos plataformas laterales por costado que suben y bajan con la liquidez.
-  Bajó de cuatro repisas angostas a dos anchas por costado: con cuatro,
-  ninguna medía más de 1,6 cuerpos y no eran plataformas, eran repisas.
+- **El escenario es fijo.** Antes las plataformas subían y bajaban con la
+  liquidez del libro (`updateStageFromBook`, sacada entera); ahora la losa
+  central ancha (`CENTER_HALF_WIDTH`) y las dos plataformas laterales por
+  costado quedan en su posición default para siempre. Bajó de cuatro
+  repisas angostas a dos anchas por costado en su momento: con cuatro,
+  ninguna medía más de 1,6 cuerpos y no eran plataformas, eran repisas —
+  esa parte del layout no cambió con el pivot, sólo dejó de moverse.
 - **Poderes a distancia.** Una especial no estalla encima de quien la tira:
   sale disparada, viaja, y recién estalla al llegar (o al pool cíclico de
   hasta ~12 en vuelo). No le pega a los propios.
+- **La IA con planificación (`planear` en `fighters.ts`), no un reactivo
+  puro.** Cada peleador reevalúa su plan —acercarse, retirarse, sostener,
+  tirar la especial, tirar el super— cada `REPLAN_INTERVAL` (0,4 s de
+  simulación, no cada cuadro: sería carísimo para seis unidades a 60 fps y
+  se vería nervioso). Es un árbol de decisión con un paso de mirada
+  adelante (1-ply, en el sentido de minimax): a especial y super, que
+  exponen al que las tira, se les resta lo mejor que el rival podría
+  contestar ahora mismo con su propio contexto. Entre una replanificación y
+  la siguiente, las primitivas de movimiento de siempre (`pickTarget`,
+  `separation`, `wantsJump`, `shouldBrakeAtLedge`, `shouldBrakeToTurn`)
+  ejecutan el plan vigente — la capa nueva decide QUÉ hacer, no CÓMO
+  moverse. Sigue sin haber azar: los empates se resuelven por el orden fijo
+  de las candidatas.
 - **Torneo 1v1 por defecto.** Cada bando manda uno; el que gana se queda, el
   que cae no vuelve y entra el siguiente de la plantilla; el bando que se
   queda sin sus tres pierde el match. Ceremonia de cierre de `CEREMONIA = 7`
@@ -173,7 +218,8 @@ min) se simula en microsegundos en los tests, sin esperar de verdad.
   quién ganó. `?modo=melee` da los seis sueltos a la vez, útil para mirar el
   motor con todo lleno.
 - **El fondo reacciona al volumen por lado**: hoguera verde y roja, cielo
-  teñido hacia el que domina. El super rota el escenario pintado
+  teñido hacia el que domina — esto no lo tocó el pivot, sigue leyendo el
+  libro en vivo. El super rota el escenario pintado
   (`public/escenarios/lista.json`, generado por `npm run escenarios` porque
   `public/` no pasa por Vite y el browser no puede listar carpetas); el corte
   cae dentro del hitstop del super para no verse como un parpadeo suelto.
@@ -314,7 +360,7 @@ servidor.
 ## Tests
 
 ```bash
-npm test           # 7 suites, sin red ni browser
+npm test           # 10 suites, sin red ni browser
 npm run test:mem   # smokeFeedCore con --expose-gc, mide heap retenido
 ```
 
@@ -322,11 +368,13 @@ npm run test:mem   # smokeFeedCore con --expose-gc, mide heap retenido
 |---|---|
 | `smokeFeedCore.ts` | Núcleo del feed: parseo, reconexión, backoff. Relojes y sockets falsos |
 | `smokeMockFeed.ts` | El generador sintético |
-| `smokeFighters.ts` | Reglas de pelea puras: cargas, daño, empuje, gigantismo |
+| `smokeFighters.ts` | Reglas de pelea puras: cargas, daño, empuje, el super |
 | `smokePhysics.ts` | Controlador de personaje: gravedad, snap a plataformas, caída |
 | `smokePoderes.ts` | Poderes a distancia: salen, viajan, estallan lejos de quien los tiró, no le pegan a los propios, el pool no se satura |
-| `smokeRoster.ts` | No hay relevos: siempre los mismos seis, el que cae reaparece él mismo |
-| `smokeTorneo.ts` | Regla del torneo 1v1: gana y se queda, cae y no vuelve, pierde sin los tres |
+| `smokeRoster.ts` | Los seis siempre en cancha sin esperar un trade; el que cae reaparece él mismo |
+| `smokeTorneo.ts` | Regla del torneo 1v1: gana y se queda, cae y no vuelve, pierde sin los tres, el relevo no espera al mercado |
+| `smokeCombos.ts` | Cadenas de combo del cuerpo a cuerpo: el orden declarado, el finisher pega de más, un silencio largo corta la cadena |
+| `smokePlanner.ts` | La IA con planificación: qué acción se puede y cuál conviene, el árbol completo con la respuesta del rival restada, determinismo |
 
 `cd server && npm test` — formato de grabación y servidor de replay, contra
 el `BinanceFeedClient` real con un `socketFactory` de Node, sin red.
