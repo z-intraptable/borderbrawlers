@@ -39,9 +39,11 @@ LISTA = RAIZ / 'shots' / 'blancos.json'
 CLARO = 232
 GRIS = 14
 #: Fracción del cuadro a partir de la cual una región vale la pena mirar.
-#: A 0,4% salen 166 regiones y casi todas son dientes, ojos y hebillas. Lo que
-#: el operador ve como "fondo blanco sin recortar" empieza arriba del 1,2%.
-UMBRAL = 0.012
+#: A 0,4% salen 166 regiones y casi todas son dientes, ojos y hebillas. El
+#: corte estaba en 1,2% pero los parches de skill/jump de Kor (23/08) medían
+#: 0,9-1,05% y se veían perfectamente en el juego: 0,8% los agarra sin volver
+#: al ruido de los dientes.
+UMBRAL = 0.008
 
 
 def etiquetar(mask: np.ndarray) -> list[np.ndarray]:
