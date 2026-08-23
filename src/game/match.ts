@@ -1,12 +1,11 @@
 import type { FeedStats, TradeRingBuffer } from '../net/feedCore';
 import type { MatchState, Skyline } from './fighters';
+import { characterFor } from './roster';
 import {
   COMBO_CHAINS,
   COMBO_FINISHER_MULT,
   COMBO_WINDOW,
-  COST_MELEE,
   COST_SKILL,
-  COST_SUPER,
   HIT_COOLDOWN,
   SLOT_ACTIVE,
   SLOT_FREE,
@@ -15,11 +14,9 @@ import {
   TEAM_GREEN,
   TEAM_RED,
   addCharge,
-  bookShare,
   chargeFromTrade,
   createMatchState,
   createSkyline,
-  growthScale,
   hasGroundAhead,
   hitDamage,
   isKO,
@@ -34,12 +31,8 @@ import {
   stunFor,
   skillRadius,
   superForce,
-  ULTRA_HOLD,
-  ultraGain,
-  ultraStage,
   teamMomentum,
   wantsJump,
-  weightFor,
 } from './fighters';
 import type { MoveResult } from './physics';
 import { createMoveResult, step as physicsStep } from './physics';
@@ -185,19 +178,6 @@ const MELEE_NUDGE = 7;
  * Con dos segundos y medio de por medio la barra llega arriba, la especial pega
  * como corresponde, y entre una y otra lo que se ve es la pelea.
  */
-/**
- * Si hay pelea a distancia. En falso, nadie tira poderes ni junta el ultra del
- * equipo (ver más abajo, `aTiro` y el bucle "el ultra: la barra del equipo").
- *
- * Se pidió sacarlo para que la pelea sea de avance e impacto: con la especial
- * disponible el que tenía barra se plantaba a tirar en vez de cerrar distancia
- * (`aTiro` más abajo), y el elegido para el ultra dejaba de pegar apenas
- * `m.ultra` pasaba `ULTRA_HOLD` (`guardando`, más abajo) para esperar el
- * remate. Las dos cosas paraban la pelea; apagado esto, todos cierran y pegan
- * siempre. La barra de energía sigue existiendo y sigue gastándose en
- * cuerpo a cuerpo (`COST_MELEE`) exactamente igual.
- */
-const PODERES_ACTIVOS = false;
 const SKILL_COOLDOWN = 2.5;
 const CONTACT = 0.85;
 /**
@@ -298,7 +278,6 @@ const LANDING_SOFT = 0.35;
 const LANDING_FULL = 18;
 const SPAWN_Y = 8;
 const SPAWN_X = 5.5;
-const MAX_SPAWNS_PER_STEP = 4;
 /**
  * Techo de trades leídos por paso. Es más alto que el de altas porque cargar es
  * mucho más barato que dar de alta, y porque un trade que no carga a nadie es un
@@ -411,7 +390,6 @@ export const EVENT_HIT = 0;
 export const EVENT_KO = 1;
 export const EVENT_SUPER = 2;
 export const EVENT_LAND = 3;
-export const EVENT_GROW = 4;
 export const EVENT_SKILL = 5;
 export const EVENT_MELEE = 6;
 /**
@@ -541,7 +519,12 @@ export interface Match {
   lastSkillAt: Float32Array;
   hitstun: Float32Array;
   whale: Uint8Array;
-  stage: Uint8Array;
+  /**
+   * Tamaño visual, 1 siempre. Quedó del gigantismo (ver el pivot de
+   * 2026-08-23 en CLAUDE.md, que lo sacó); el array sobrevive porque el
+   * render y `physicsStep` ya lo multiplican al tamaño del cuerpo, y tocar
+   * esas dos lecturas no valía el riesgo por sacar un `* 1`.
+   */
   scale: Float32Array;
   claims: Uint8Array;
   /**
@@ -572,17 +555,6 @@ export interface Match {
    */
   chargeCursor: Int8Array;
 
-  /**
-   * La barra de ultra de cada equipo, de 0 a 1. La cargan las mismas órdenes que
-   * las personales, moduladas por la cuota del libro. Al llenarse le da el super
-   * al peleador al que le toca, y el turno pasa al siguiente.
-   */
-  ultra: Float32Array;
-  /** A qué carril del bando le toca el próximo ultra: 0, 1, 2 y vuelve. */
-  ultraTurn: Uint8Array;
-
-  /** Quién está creciendo por equipo, -1 si nadie. */
-  growing: Int8Array;
   /**
    * Cuántos carriles de los tres usa cada bando. Es lo único que separa un 3v3
    * de un 1v1: los slots de los carriles de más quedan libres para siempre, y
@@ -660,7 +632,6 @@ export function createMatch(
     lastSkillAt: new Float32Array(CAPACITY),
     hitstun: new Float32Array(CAPACITY),
     whale: new Uint8Array(CAPACITY),
-    stage: new Uint8Array(CAPACITY),
     scale: new Float32Array(CAPACITY).fill(1),
     claims: new Uint8Array(CAPACITY),
     energy: new Float32Array(CAPACITY),
@@ -671,9 +642,6 @@ export function createMatch(
     // sincronizados, el primer intercambio de cada uno se ve idéntico.
     comboChain: Uint8Array.from({ length: CAPACITY }, (_, i) => i % COMBO_CHAINS.length),
     chargeCursor: new Int8Array(2),
-    ultra: new Float32Array(2),
-    ultraTurn: new Uint8Array(2),
-    growing: Int8Array.from([-1, -1]),
     lanes: Math.min(FIGHTERS_PER_TEAM, Math.max(1, Math.round(lanes))),
     torneo,
     caidos: new Uint8Array(2),
@@ -706,39 +674,6 @@ export function createMatch(
 }
 
 const move: MoveResult = createMoveResult();
-
-export function updateStageFromBook(
-  m: Match,
-  bidQtys: Float64Array,
-  bidCount: number,
-  askQtys: Float64Array,
-  askCount: number,
-  qtyMedian: number,
-): void {
-  const reference = qtyMedian > 0 ? qtyMedian : 1;
-  for (let i = 1; i < PLATFORM_COUNT; i++) m.targetY[i] = PLATFORM_MIN_Y;
-
-  // Los 20 niveles de cada lado se reparten entre sus 4 plataformas.
-  const perPlatform = Math.ceil(bidCount / PLATFORMS_PER_SIDE) || 1;
-  for (let level = 0; level < bidCount; level++) {
-    const slot = Math.min(PLATFORMS_PER_SIDE - 1, Math.floor(level / perPlatform));
-    const height = Math.log1p(bidQtys[level] / reference) * 2.2;
-    const index = 1 + slot;
-    if (height > m.targetY[index]) m.targetY[index] = height;
-  }
-  const perAsk = Math.ceil(askCount / PLATFORMS_PER_SIDE) || 1;
-  for (let level = 0; level < askCount; level++) {
-    const slot = Math.min(PLATFORMS_PER_SIDE - 1, Math.floor(level / perAsk));
-    const height = Math.log1p(askQtys[level] / reference) * 2.2;
-    const index = 1 + PLATFORMS_PER_SIDE + slot;
-    if (height > m.targetY[index]) m.targetY[index] = height;
-  }
-
-  for (let i = 1; i < PLATFORM_COUNT; i++) {
-    if (m.targetY[i] < PLATFORM_MIN_Y) m.targetY[i] = PLATFORM_MIN_Y;
-    if (m.targetY[i] > PLATFORM_MAX_Y) m.targetY[i] = PLATFORM_MAX_Y;
-  }
-}
 
 function damp(current: number, goal: number, lambda: number, dt: number): number {
   return goal + (current - goal) * Math.exp(-lambda * dt);
@@ -831,7 +766,7 @@ export function stepMatch(
       // No se traba: la especial gasta la barra ENTERA y tiene enfriamiento, así
       // que `aTiro` se apaga solo apenas dispara. Y si los dos se plantan a la
       // vez, el primero que se queda sin barra vuelve a avanzar.
-      const aTiro = PODERES_ACTIVOS && target >= 0 && m.energy[i] >= COST_SKILL
+      const aTiro = target >= 0 && m.energy[i] >= COST_SKILL
         && Math.abs(dx) <= ALCANCE * 0.8;
       const closing = Math.abs(dx) > rango && !aTiro;
       m.engaged[i] = closing ? 0 : 1;
@@ -913,22 +848,22 @@ export function stepMatch(
     }
   }
 
+  // El super (`unleash`, más abajo, usa `COST_SUPER`) ya no depende del
+  // gigantismo por turnos de equipo, que se sacó con el pivot de 2026-08-23
+  // (ver CLAUDE.md). Todavía no lo dispara nadie: probé darle prioridad
+  // sobre la especial acá mismo y el resultado fue un super cada vez que la
+  // barra pasaba 0,6 —bastaba UN trade grande— sin dejar pasar nunca ni una
+  // especial ni un golpe, todo el partido volando por el aire. Decidir
+  // CUÁNDO conviene esperar el super en vez de la especial es justamente el
+  // trabajo de la IA con planificación de la Fase 2; hasta que exista, el
+  // super queda cableado (`unleash`, `COST_SUPER`) pero sin quién lo tire.
+
   /* --- especiales: se pagan con la barra ------------------------------- */
   for (let i = 0; i < CAPACITY; i++) {
-    if (!PODERES_ACTIVOS) continue;
     if (m.slot[i] !== SLOT_ACTIVE) continue;
     if (m.energy[i] < COST_SKILL) continue;
     if (now - m.hitstun[i] < HITSTUN) continue;
     if (now - m.lastSkillAt[i] < SKILL_COOLDOWN) continue;
-    // El elegido para el ultra se PLANTA cuando la barra del equipo pasa de
-    // `ULTRA_HOLD`: deja de gastar y junta para el super. Sin esto la especial
-    // le baja la barra a cero y cuando le toca el ultra no puede pagarlo.
-    //
-    // Se planta recién ahí y no desde el principio del ciclo a propósito: entre
-    // ultra y ultra pasa medio minuto largo, y un peleador que se lo pasa entero
-    // sin atacar es un peleador de menos en la pelea. El momento en que se
-    // planta es además el momento en que se lo ve crecer, así que se lee.
-    if (m.growing[m.team[i]] === i && m.ultra[m.team[i]] >= ULTRA_HOLD) continue;
 
     // La especial gasta la barra ENTERA, no su precio. Es lo que hace que
     // esperar valga la pena: dos especiales al mínimo hacen menos que una con la
@@ -1014,14 +949,10 @@ export function stepMatch(
 
       if (now - m.lastHit[i] < HIT_COOLDOWN || now - m.lastHit[j] < HIT_COOLDOWN) continue;
 
-      // El GOLPE, en cambio, se paga, y cada uno por su cuenta. Antes el
-      // contacto disparaba un intercambio automático: los dos se pegaban
-      // siempre, hubiera pasado lo que hubiera pasado en el mercado. Ahora un
-      // peleador cargado le pega a uno vacío y el vacío sólo se lo come, porque
-      // el que no tiene órdenes atrás no tiene con qué pegar.
-      const golpeaI = m.energy[i] >= COST_MELEE && !guardando(m, i);
-      const golpeaJ = m.energy[j] >= COST_MELEE && !guardando(m, j);
-      if (!golpeaI && !golpeaJ) continue;
+      // El GOLPE, en cambio, es incondicional: el cuerpo a cuerpo ya no
+      // depende de la barra de mercado (ver el pivot de 2026-08-23 en
+      // CLAUDE.md) — sólo especiales y super la gastan. Los dos siempre
+      // conectan si llegaron al cooldown.
 
       // Cuánto pasó desde el último golpe CONECTADO de cada uno, antes de pisar
       // `lastHit` — es lo que decide si la cadena de combo sigue o se cortó.
@@ -1041,17 +972,12 @@ export function stepMatch(
       //
       // El cuerpo a cuerpo no lanzaba a propósito: para eso estaban las
       // especiales y el super, y que el golpe chico no lance es lo que hace
-      // que el daño acumulado signifique algo. Pero con los dos apagados
-      // (`PODERES_ACTIVOS`) el cuerpo a cuerpo pasó a ser la ÚNICA fuente de
-      // empuje que queda — sin esto ningún golpe saca a nadie del escenario y
-      // ningún match termina nunca. Se confirmó con un 1 contra 1 aislado que
-      // llegó a 6000% de daño acumulado sin que pasara absolutamente nada.
-      // La fórmula de `knockback` ya está pensada para esto: al principio
-      // (`BASE_KNOCKBACK`) empuja poco, y recién con daño acumulado empuja
-      // fuerte — el mismo "golpe chico no lanza" de antes, pero ganado con
-      // números en vez de con un bando aparte del sistema.
-      if (golpeaI) {
-        m.energy[i] -= COST_MELEE;
+      // que el daño acumulado signifique algo. La fórmula de `knockback` ya
+      // está pensada para esto: al principio (`BASE_KNOCKBACK`) empuja poco,
+      // y recién con daño acumulado empuja fuerte — el mismo "golpe chico no
+      // lanza" de antes, pero ganado con números en vez de con un bando
+      // aparte del sistema.
+      {
         const { blow, esFinisher } = nextBlow(m, i, sinceI);
         m.lastBlow[i] = blow;
         const force = knockback(m.damage[j], m.weight[j], m.weight[i]);
@@ -1062,8 +988,7 @@ export function stepMatch(
         m.hitstun[j] = now - HITSTUN + stunFor(force);
         emit(m.events, EVENT_MELEE, m.x[i], m.y[i], m.lastBlow[i], m.team[i], i);
       }
-      if (golpeaJ) {
-        m.energy[j] -= COST_MELEE;
+      {
         const { blow, esFinisher } = nextBlow(m, j, sinceJ);
         m.lastBlow[j] = blow;
         const force = knockback(m.damage[i], m.weight[i], m.weight[j]);
@@ -1084,7 +1009,7 @@ export function stepMatch(
       // El temblor queda para lo que pasa cada tanto: una especial, el super,
       // un KO. Una ballena sí sacude, porque es el único cuerpo a cuerpo que
       // no es rutina.
-      const heavy = (golpeaI && m.whale[i] === 1) || (golpeaJ && m.whale[j] === 1);
+      const heavy = m.whale[i] === 1 || m.whale[j] === 1;
       if (heavy) m.shake = Math.max(m.shake, 0.7);
     }
   }
@@ -1114,107 +1039,23 @@ export function stepMatch(
     }
   }
 
-  /* --- el ultra: la barra del equipo ---------------------------------- */
-  for (let team = 0; team < 2; team++) {
-    if (!PODERES_ACTIVOS) continue;
-    // A quién le toca. Si el elegido está caído le toca al siguiente vivo, pero
-    // el turno NO se pierde: el ciclo es de tres y se respeta, que es lo que
-    // hace que el ultra sea previsible en vez de una lotería.
-    const from = team === TEAM_GREEN ? 0 : FIGHTERS_PER_TEAM;
-    let chosen = -1;
-    for (let n = 0; n < FIGHTERS_PER_TEAM; n++) {
-      const i = from + (m.ultraTurn[team] + n) % FIGHTERS_PER_TEAM;
-      if (m.slot[i] === SLOT_ACTIVE) { chosen = i; break; }
-    }
-
-    // El que dejó de ser el elegido vuelve a su tamaño. Sin esto un peleador que
-    // se cae mientras crecía reaparece gigante para siempre.
-    const antes = m.growing[team];
-    if (antes >= 0 && antes !== chosen) {
-      m.stage[antes] = 0;
-      m.scale[antes] = 1;
-    }
-    m.growing[team] = chosen;
-    if (chosen < 0) continue;
-
-    // El gigantismo es el DIBUJO de la barra del equipo: el elegido crece a
-    // medida que se carga, así se ve venir el ultra sin leer ningún número y se
-    // sabe de antemano a quién le toca.
-    const stage = ultraStage(m.ultra[team]);
-    if (stage > m.stage[chosen]) {
-      emit(m.events, EVENT_GROW, m.x[chosen], m.y[chosen], stage, team, chosen);
-    }
-    m.stage[chosen] = stage;
-    m.scale[chosen] = growthScale(stage);
-
-    if (m.ultra[team] < 1) continue;
-    // La barra del equipo da el DERECHO a tirar el ultra; la personal lo paga.
-    // Como el elegido dejó de gastar al llegar a `ULTRA_HOLD`, para cuando la de
-    // equipo se llena la suya ya está arriba del mínimo casi siempre.
-    if (m.energy[chosen] < COST_SUPER) continue;
-
-    const spent = m.energy[chosen];
-    m.energy[chosen] = 0;
-    m.ultra[team] = 0;
-    m.ultraTurn[team] = (m.ultraTurn[team] + 1) % FIGHTERS_PER_TEAM;
-    unleash(m, chosen, now, spent);
-    m.stage[chosen] = 0;
-    m.scale[chosen] = 1;
-  }
-  for (let team = 0; team < 2; team++) {
-    const chosen = m.growing[team];
-    m.state.charge[team] = chosen >= 0 ? m.stage[chosen] : 0;
-    m.state.ultra[team] = m.ultra[team];
-    m.state.ultraTurn[team] = m.ultraTurn[team];
-  }
-
-  /* --- la cola de trades: carga las barras y da de alta ---------------- */
-  const greenShare = bookShare(stats.bidVolume, stats.askVolume, TEAM_GREEN);
-  const redShare = bookShare(stats.bidVolume, stats.askVolume, TEAM_RED);
+  /* --- la cola de trades: carga la barra personal ----------------------- */
   //
-  // Antes este bucle sacaba como mucho cuatro trades por paso y tiraba el resto:
-  // un trade que llegaba con los tres slots del bando ocupados no hacía
-  // absolutamente nada. Ahora TODO trade carga la barra de alguien, y el alta es
-  // lo secundario. Es lo que hace que el ritmo de golpes sea el del mercado: en
-  // una ráfaga de compras las barras verdes se llenan aunque no entre nadie
-  // nuevo, y el bando descarga.
-  let spawned = 0;
+  // Desde el pivot de 2026-08-23 (ver CLAUDE.md) el mercado sólo carga la
+  // barra que habilita especiales y super — ya no da de alta a nadie ni
+  // decide el peso. Quién está en cancha lo resuelve `relevar`, más abajo,
+  // sin mirar el feed en absoluto.
   let drained = 0;
   while (drained < MAX_TRADES_PER_STEP) {
-    // Con el cupo de altas ya lleno y algún slot todavía esperando, se corta.
-    // Sacar un trade de la cola sólo para cargar se lo robaría al alta del paso
-    // siguiente, y un slot vacío es un peleador que falta en pantalla. Sin esta
-    // guarda, seis trades de arranque daban cuatro peleadores en vez de seis:
-    // el primer paso se llevaba los seis de la cola y sólo podía dar de alta a
-    // cuatro. Una vez que están los seis arriba no vuelve a activarse, que es el
-    // caso normal.
-    if (spawned >= MAX_SPAWNS_PER_STEP
-      && (freeSlot(m, TEAM_GREEN) >= 0 || freeSlot(m, TEAM_RED) >= 0)) break;
-
     const trade = trades.pop();
     if (trade === null) break;
     drained++;
     const team = trade.side === 'buy' ? TEAM_GREEN : TEAM_RED;
     charge(m, team, chargeFromTrade(trade.size, stats.tradeMedian));
-    // Con los poderes apagados nadie tira el ultra (ver `PODERES_ACTIVOS`), así
-    // que cargarlo igual sólo dejaría la mecha del HUD llena para siempre sin
-    // que nada la gaste — más confuso que una barra que se queda en cero.
-    if (PODERES_ACTIVOS) {
-      m.ultra[team] = addCharge(
-        m.ultra[team],
-        ultraGain(trade.size, stats.tradeMedian, team === TEAM_GREEN ? greenShare : redShare),
-      );
-    }
-
-    if (spawned >= MAX_SPAWNS_PER_STEP) continue;
-    const slot = freeSlot(m, team);
-    if (slot < 0) continue;
-    spawned++;
-    activate(m, slot, team, trade.size, trade.whale, stats.tradeMedian, now);
   }
   if (trades.count > CAPACITY * 6) trades.clear();
 
-  relevar(m, stats.tradeMedian, now);
+  relevar(m, now);
   summarize(m);
 }
 
@@ -1321,24 +1162,22 @@ function moverPoderes(m: Match, dt: number, now: number): void {
 }
 
 /**
- * En torneo, mantiene UN peleador por bando en el escenario.
+ * Mantiene la cancha llena, sin mirar el mercado para nada.
  *
- * La pelea de torneo no puede depender del mercado para existir: el mercado
- * decide con qué fuerza pegan y cuándo cargan el ultra, pero un 1v1 con un solo
- * peleador no es una pelea. En melé sigue mandando el trade —ahí el alta ES la
- * visualización del flujo—, y por eso esto arranca con un `return`.
- *
- * Entra con el peso de un trade mediano a propósito: en un torneo la plantilla
- * está fijada de antemano y el tercero no puede salir enano porque justo venían
- * órdenes chicas.
+ * Desde el pivot de 2026-08-23 (ver CLAUDE.md) la pelea no depende del mercado
+ * para existir: quién está en cancha lo decide `freeSlot` —el torneo respeta
+ * `relevoEn`/`caidos`, el melé simplemente llena los `lanes` que tenga— y acá
+ * sólo se activa a quien corresponda apenas hay un slot libre. Antes esto
+ * dependía de que llegara un trade puntual; con `activate` ya sin `size`,
+ * `whale` ni `median` —el peso es fijo por personaje— no hace falta esperar
+ * nada del feed.
  */
-function relevar(m: Match, median: number, now: number): void {
-  if (!m.torneo || m.ganador >= 0) return;
+function relevar(m: Match, now: number): void {
+  if (m.ganador >= 0) return;
   for (let team = 0; team < 2; team++) {
-    if (m.clock < m.relevoEn[team]) continue;
     const slot = freeSlot(m, team);
     if (slot < 0) continue;
-    activate(m, slot, team, median > 0 ? median : 1, false, median, now);
+    activate(m, slot, team, now);
   }
 }
 
@@ -1359,15 +1198,6 @@ function charge(m: Match, team: number, amount: number): void {
     m.chargeCursor[team] = (lane + 1) % FIGHTERS_PER_TEAM;
     return;
   }
-}
-
-/**
- * ¿Está guardando para el ultra? El elegido, con la barra del equipo pasada de
- * `ULTRA_HOLD`, no gasta ni en puños: se planta y espera el remate.
- */
-function guardando(m: Match, i: number): boolean {
-  const team = m.team[i];
-  return m.growing[team] === i && m.ultra[team] >= ULTRA_HOLD;
 }
 
 /**
@@ -1415,10 +1245,7 @@ function freeSlot(m: Match, team: number): number {
 }
 
 
-function activate(
-  m: Match, slot: number, team: number,
-  size: number, whale: boolean, median: number, now: number,
-): void {
+function activate(m: Match, slot: number, team: number, now: number): void {
   // En melé `m.character[slot]` no se toca: lo fijó `createMatch` y reactivar un
   // slot es devolverle al MISMO peleador que se cayó, porque no hay relevos.
   //
@@ -1426,17 +1253,17 @@ function activate(
   // bando, así que quién entra por él es quién sigue en la plantilla. Por eso
   // `character` siguió siendo un array por slot y no una constante.
   if (m.torneo) m.character[slot] = m.caidos[team] % FIGHTERS_PER_TEAM;
-  const weight = weightFor(size, median, whale);
-  m.weight[slot] = weight;
+  // El peso es un stat fijo por personaje (ver `ROSTER[].weight`), no algo
+  // que trae el trade que lo hizo entrar — desde el pivot de 2026-08-23 (ver
+  // CLAUDE.md) el mercado ya no decide quién aparece ni cuánto pesa.
+  m.weight[slot] = characterFor(team, m.character[slot]).weight;
   m.damage[slot] = 0;
   m.stocks[slot] = STOCKS;
   m.jumps[slot] = MAX_JUMPS;
   m.lastJump[slot] = now;
   m.lastHit[slot] = now;
   m.hitstun[slot] = -10;
-  m.whale[slot] = whale ? 1 : 0;
-  m.stage[slot] = 0;
-  m.scale[slot] = 1;
+  m.whale[slot] = 0;
   m.lastSkill[slot] = 1;
   // La barra arranca vacía: un peleador que acaba de entrar todavía no tiene
   // órdenes atrás. Las primeras que lleguen de su lado se la cargan.
@@ -1456,11 +1283,16 @@ function activate(
 }
 
 /**
- * El super del gigantismo. No usa el knockback normal a propósito: tiene que
- * sacar del escenario aunque el rival esté con 0% de daño, o el gigantismo es
- * sólo un personaje más grande.
+ * El super. No usa el knockback normal a propósito: tiene que sacar del
+ * escenario aunque el rival esté con 0% de daño, o no se distingue de un
+ * empujón cualquiera.
+ *
+ * Exportada sin uso todavía dentro de este archivo: nadie la llama desde el
+ * pivot de 2026-08-23 (ver CLAUDE.md) hasta que la Fase 2 -- la IA con
+ * planificación -- decida cuándo conviene tirar el super. `export` es sólo
+ * para que el compilador no la marque como código muerto mientras tanto.
  */
-function unleash(m: Match, self: number, now: number, spent: number): void {
+export function unleash(m: Match, self: number, now: number, spent: number): void {
   // Lo que se gastó gradúa el remate: al mínimo pega poco más que el super de
   // antes, con la barra llena pega un tercio más.
   const power = 0.6 + spent * 0.7;
@@ -1509,7 +1341,6 @@ function ceremonia(m: Match): void {
     m.grounded[i] = 1;
     m.damage[i] = 0;
     m.scale[i] = 1;
-    m.stage[i] = 0;
     m.whale[i] = 0;
     m.hitstun[i] = -10;
     // Mirándose entre ellos y no los tres al mismo lado: tres muñecos de perfil
@@ -1540,7 +1371,6 @@ function reiniciar(m: Match): void {
     m.slot[i] = SLOT_FREE;
     m.damage[i] = 0;
     m.stocks[i] = STOCKS;
-    m.stage[i] = 0;
     m.scale[i] = 1;
     m.whale[i] = 0;
     m.energy[i] = 0;
@@ -1556,12 +1386,6 @@ function reiniciar(m: Match): void {
   m.ganador = -1;
   m.state.kos[0] = 0;
   m.state.kos[1] = 0;
-  m.ultra[0] = 0;
-  m.ultra[1] = 0;
-  m.ultraTurn[0] = 0;
-  m.ultraTurn[1] = 0;
-  m.growing[0] = -1;
-  m.growing[1] = -1;
 }
 
 function summarize(m: Match): void {

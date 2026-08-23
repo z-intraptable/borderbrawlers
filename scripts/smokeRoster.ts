@@ -13,7 +13,7 @@
 import { TradeRingBuffer } from '../src/net/feedCore';
 import type { FeedStats } from '../src/net/feedCore';
 import { CAPACITY, FIGHTERS_PER_TEAM, createMatch, stepMatch } from '../src/game/match';
-import { SLOT_ACTIVE, SLOT_FREE, TEAM_GREEN } from '../src/game/fighters';
+import { SLOT_ACTIVE, TEAM_GREEN } from '../src/game/fighters';
 import { GREEN_ROSTER, RED_ROSTER, ROSTER, characterFor, requiredAnimations } from '../src/game/roster';
 
 let failures = 0;
@@ -70,13 +70,12 @@ console.log('\n== reaparición al caerse ==');
     greenFirst.size === FIGHTERS_PER_TEAM, `${[...greenFirst]}`);
 
   // Se lo tira del escenario a mano: es exactamente lo que hace un super.
+  // Desde el pivot de 2026-08-23 (ver CLAUDE.md) `relevar` ya no espera un
+  // trade para reponerlo: vuelve a entrar en el mismo paso.
   m.x[0] = -200;
   stepMatch(m, trades, stats, 1 / 60);
-  check('el que se pasó del borde deja el slot libre', m.slot[0] === SLOT_FREE);
-
-  fill();
-  check('el slot se vuelve a llenar', m.slot[0] === SLOT_ACTIVE);
-  check('y con el mismo que se cayó', m.character[0] === first[0],
+  check('el que se cae vuelve a entrar en el mismo paso', m.slot[0] === SLOT_ACTIVE);
+  check('y con el mismo personaje que se cayó', m.character[0] === first[0],
     `${characterFor(TEAM_GREEN, first[0]).label} → ${characterFor(TEAM_GREEN, m.character[0]).label}`);
 
   const green = new Set<number>();

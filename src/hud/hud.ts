@@ -1,6 +1,6 @@
 import type { FeedStats } from '../net/feedCore';
 import type { MatchState } from '../game/fighters';
-import { GROWTH_MAX_STAGE, TEAM_GREEN, TEAM_RED } from '../game/fighters';
+import { TEAM_GREEN, TEAM_RED } from '../game/fighters';
 import { FIGHTERS_PER_TEAM } from '../game/match';
 
 /**
@@ -138,8 +138,8 @@ export function mountHud(
     const panel = el('div',
       `flex:1;display:flex;flex-direction:column;align-items:${lado};gap:2px;min-width:0`);
 
-    /* cabecera: glifo + label + puntitos del plantel + carga del gigantismo,
-       todo en UNA línea angosta en vez de tres filas apiladas */
+    /* cabecera: glifo + label + puntitos del plantel, en UNA línea angosta
+       en vez de tres filas apiladas */
     const head = el('div',
       `display:flex;align-items:center;gap:clamp(3px,.9vw,7px);width:100%;` +
       `flex-direction:${verde ? 'row' : 'row-reverse'}`);
@@ -165,16 +165,9 @@ export function mountHud(
       lives.append(dot);
     }
 
-    const charge = el('div', 'display:flex;gap:1.5px');
-    const pips: HTMLElement[] = [];
-    for (let i = 0; i < GROWTH_MAX_STAGE; i++) {
-      const pip = el('span', 'width:clamp(5px,1vw,8px);height:2px;background:#263041');
-      pips.push(pip);
-      charge.append(pip);
-    }
     const marcas = el('div',
       `display:flex;align-items:center;gap:5px;flex:1;min-width:0;justify-content:${lado}`);
-    marcas.append(...(verde ? [lives, charge] : [charge, lives]));
+    marcas.append(lives);
 
     head.append(marca, marcas);
 
@@ -198,7 +191,7 @@ export function mountHud(
       `background:${color};box-shadow:0 0 8px ${color}cc;transition:width .12s linear`);
     riel.append(fantasma, relleno);
 
-    /* la fila de abajo: daño, KO y la mecha de ultra, todo en una línea chica */
+    /* la fila de abajo: daño y KO, en una línea chica */
     const fila = el('div',
       `display:flex;align-items:center;gap:clamp(4px,1.2vw,10px);width:100%;` +
       `flex-direction:${verde ? 'row' : 'row-reverse'}`);
@@ -211,21 +204,11 @@ export function mountHud(
     const kos = el('div',
       `color:#9fb0c4;font-size:.9em;text-shadow:${CONTORNO};white-space:nowrap`, '0 KO');
 
-    // La mecha de ULTRA: una línea fina que avisa que viene el super, sin
-    // competirle en tamaño a la de resistencia.
-    const ultraTrack = el('div',
-      'flex:1;min-width:18px;height:2px;background:#26304199;' +
-      'outline:1px solid #05070d99;overflow:hidden;position:relative');
-    const ultraFill = el('div',
-      `position:absolute;top:0;bottom:0;${borde};width:0%;background:${GOLD};` +
-      'transition:width .12s linear');
-    ultraTrack.append(ultraFill);
-
-    fila.append(damage, kos, ultraTrack);
+    fila.append(damage, kos);
     panel.append(head, riel, fila);
     return {
       team, color, panel, icono, riel, relleno, fantasma,
-      kos, damage, dots, pips, ultraFill, anotados: 0, dano: 0,
+      kos, damage, dots, anotados: 0, dano: 0,
     };
   });
 
@@ -325,16 +308,6 @@ export function mountHud(
         dot.style.background = i < quedan ? p.color : '#1b2331';
         dot.style.boxShadow = i < quedan ? `0 0 8px ${p.color}` : 'none';
       });
-      const stage = match.charge[p.team];
-      p.pips.forEach((pip, i) => {
-        pip.style.background = i < stage ? GOLD : '#263041';
-        pip.style.boxShadow = i < stage ? `0 0 8px ${GOLD}` : 'none';
-      });
-
-      const ultra = match.ultra[p.team];
-      p.ultraFill.style.width = `${Math.round(ultra * 100)}%`;
-      // Llena, brilla: es el aviso de que el super sale en cualquier momento.
-      p.ultraFill.style.boxShadow = ultra >= 1 ? `0 0 8px ${GOLD}` : 'none';
     }
 
     if (match.ganador !== mostrando) {

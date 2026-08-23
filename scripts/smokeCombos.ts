@@ -45,8 +45,11 @@ console.log('\n== el golpe que sale sigue una cadena declarada ==');
   let golpes = 0;
   let noCoincide = 0;
   for (let paso = 0; paso < 3600; paso++) {
-    // Órdenes constantes de los dos lados: la barra nunca se vacía.
-    trades.push(paso, paso % 2 === 0 ? 'buy' : 'sell', 100, 3, false, paso);
+    // Sin más trades a propósito: desde el pivot de 2026-08-23 (ver CLAUDE.md)
+    // el cuerpo a cuerpo no gasta la barra de mercado, así que no hace falta
+    // seguir cargándola para que golpeen — y si se la carga, `aTiro` los
+    // manda a plantarse a tirar especiales en vez de cerrar distancia, que es
+    // justo lo que este test NO quiere medir.
     stepMatch(m, trades, stats, 1 / 60);
     for (let e = 0; e < m.events.count; e++) {
       if (m.events.kind[e] !== EVENT_MELEE) continue;
@@ -87,23 +90,21 @@ console.log('\n== el finisher pega más fuerte, el resto no ==');
   // Mucho más pasos que el bloque de arriba de sobra, no porque haga falta
   // tanto: el cuerpo a cuerpo empuja de verdad (`knockback`/`stunFor`, ver
   // `stepMatch`), así que la víctima termina cayendo del escenario y el
-  // intercambio se corta solo —correcto: es la única forma que le queda al
-  // juego de terminar un match con los poderes apagados. Lo que importa es
-  // que entren unos pocos golpes antes de eso, no sostenerlo en el tiempo.
+  // intercambio se corta solo. Lo que importa es que entren unos pocos
+  // golpes antes de eso, no sostenerlo en el tiempo. Sin más trades a
+  // propósito, igual que en el bloque de arriba: el peso ahora es fijo por
+  // personaje (ver `ROSTER[].weight`), así que ni siquiera hace falta
+  // cargar nada para que el peso del atacante se mantenga constante.
   // Comparar promedios de finisher contra no-finisher, agrupado por tipo de
   // golpe, se cae si la cadena activa es de las dos que NUNCA repiten tipo de
   // golpe entre pasos normales y el finisher ([0,0,1] y [1,1,0]: no hay con
   // qué comparar un puño finisher contra un puño normal si nunca hay uno). En
   // cambio la fórmula de producción (`hitDamage` + `COMBO_FINISHER_MULT`) se
-  // puede predecir golpe por golpe sin importar qué cadena esté activa: el
-  // peso del atacante no cambia en toda la pelea (no hay gigantismo con los
-  // poderes apagados), así que alcanza con comparar cada golpe contra lo que
-  // la fórmula dice que tenía que doler.
+  // puede predecir golpe por golpe sin importar qué cadena esté activa.
   const peso = m.weight[atacante];
   let golpes = 0;
   let fueraDeTolerancia = 0;
   for (let paso = 0; paso < 9000; paso++) {
-    trades.push(paso, 'buy', 100, 3, false, paso);
     const danoAntes = m.damage[victima];
     stepMatch(m, trades, stats, 1 / 60);
     let golpeo = false;
@@ -144,8 +145,9 @@ console.log('\n== un silencio más largo que COMBO_WINDOW corta la cadena ==');
   }
 
   // Deja que pegue un par de veces para que `comboStep` no esté ya en 0.
+  // Sin más trades: el golpe ya no necesita la barra (ver el bloque de
+  // arriba) y cargarla los mandaría a plantarse a tirar en vez de pegar.
   for (let paso = 0; paso < 30; paso++) {
-    trades.push(paso, 'buy', 100, 3, false, paso);
     stepMatch(m, trades, stats, 1 / 60);
     m.events.count = 0;
   }
@@ -163,7 +165,6 @@ console.log('\n== un silencio más largo que COMBO_WINDOW corta la cadena ==');
   // una cadena nueva —paso 0— y no seguir donde había quedado.
   let volvioAPegar = false;
   for (let paso = 0; paso < 60 && !volvioAPegar; paso++) {
-    trades.push(1000 + paso, 'buy', 100, 3, false, 1000 + paso);
     stepMatch(m, trades, stats, 1 / 60);
     for (let e = 0; e < m.events.count; e++) {
       if (m.events.kind[e] === EVENT_MELEE && m.events.slot[e] === atacante) volvioAPegar = true;
