@@ -10,7 +10,11 @@ entonces no hay un veredicto claro de que el rigging por huesos (Método A) se v
 mejor que el corte en piezas que ya corre en producción, esta carpeta se archiva
 sin más discusión y el esfuerzo de arte se concentra en la tubería de Pixi
 existente. No es una fecha para terminar el rig de los seis — alcanza con
-decidir sobre Asuri, que ya tiene rig de prueba armado.
+decidir sobre Asuri. **Corregido 2026-08-23**: acá sólo está el dibujo de
+referencia (`personajes/asuri/asuri.png`), no hay `asuri.tscn` todavía — el rig
+de prueba queda por armar antes de poder juzgar nada, y ese armado necesita el
+editor de Godot con interacción visual (arrastrar huesos y mirar el resultado),
+así que no se puede avanzar en un entorno sin GUI.
 
 ## Por qué existe
 

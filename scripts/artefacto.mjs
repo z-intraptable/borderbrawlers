@@ -123,8 +123,18 @@ for carpeta in sorted((publico / 'art').iterdir()):
                     cuadro['rect'] = [round(v * f2) for v in cuadro['rect']]
             h['unit'] = h['unit'] * f2
             h['cell'] = [round(v * f2) for v in h['cell']]
-        buf = io.BytesIO(); im.save(buf, 'PNG', optimize=True)
-        poner(f'art/{carpeta.name}/{h["file"]}', buf.getvalue(), 'image/png')
+        # La hoja puede venir en .webp (así se generan hoy, ver 6252154): hay
+        # que reescribirla en su mismo formato, no siempre PNG, o se pierde
+        # toda la compresión que ese cambio ganó (855 KB -> 3+ MB por hoja).
+        es_webp = h['file'].lower().endswith('.webp')
+        buf = io.BytesIO()
+        if es_webp:
+            im.save(buf, 'WEBP', quality=90, method=6)
+            mime = 'image/webp'
+        else:
+            im.save(buf, 'PNG', optimize=True)
+            mime = 'image/png'
+        poner(f'art/{carpeta.name}/{h["file"]}', buf.getvalue(), mime)
         poner(f'art/{carpeta.name}/hojas.json', json.dumps(h).encode(),
               'application/json')
 
@@ -193,6 +203,10 @@ console.log('empaquetando el código…');
 execFileSync('npx', [
   'esbuild', entrada,
   '--bundle', '--format=esm', '--target=es2022', '--minify',
+  // Vite inyecta `import.meta.env` en el build normal; esbuild no. Sin este
+  // define, `main.ts` explota en "Cannot read properties of undefined
+  // (reading 'DEV')" apenas arranca, antes de dibujar nada.
+  '--define:import.meta.env.DEV=false',
   `--outfile=${bundle}`,
 ], { cwd: RAIZ, stdio: ['ignore', 'ignore', 'inherit'] });
 

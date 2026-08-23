@@ -1,17 +1,12 @@
 /* Smoke test de las reglas de la pelea. Lógica pura: sin three, sin física. */
 import {
-  COST_MELEE,
   COST_SKILL,
   COST_SUPER,
-  GROWTH_MAX_STAGE,
   SUPER_RADIUS,
-  ULTRA_HOLD,
   addCharge,
   chargeFromTrade,
   skillDamage,
   skillRadius,
-  ultraGain,
-  ultraStage,
   BASE_KNOCKBACK,
   JUMP_COOLDOWN,
   MAX_KNOCKBACK,
@@ -19,7 +14,6 @@ import {
   SLOT_FREE,
   TEAM_GREEN,
   TEAM_RED,
-  WEIGHT_MAX,
   createSkyline,
   groundYAt,
   hasGroundAhead,
@@ -32,16 +26,10 @@ import {
   platformIndexAt,
   separation,
   shouldBrakeAtLedge,
+  shouldBrakeToTurn,
   teamMomentum,
   TEAMMATE_SPACING,
-  weightFor,
   wantsJump,
-  GROWTH_COOLDOWN,
-  GROWTH_MAX_STAGE,
-  SUPER_RADIUS,
-  bookShare,
-  growthScale,
-  shouldGrow,
   superForce,
 } from '../src/game/fighters';
 
@@ -136,6 +124,16 @@ console.log('\n== frenar en el borde ==');
   check('frena si el rival está encima suyo', shouldBrakeAtLedge(false, 0.1, 1));
 }
 
+console.log('\n== frenar antes de girar, no caminar para atrás ==');
+{
+  check('mirando para donde va, no frena', !shouldBrakeToTurn(3, 1, 1, 0.3));
+  check('quieto y quiere girar, no hace falta frenar más', !shouldBrakeToTurn(0.1, 1, -1, 0.3));
+  check('corriendo rápido para un lado y el objetivo cambió de lado: frena',
+    shouldBrakeToTurn(3, 1, -1, 0.3));
+  check('el signo de vx no importa, sólo si mira para donde va',
+    shouldBrakeToTurn(-3, 1, -1, 0.3));
+}
+
 console.log('\n== knockback estilo Smash ==');
 {
   const light = knockback(0, 1, 1);
@@ -154,19 +152,6 @@ console.log('\n== knockback estilo Smash ==');
     hitDamage(2, false) > hitDamage(1, false) && hitDamage(1, false) > 0);
   check('la patada pega más fuerte que el puño',
     hitDamage(1, true) > hitDamage(1, false));
-}
-
-console.log('\n== peso desde el tamaño del trade ==');
-{
-  const median = 0.5;
-  check('un trade mediano pesa poco más que el mínimo', weightFor(median, median, false) < 1.2,
-    weightFor(median, median, false).toFixed(2));
-  check('más grande pesa más', weightFor(5, median, false) > weightFor(1, median, false));
-  check('una ballena pesa más que el mismo trade sin serlo',
-    weightFor(5, median, true) > weightFor(5, median, false));
-  check('nunca pasa el tope', weightFor(1e9, median, true) <= WEIGHT_MAX);
-  check('sin mediana todavía da algo razonable',
-    Number.isFinite(weightFor(0.3, 0, false)) && weightFor(0.3, 0, false) > 0);
 }
 
 console.log('\n== ímpetu de equipo ==');
@@ -190,23 +175,8 @@ console.log('\n== KO ==');
   check('el borde exacto todavía no es KO', !isKO(zone, 14, -12));
 }
 
-console.log('\n== gigantismo ==');
+console.log('\n== el super ==');
 {
-  check('sin liquidez el libro está empatado', bookShare(0, 0, TEAM_GREEN) === 0.5);
-  check('todo el libro del lado bid es cuota verde', bookShare(100, 0, TEAM_GREEN) === 1);
-  check('y cero para el rojo', bookShare(100, 0, TEAM_RED) === 0);
-  check('las dos cuotas suman 1',
-    Math.abs(bookShare(30, 70, TEAM_GREEN) + bookShare(30, 70, TEAM_RED) - 1) < 1e-9);
-
-  check('con el libro parejo nadie crece', !shouldGrow(0.5, 999));
-  check('con ventaja clara sí crece', shouldGrow(0.7, GROWTH_COOLDOWN));
-  check('pero no antes de que pase el cooldown', !shouldGrow(0.7, GROWTH_COOLDOWN - 0.01));
-
-  check('la etapa 0 es el tamaño normal', growthScale(0) === 1);
-  check('cada paso agranda', growthScale(1) < growthScale(2) && growthScale(2) < growthScale(3));
-  check('tres pasos y nada más', growthScale(GROWTH_MAX_STAGE + 5) === growthScale(GROWTH_MAX_STAGE));
-  check('una etapa negativa no rompe', growthScale(-1) === 1);
-
   check('el super pega más fuerte de cerca', superForce(0) > superForce(SUPER_RADIUS));
   check('y en el borde del radio todavía pega', superForce(SUPER_RADIUS) > 0);
 }
@@ -289,40 +259,7 @@ console.log('\n== la barra de fuerza ==');
   check('una especial con la barra llena no llega al radio del super',
     skillRadius(1) < SUPER_RADIUS, `${skillRadius(1)} < ${SUPER_RADIUS}`);
 
-  check('los precios van de barato a caro', COST_MELEE < COST_SKILL && COST_SKILL < COST_SUPER);
-}
-
-console.log('\n== el ultra del equipo ==');
-{
-  // Mucho más lenta que la personal: un super cada diez segundos no es un super.
-  const paso = ultraGain(100, 100, 0.5);
-  check('la barra de equipo tarda decenas de trades en llenarse',
-    1 / paso > 40, `${1 / paso} trades`);
-  check('mucho más lenta que la personal', paso < chargeFromTrade(100, 100) / 5);
-
-  // El libro empuja pero no decide: sin esto el que va perdiendo el libro no
-  // llega nunca a su ultra y la pelea deja de tener vuelta.
-  const dominando = ultraGain(100, 100, 1);
-  const perdiendo = ultraGain(100, 100, 0);
-  check('dominar el libro carga más rápido', dominando > perdiendo);
-  // Con el libro entero en contra tiene que llegar igual, sólo que más tarde.
-  // Si tardara más del doble, el equipo que va perdiendo no vuelve nunca.
-  check('el que pierde el libro tarda menos del doble',
-    perdiendo * 2 > dominando, `${perdiendo} vs ${dominando}`);
-
-  // En pasos y no de corrido: se lee como un aviso, no como un zoom lento.
-  check('vacía no crece', ultraStage(0) === 0);
-  check('llena está en el paso máximo', ultraStage(1) === GROWTH_MAX_STAGE);
-  check('el paso en que se planta es el mismo en que se lo ve grande',
-    ultraStage(ULTRA_HOLD) === 2);
-  let previo = -1;
-  let sube = true;
-  for (let u = 0; u <= 1.0001; u += 0.01) {
-    const s = ultraStage(u);
-    if (s < previo) sube = false;
-    previo = s;
-  }
-  check('nunca decrece mientras se carga', sube);
+  check('los precios van de barato a caro', COST_SKILL < COST_SUPER);
 }
 
 console.log(failures === 0 ? '\nTODO OK\n' : `\n${failures} FALLOS\n`);

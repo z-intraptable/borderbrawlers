@@ -259,6 +259,138 @@ export function shouldBrakeAtLedge(groundAhead: boolean, dx: number, dir: number
   return Math.sign(dx) !== dir || Math.abs(dx) < 0.4;
 }
 
+/**
+ * ¿Frena en vez de acelerar para el otro lado?
+ *
+ * `GROUND_ACCEL` revierte `vx` en una fracción de segundo, pero girar el
+ * dibujo tiene su propio enfriamiento (`TURN_COOLDOWN`) para no parpadear. Sin
+ * este freno, `vx` cruza al signo nuevo ANTES de que el cooldown deje girar el
+ * sprite, y el peleador se ve caminando para atrás: corriendo hacia un lado
+ * con el dibujo todavía mirando el otro. Frenando hasta `brakeSpeed` antes de
+ * dejar acelerar de nuevo, la velocidad nunca le gana la carrera al dibujo.
+ */
+export function shouldBrakeToTurn(
+  vx: number, facing: number, dir: number, brakeSpeed: number,
+): boolean {
+  return dir !== facing && Math.abs(vx) > brakeSpeed;
+}
+
+/* ------------------------------------------------------------------ */
+/* El plan: qué hacer, no cómo moverse                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Capa de planificación, arriba de las primitivas de movimiento de más
+ * arriba (`pickTarget`, `separation`, `wantsJump`, `shouldBrakeAtLedge`,
+ * `shouldBrakeToTurn`). Esas siguen ejecutando el plan vigente cuadro a
+ * cuadro — quién sigue siendo "cómo moverse". Esto es "qué hacer": cada
+ * tanto (`REPLAN_INTERVAL` en match.ts, no cada cuadro — sería carísimo
+ * para seis unidades a 60 fps y además se vería nervioso) se evalúan un
+ * puñado de acciones candidatas y se elige la de mejor puntaje, mirando un
+ * paso adelante para las dos que exponen (especial y super): qué le
+ * conviene contestar al rival, y cuánto le resta a la apuesta.
+ *
+ * Reemplaza al viejo `aTiro` —una sola condición si/no calculada cada
+ * cuadro— por una decisión explícita, deliberada, y que compara alternativas
+ * en vez de responder a un único umbral. Sigue sin haber azar: empates se
+ * resuelven por el orden de `CANDIDATAS`, siempre el mismo.
+ */
+export const ACCION_ACERCAR = 0;
+export const ACCION_RETIRAR = 1;
+export const ACCION_SOSTENER = 2;
+export const ACCION_ESPECIAL = 3;
+export const ACCION_SUPER = 4;
+
+const CANDIDATAS = [
+  ACCION_ACERCAR, ACCION_RETIRAR, ACCION_SOSTENER, ACCION_ESPECIAL, ACCION_SUPER,
+] as const;
+
+/** Lo que un peleador ve de sí mismo (o del rival, para el paso 1-ply) al planear. */
+export interface PlanContext {
+  /** Distancia horizontal absoluta al rival. */
+  distancia: number;
+  /** Barra propia, 0 a 1. */
+  energia: number;
+  /** Alcance de la especial (`ALCANCE` en match.ts). */
+  alcance: number;
+  /** Si retirarse lo manda al vacío: no hay piso detrás. */
+  cercaDelBorde: boolean;
+  /** % de daño acumulado propio y del rival. */
+  dañoPropio: number;
+  dañoRival: number;
+  /**
+   * Si el super sigue enfriando (`SUPER_COOLDOWN` en match.ts). Sin esto, con
+   * el mercado a mil la barra vuelve a llenarse tan rápido que el super gana
+   * SIEMPRE apenas la energía alcanza y la especial no se elige nunca — se
+   * midió con un mercado agitado sintético: 0 especiales en 20 partidos
+   * enteros. El super es el remate ocasional, no el ataque de rutina.
+   */
+  superEnfriando: boolean;
+}
+
+/**
+ * Puntaje de UNA acción candidata para el contexto dado. Más alto es mejor;
+ * `-Infinity` es "no se puede" (sin barra, sin alcance, al borde del vacío).
+ */
+export function puntajeAccion(accion: number, ctx: PlanContext): number {
+  switch (accion) {
+    case ACCION_SUPER:
+      if (ctx.energia < COST_SUPER || ctx.superEnfriando) return -Infinity;
+      // Más que el techo de la especial (4 + 1×2 = 6, con la barra llena):
+      // con las dos listas a la vez, gana el remate. Conviene todavía más
+      // cuanto más daño acumuló el rival: el super lo manda lejos con menos
+      // empuje si ya viene golpeado.
+      return 7 + ctx.dañoRival * 0.02;
+    case ACCION_ESPECIAL:
+      if (ctx.energia < COST_SKILL || ctx.distancia > ctx.alcance) return -Infinity;
+      // Cuanto más cargada, más vale la pena tirarla ya en vez de acercarse.
+      return 4 + ctx.energia * 2;
+    case ACCION_RETIRAR:
+      if (ctx.cercaDelBorde) return -Infinity;
+      // Conviene retirarse cuando uno mismo acumuló más daño que el rival:
+      // el próximo golpe que se reciba duele más que el que se da.
+      return (ctx.dañoPropio - ctx.dañoRival) * 0.03;
+    case ACCION_SOSTENER:
+      return 0.5;
+    case ACCION_ACERCAR:
+    default:
+      return 1;
+  }
+}
+
+/**
+ * El árbol de decisión completo: puntúa las candidatas y devuelve la mejor.
+ *
+ * El "1-ply" del minimax simple: a especial y super, que exponen al que las
+ * tira (quieto un instante, la barra a cero después), se les resta lo mejor
+ * que el rival podría contestar ahora mismo con SU contexto (`ctxRival`) —
+ * no lo que el rival vaya a hacer de verdad, sino el techo de lo que podría,
+ * que es lo que un rival racional puede aprovechar. Si esa resta lo empareja
+ * o le gana a `ACCION_ACERCAR`, no vale la pena abrir el juego.
+ */
+export function planear(ctx: PlanContext, ctxRival: PlanContext): number {
+  let mejor = ACCION_ACERCAR;
+  let mejorPuntaje = -Infinity;
+  for (const accion of CANDIDATAS) {
+    let puntaje = puntajeAccion(accion, ctx);
+    if (puntaje === -Infinity) continue;
+    if (accion === ACCION_ESPECIAL || accion === ACCION_SUPER) {
+      const contraEspecial = puntajeAccion(ACCION_ESPECIAL, ctxRival);
+      const contraSuper = puntajeAccion(ACCION_SUPER, ctxRival);
+      const respuesta = Math.max(
+        contraEspecial === -Infinity ? 0 : contraEspecial,
+        contraSuper === -Infinity ? 0 : contraSuper,
+      );
+      puntaje -= respuesta * 0.3;
+    }
+    if (puntaje > mejorPuntaje) {
+      mejorPuntaje = puntaje;
+      mejor = accion;
+    }
+  }
+  return mejor;
+}
+
 /* ------------------------------------------------------------------ */
 /* Golpes                                                              */
 /* ------------------------------------------------------------------ */
@@ -388,24 +520,8 @@ export function hitDamage(attackerWeight: number, esPatada: boolean): number {
 }
 
 /* ------------------------------------------------------------------ */
-/* Peso y equipo                                                       */
+/* Equipo                                                              */
 /* ------------------------------------------------------------------ */
-
-export const WEIGHT_MIN = 0.7;
-export const WEIGHT_MAX = 2.4;
-
-/**
- * El tamaño del trade define el peso, contra la mediana móvil y nunca contra un
- * umbral fijo — el mismo criterio que las ballenas. Logarítmico porque los
- * tamaños tienen cola larga: sin el log, un solo trade grande produce un
- * personaje absurdo y todos los demás quedan iguales entre sí.
- */
-export function weightFor(size: number, median: number, whale: boolean): number {
-  const reference = median > 0 ? median : size;
-  const magnitude = Math.log1p(size / Math.max(reference, 1e-12));
-  const base = WEIGHT_MIN + magnitude * 0.55;
-  return Math.min(WEIGHT_MAX, whale ? base * 1.8 : base);
-}
 
 /**
  * Ímpetu del equipo: cuánto del volumen agresor reciente le pertenece. 0,5 es
@@ -440,51 +556,19 @@ export function isKO(zone: BlastZone, x: number, y: number): boolean {
 }
 
 /* ------------------------------------------------------------------ */
-/* Gigantismo                                                          */
+/* El super                                                            */
 /* ------------------------------------------------------------------ */
 
 /**
- * Cuando la liquidez de un lado del libro crece, ese equipo se envalentona: de
- * a UNO por vez, un peleador crece en tres pasos y al llegar arriba descarga un
- * super que despide a todo lo que tenga cerca, y vuelve a su tamaño.
- *
- * De a uno y no todos juntos es lo que lo hace legible: con los tres creciendo a
- * la vez no se entiende qué pasó, con uno solo se ve venir el golpe.
+ * Hasta el pivot de 2026-08-23 (ver CLAUDE.md) el super salía del gigantismo:
+ * cuando la liquidez de un lado del libro pasaba de un umbral, ese equipo
+ * hacía crecer a uno de los suyos en tres pasos y al llegar arriba lo
+ * descargaba. Ahora sale directo de la barra personal —la misma que paga las
+ * especiales— al llegar a `COST_SUPER`, sin turnos de equipo ni escalado
+ * visual: se dispara, y punto.
  */
-export const GROWTH_MAX_STAGE = 3;
-/** Cuota del libro a partir de la cual un equipo empieza a crecer. */
-export const GROWTH_THRESHOLD = 0.56;
-/** Segundos entre pasos. Es el tiempo que tarda en verse venir. */
-export const GROWTH_COOLDOWN = 1.6;
 
-/**
- * Escalas de la especificación del usuario: 1,15 / 1,30 / 1,50.
- *
- * Las que había —hasta 2,6×— estaban pensadas para cápsulas sin cara, donde el
- * único recurso para que se notara era el tamaño bruto. Con un personaje
- * dibujado, 2,6× es un monstruo que tapa el escenario y deja de leerse como el
- * mismo peleador. A 1,5× se nota perfecto y sigue siendo él.
- */
-const GROWTH_SCALES = [1, 1.15, 1.3, 1.5] as const;
-
-export function growthScale(stage: number): number {
-  const clamped = stage < 0 ? 0 : stage > GROWTH_MAX_STAGE ? GROWTH_MAX_STAGE : stage;
-  return GROWTH_SCALES[clamped];
-}
-
-/** Cuota de la liquidez del libro que le corresponde a un equipo. */
-export function bookShare(bidVolume: number, askVolume: number, team: number): number {
-  const total = bidVolume + askVolume;
-  if (total <= 0) return 0.5;
-  const bidShare = bidVolume / total;
-  return team === TEAM_GREEN ? bidShare : 1 - bidShare;
-}
-
-export function shouldGrow(share: number, sinceLastStep: number): boolean {
-  return share > GROWTH_THRESHOLD && sinceLastStep >= GROWTH_COOLDOWN;
-}
-
-/** Alcance y potencia del super que se descarga al completar el gigantismo. */
+/** Alcance y potencia del super. */
 export const SUPER_RADIUS = 3.4;
 export const SUPER_FORCE = 15;
 export const SUPER_DAMAGE = 34;
@@ -500,32 +584,26 @@ export function superForce(distance: number): number {
 /* ------------------------------------------------------------------ */
 
 /**
- * Cada peleador tiene UNA barra. Las órdenes agresoras de su lado la cargan y
- * **todo lo que golpea la gasta**: el puño, la patada, la especial y el super.
+ * Cada peleador tiene UNA barra, cargada por las órdenes agresoras de su
+ * lado. Desde el pivot de 2026-08-23 (ver CLAUDE.md) es lo ÚNICO que el
+ * mercado decide en la pelea: la gastan la especial y el super, nunca el
+ * cuerpo a cuerpo.
  *
- * Antes los golpes no salían del mercado. El cuerpo a cuerpo pegaba en cada
- * contacto que pasara el cooldown y las especiales salían de un temporizador
- * aleatorio de 8 a 12 segundos —el código decía, textual, que "no dependen de
- * que el mercado haga nada"—. El resultado era un goteo constante de golpes
- * chicos: muchos, iguales entre sí, y ninguno significaba nada. Un espectador no
- * podía mirar la pelea y sacar UNA sola conclusión sobre el libro.
+ * Antes esta barra también pagaba el puño y la patada, y antes de eso ni
+ * siquiera existía: el cuerpo a cuerpo pegaba en cada contacto que pasara el
+ * cooldown y las especiales salían de un temporizador aleatorio de 8 a 12
+ * segundos, sin mirar el mercado para nada. El cuerpo a cuerpo ya volvió a
+ * ser incondicional —es el forcejeo constante de la pelea, no el evento—, y
+ * lo que la barra dice ahora es más preciso: un especial o un super que se
+ * ve **es** el mercado pagándolo, punto.
  *
- * Con la barra, un golpe que se ve **es** un trade que pasó. El ritmo de la
- * pelea es el ritmo del mercado: libro quieto, pelea de forcejeo; ráfaga de
- * compras, el verde descarga. Y como cada uno tira siempre lo más caro que puede
- * pagar, la potencia sube sola con el flujo en vez de estar pegada a una
- * constante.
- *
- * **El precio a pagar, y es real**: con el libro muerto no hay golpes. El
- * temporizador viejo existía justamente para que "siempre esté pasando algo
- * aunque el libro esté quieto". Eso se pierde a propósito — un visualizador que
- * inventa acción cuando no hay datos está mintiendo—, pero deja la pantalla
- * quieta en un mercado sin volumen. Lo que sostiene la escena en ese caso es el
- * forcejeo del cuerpo a cuerpo, que no cuesta energía y sólo separa.
+ * **El precio a pagar, y es real**: con el libro muerto no hay especiales ni
+ * super, sólo cuerpo a cuerpo. Un visualizador que inventa esos golpes
+ * grandes cuando no hay datos estaría mintiendo, así que la pantalla se
+ * queda sin ellos en un mercado sin volumen — el forcejeo sigue sosteniendo
+ * la escena en ese caso.
  */
 
-/** Puño o patada. Barato: es el relleno, no el evento. */
-export const COST_MELEE = 0.12;
 /** Especial. Sale cara para que se vea venir. */
 export const COST_SKILL = 0.45;
 /**
@@ -602,70 +680,6 @@ function clamp01(v: number): number {
 }
 
 /* ------------------------------------------------------------------ */
-/* El ultra: la barra del equipo                                       */
-/* ------------------------------------------------------------------ */
-
-/**
- * Arriba de las tres barras personales hay UNA por equipo. La cargan las mismas
- * órdenes, y cuando se llena le da el **ultra** al peleador al que le toca: el
- * primero, después el segundo, después el tercero, y vuelve a empezar.
- *
- * Es lo que le da sentido al gigantismo. Antes crecer salía de la cuota de
- * liquidez del libro y el super se descargaba solo al tercer paso, así que el
- * espectador veía a alguien inflarse sin saber por qué ni a quién le iba a tocar
- * después. Ahora el ciclo es de tres y se anuncia: el elegido crece a medida que
- * la barra del equipo se llena —el gigantismo ES el dibujo de la barra— y el
- * turno pasa al siguiente en cuanto descarga.
- *
- * El libro no queda afuera: modula la velocidad de carga. El equipo que domina
- * la liquidez carga más rápido, así que `bidVolume` y `askVolume` siguen
- * decidiendo quién llega antes a su ultra.
- */
-
-/**
- * Cuánto carga la barra de equipo un trade del tamaño de la mediana. Bajó de
- * 0,018 a 0,011 —hacen falta unos 90 en vez de 55— porque con mercado movido
- * (varios cientos de trades en pocos minutos) el super salía cada pocos
- * segundos y dejaba de leerse como el momento excepcional que es. A ritmo de
- * mercado normal ahora es un ultra por equipo cerca del minuto; en mercado
- * movido sigue siendo más frecuente, pero nunca al punto de sentirse spameado.
- */
-const ULTRA_PER_MEDIAN = 0.011;
-
-/**
- * A partir de acá el elegido deja de gastar en golpes y especiales: está
- * guardando para el ultra. Coincide con el paso 2 de gigantismo, así que el
- * momento en que se planta es el mismo en que se lo ve grande. Antes de eso
- * pelea normal, porque un peleador que se pasa media pelea sin atacar es un
- * peleador de menos.
- */
-export const ULTRA_HOLD = 0.66;
-
-/** Lo que suma a la barra de equipo un trade agresor, según la cuota del libro. */
-export function ultraGain(size: number, median: number, share: number): number {
-  const base = median > 0 ? Math.min(size / median, CHARGE_CAP) : 1;
-  // El libro empuja, pero no decide. Con el libro entero en contra la carga va a
-  // 0,7x y con todo a favor a 1,3x: el que pierde el libro tarda menos del doble
-  // que el que lo domina, nunca más. Pasado ese punto el equipo que va perdiendo
-  // no llega nunca a su ultra y la pelea deja de tener vuelta — que es
-  // justamente lo que el ultra por turnos vino a garantizar.
-  return base * ULTRA_PER_MEDIAN * (0.7 + clamp01(share) * 0.6);
-}
-
-/**
- * En qué paso de gigantismo va el elegido según la barra de su equipo.
- *
- * Discreto y no continuo: en pasos se lee como un aviso —"va por el segundo"— y
- * de corrido se ve como un zoom lento que nadie registra.
- */
-export function ultraStage(ultra: number): number {
-  if (ultra >= 0.99) return GROWTH_MAX_STAGE;
-  if (ultra >= ULTRA_HOLD) return 2;
-  if (ultra >= 0.33) return 1;
-  return 0;
-}
-
-/* ------------------------------------------------------------------ */
 /* Estado del combate para el HUD                                      */
 /* ------------------------------------------------------------------ */
 
@@ -686,12 +700,6 @@ export interface MatchState {
   ganador: number;
   /** Si se está jugando el torneo 1v1. Lo lee el HUD para no mentir. */
   torneo: boolean;
-  /** Etapa de gigantismo en curso por equipo. 0 = nadie creciendo. */
-  charge: Uint8Array;
-  /** La barra de ultra del equipo, de 0 a 1. */
-  ultra: Float32Array;
-  /** A qué carril del bando le toca el próximo ultra. */
-  ultraTurn: Uint8Array;
 }
 
 export function createMatchState(): MatchState {
@@ -703,8 +711,5 @@ export function createMatchState(): MatchState {
     plantel: new Uint8Array(2),
     ganador: -1,
     torneo: false,
-    charge: new Uint8Array(2),
-    ultra: new Float32Array(2),
-    ultraTurn: new Uint8Array(2),
   };
 }

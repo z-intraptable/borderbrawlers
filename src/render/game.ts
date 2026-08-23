@@ -6,7 +6,6 @@ import type { Match } from '../game/match';
 import {
   EVENT_ENTRA,
   EVENT_ESTALLIDO,
-  EVENT_GROW,
   EVENT_HIT,
   EVENT_KO,
   EVENT_LAND,
@@ -23,9 +22,8 @@ import {
   platformCenterX,
   platformHalfWidth,
   stepMatch,
-  updateStageFromBook,
 } from '../game/match';
-import { SLOT_ACTIVE, TEAM_GREEN } from '../game/fighters';
+import { COST_SUPER, SLOT_ACTIVE, TEAM_GREEN } from '../game/fighters';
 import type { BinanceFeedClient } from '../net/feedCore';
 import { createFighterView } from '../art/fighter';
 import type { FighterView } from '../art/fighter';
@@ -804,7 +802,6 @@ export async function startGame(
   const fx = createFx();
 
   let accumulator = 0;
-  let lastBookId = -1;
   let hitstop = 0;
   let elapsed = 0;
 
@@ -850,17 +847,6 @@ export async function startGame(
     /** Tiempo de la pelea: el mismo, a la velocidad de `RITMO`. */
     const dtPelea = dt * ritmo;
     elapsed += dtPelea;
-
-    // El escenario se recalcula sólo cuando llega un snapshot nuevo.
-    if (client.book.lastUpdateId !== lastBookId && client.book.mid > 0) {
-      lastBookId = client.book.lastUpdateId;
-      updateStageFromBook(
-        match,
-        client.book.bidQtys, client.book.bidCount,
-        client.book.askQtys, client.book.askCount,
-        client.stats.bookQtyMedian,
-      );
-    }
 
     if (hitstop > 0) {
       // Durante el hitstop no se acumula tiempo de simulación. No se descarta:
@@ -1129,11 +1115,13 @@ export async function startGame(
           flash(target, x, y, 0.65, 0.18, teamColor);
           destellar(DESTELLO_KO, teamColor);
           stop = Math.max(stop, HITSTOP_KO);
-          // Sin acercamiento: con los poderes apagados (`PODERES_ACTIVOS` en
-          // match.ts) el KO queda como único gatillo de `zoomTarget`, y un
-          // salto de plano en cada caída es la cámara "cazando" la pelea en
-          // vez de quedarse fija mirándola. El fogonazo y el hitstop ya
-          // marcan que pasó algo; no hace falta que la cámara se mueva.
+          // Sin acercamiento: un salto de plano en cada caída es la cámara
+          // "cazando" la pelea en vez de quedarse fija mirándola. El
+          // fogonazo y el hitstop ya marcan que pasó algo; no hace falta que
+          // la cámara se mueva. (Escrito cuando el KO era el único gatillo
+          // de `zoomTarget` con los poderes apagados; con especial y super
+          // reactivados desde el pivot de 2026-08-23 —ver CLAUDE.md— vale la
+          // pena revisar si el criterio sigue siendo el mismo.)
           break;
         case EVENT_ESTALLIDO: {
           // Mismo criterio: sin bola, rayos, esquirlas ni onda — sólo el
@@ -1177,10 +1165,6 @@ export async function startGame(
           wave(target, x, y - FIGHTER_HALF_HEIGHT, 1.1, 0.34, teamColor);
           burst(target, x, y - FIGHTER_HALF_HEIGHT * 0.6, 9, 6, 0.12, 0.4, teamColor);
           dust(target, x, y - FIGHTER_HALF_HEIGHT, 1.1);
-          break;
-        case EVENT_GROW:
-          // Sin anillo: el propio cambio de tamaño del peleador ya avisa que
-          // está creciendo, no hace falta una bola de luz encima.
           break;
         default:
           break;
@@ -1702,9 +1686,8 @@ const BAR_GOLD = 0xffcc33;
  * fuerte" en "venía cargado", que es la lectura del libro que la pelea tiene que
  * entregar.
  *
- * Al elegido para el ultra se le pinta el marco en dorado. Es cómo se sabe a
- * quién le toca el super ANTES de que salga, que es la mitad de la gracia del
- * ciclo por turnos: sin eso el super vuelve a ser una sorpresa.
+ * Con la barra por encima de `COST_SUPER` se le pinta el marco en dorado: es
+ * cómo se sabe que el super está a un cuadro de salir, antes de que salga.
  */
 function drawBars(g: Graphics, match: Match): void {
   g.clear();
@@ -1715,18 +1698,18 @@ function drawBars(g: Graphics, match: Match): void {
     // `y` del mundo crece hacia arriba y el de la pantalla hacia abajo: la capa
     // del mundo ya está invertida, así que acá se resta para subir.
     const y = -(match.y[i] + FIGHTER_HALF_HEIGHT * scale + BAR_LIFT);
-    const elegido = match.growing[match.team[i]] === i;
+    const fill = match.energy[i];
+    const cargado = fill >= COST_SUPER;
 
     g.rect(x, y, BAR_WIDTH, BAR_HEIGHT).fill({ color: BAR_BACK, alpha: 0.75 });
-    const fill = match.energy[i];
     if (fill > 0) {
       g.rect(x, y, BAR_WIDTH * fill, BAR_HEIGHT)
         .fill(match.team[i] === TEAM_GREEN ? GREEN : RED);
     }
     g.rect(x, y, BAR_WIDTH, BAR_HEIGHT).stroke({
-      width: elegido ? 0.035 : 0.018,
-      color: elegido ? BAR_GOLD : 0x000000,
-      alpha: elegido ? 1 : 0.55,
+      width: cargado ? 0.035 : 0.018,
+      color: cargado ? BAR_GOLD : 0x000000,
+      alpha: cargado ? 1 : 0.55,
     });
   }
 }
