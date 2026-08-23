@@ -37,6 +37,7 @@ function ctx(over: Partial<PlanContext> = {}): PlanContext {
     cercaDelBorde: false,
     dañoPropio: 0,
     dañoRival: 0,
+    superEnfriando: false,
     ...over,
   };
 }
@@ -63,6 +64,12 @@ console.log('\n== puntajeAccion: qué se puede y qué no ==');
   check('acercarse y sostener siempre se pueden',
     puntajeAccion(ACCION_ACERCAR, ctx()) > -Infinity
     && puntajeAccion(ACCION_SOSTENER, ctx()) > -Infinity);
+
+  // Sin esto medido con mercado agitado sintético: 0 especiales en 20
+  // partidos enteros, porque la barra se recarga tan rápido que el super
+  // siempre gana apenas puede -- ver `superEnfriando` en fighters.ts.
+  check('con barra llena pero enfriando, el super no se puede',
+    puntajeAccion(ACCION_SUPER, ctx({ energia: 1, superEnfriando: true })) === -Infinity);
 }
 
 console.log('\n== puntajeAccion: qué conviene más ==');
@@ -90,6 +97,11 @@ console.log('\n== planear: el árbol completo ==');
   // mejor que ésa.
   check('con barra sólo para la especial, la tira',
     planear(ctx({ energia: COST_SKILL }), ctx({ energia: 0 })) === ACCION_ESPECIAL);
+
+  // Barra llena, pero el super todavía enfriando: vuelve a valer la
+  // especial. Es la regresión real que motivó `superEnfriando`.
+  check('con barra llena y el super enfriando, tira la especial en vez de esperar',
+    planear(ctx({ energia: 1, superEnfriando: true }), ctx({ energia: 0 })) === ACCION_ESPECIAL);
 
   // Las dos barras llenas: la especial expone, y el rival puede contestar
   // con la suya -- el 1-ply tiene que notarlo y no siempre elegir especial.

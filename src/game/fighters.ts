@@ -318,6 +318,14 @@ export interface PlanContext {
   /** % de daño acumulado propio y del rival. */
   dañoPropio: number;
   dañoRival: number;
+  /**
+   * Si el super sigue enfriando (`SUPER_COOLDOWN` en match.ts). Sin esto, con
+   * el mercado a mil la barra vuelve a llenarse tan rápido que el super gana
+   * SIEMPRE apenas la energía alcanza y la especial no se elige nunca — se
+   * midió con un mercado agitado sintético: 0 especiales en 20 partidos
+   * enteros. El super es el remate ocasional, no el ataque de rutina.
+   */
+  superEnfriando: boolean;
 }
 
 /**
@@ -327,7 +335,7 @@ export interface PlanContext {
 export function puntajeAccion(accion: number, ctx: PlanContext): number {
   switch (accion) {
     case ACCION_SUPER:
-      if (ctx.energia < COST_SUPER) return -Infinity;
+      if (ctx.energia < COST_SUPER || ctx.superEnfriando) return -Infinity;
       // Más que el techo de la especial (4 + 1×2 = 6, con la barra llena):
       // con las dos listas a la vez, gana el remate. Conviene todavía más
       // cuanto más daño acumuló el rival: el super lo manda lejos con menos

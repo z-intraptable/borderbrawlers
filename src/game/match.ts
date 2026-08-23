@@ -187,6 +187,17 @@ const MELEE_NUDGE = 7;
  */
 const SKILL_COOLDOWN = 2.5;
 /**
+ * Enfriamiento del super, aparte de lo que tarda en recargarse la barra.
+ *
+ * Sin esto, con el mercado a mil la barra vuelve a llenarse casi al toque de
+ * descargarla y el super gana SIEMPRE por sobre la especial (ver el
+ * comentario de `superEnfriando` en `fighters.ts`) — medido con un mercado
+ * agitado sintético: 0 especiales en 20 partidos enteros, todo remate. Más
+ * largo que `SKILL_COOLDOWN` a propósito: el super es la excepción, no la
+ * rutina.
+ */
+const SUPER_COOLDOWN = 6;
+/**
  * Cada cuánto se vuelve a evaluar el plan (`planear` en fighters.ts), en
  * segundos de simulación. Evaluarlo cada cuadro sería carísimo para seis
  * unidades a 60 fps y además se vería nervioso -- un peleador cambiando de
@@ -531,6 +542,8 @@ export interface Match {
   lastTurn: Float32Array;
   /** Cuándo tiró su última especial. Ver `SKILL_COOLDOWN`. */
   lastSkillAt: Float32Array;
+  /** Cuándo tiró su último super. Ver `SUPER_COOLDOWN`. */
+  lastSuperAt: Float32Array;
   /**
    * El plan vigente (`ACCION_*` en fighters.ts) y cuándo se decidió.
    * `REPLAN_INTERVAL` marca cada cuánto se vuelve a evaluar — no cada
@@ -653,6 +666,7 @@ export function createMatch(
     engaged: new Uint8Array(CAPACITY),
     lastTurn: new Float32Array(CAPACITY),
     lastSkillAt: new Float32Array(CAPACITY),
+    lastSuperAt: new Float32Array(CAPACITY),
     plan: new Uint8Array(CAPACITY).fill(ACCION_ACERCAR),
     lastPlan: new Float32Array(CAPACITY),
     hitstun: new Float32Array(CAPACITY),
@@ -793,6 +807,7 @@ export function stepMatch(
           cercaDelBorde: !hasGroundAhead(m.skyline, m.x[i], -dir, LOOKAHEAD),
           dañoPropio: m.damage[i],
           dañoRival: m.damage[target],
+          superEnfriando: now - m.lastSuperAt[i] < SUPER_COOLDOWN,
         };
         const ctxRival: PlanContext = {
           distancia: ctx.distancia,
@@ -801,6 +816,7 @@ export function stepMatch(
           cercaDelBorde: !hasGroundAhead(m.skyline, m.x[target], dir, LOOKAHEAD),
           dañoPropio: m.damage[target],
           dañoRival: m.damage[i],
+          superEnfriando: now - m.lastSuperAt[target] < SUPER_COOLDOWN,
         };
         m.plan[i] = planear(ctx, ctxRival);
         m.lastPlan[i] = now;
@@ -914,8 +930,10 @@ export function stepMatch(
     if (m.plan[i] !== ACCION_SUPER) continue;
     if (m.energy[i] < COST_SUPER) continue;
     if (now - m.hitstun[i] < HITSTUN) continue;
+    if (now - m.lastSuperAt[i] < SUPER_COOLDOWN) continue;
     const spent = m.energy[i];
     m.energy[i] = 0;
+    m.lastSuperAt[i] = now;
     unleash(m, i, now, spent);
   }
 
