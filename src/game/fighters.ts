@@ -300,9 +300,18 @@ export const ACCION_RETIRAR = 1;
 export const ACCION_SOSTENER = 2;
 export const ACCION_ESPECIAL = 3;
 export const ACCION_SUPER = 4;
+/**
+ * Dash/air dodge: un pulso de velocidad de escape, invulnerable a poder y
+ * super mientras dura (ver `DODGE_INVULN` en match.ts). Distinta de
+ * `ACCION_RETIRAR` en el motivo: retirar es "conviene alejarse por el daño
+ * acumulado", esquivar es "el rival YA decidió tirar algo y esto lo esquiva
+ * de verdad" -- puede elegirse aunque retirarse no convenga.
+ */
+export const ACCION_ESQUIVAR = 5;
 
 const CANDIDATAS = [
   ACCION_ACERCAR, ACCION_RETIRAR, ACCION_SOSTENER, ACCION_ESPECIAL, ACCION_SUPER,
+  ACCION_ESQUIVAR,
 ] as const;
 
 /** Lo que un peleador ve de sí mismo (o del rival, para el paso 1-ply) al planear. */
@@ -326,6 +335,13 @@ export interface PlanContext {
    * enteros. El super es el remate ocasional, no el ataque de rutina.
    */
   superEnfriando: boolean;
+  /**
+   * El rival ya decidió tirar especial o super (su `plan` de la última
+   * replanificación) y el esquive propio no está enfriando. Es la señal de
+   * "hay algo cargado viniendo", no una predicción -- se lee directo del
+   * plan vigente del rival, que YA es la telegrafía del golpe.
+   */
+  amenazado: boolean;
 }
 
 /**
@@ -350,6 +366,14 @@ export function puntajeAccion(accion: number, ctx: PlanContext): number {
       // Conviene retirarse cuando uno mismo acumuló más daño que el rival:
       // el próximo golpe que se reciba duele más que el que se da.
       return (ctx.dañoPropio - ctx.dañoRival) * 0.03;
+    case ACCION_ESQUIVAR:
+      // Al borde del vacío tampoco: el pulso de escape es hacia atrás, igual
+      // que retirarse, y ahí atrás no hay piso.
+      if (!ctx.amenazado || ctx.cercaDelBorde) return -Infinity;
+      // Más que ACERCAR/SOSTENER siempre que haya amenaza real, pero menos
+      // que tirar la propia especial/super -- si las dos barras están
+      // listas a la vez, conviene más rematar que esquivar.
+      return 3;
     case ACCION_SOSTENER:
       return 0.5;
     case ACCION_ACERCAR:

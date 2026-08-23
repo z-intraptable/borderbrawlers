@@ -10,6 +10,7 @@
 import {
   ACCION_ACERCAR,
   ACCION_ESPECIAL,
+  ACCION_ESQUIVAR,
   ACCION_RETIRAR,
   ACCION_SOSTENER,
   ACCION_SUPER,
@@ -28,7 +29,7 @@ function check(name: string, ok: boolean, detail = ''): void {
 
 const ALCANCE = 22;
 
-/** Un contexto neutro, para no repetir los siete campos en cada caso. */
+/** Un contexto neutro, para no repetir los ocho campos en cada caso. */
 function ctx(over: Partial<PlanContext> = {}): PlanContext {
   return {
     distancia: 3,
@@ -38,6 +39,7 @@ function ctx(over: Partial<PlanContext> = {}): PlanContext {
     dañoPropio: 0,
     dañoRival: 0,
     superEnfriando: false,
+    amenazado: false,
     ...over,
   };
 }
@@ -70,6 +72,13 @@ console.log('\n== puntajeAccion: qué se puede y qué no ==');
   // siempre gana apenas puede -- ver `superEnfriando` en fighters.ts.
   check('con barra llena pero enfriando, el super no se puede',
     puntajeAccion(ACCION_SUPER, ctx({ energia: 1, superEnfriando: true })) === -Infinity);
+
+  check('sin amenaza, esquivar no se puede',
+    puntajeAccion(ACCION_ESQUIVAR, ctx({ amenazado: false })) === -Infinity);
+  check('con amenaza, esquivar sí se puede',
+    puntajeAccion(ACCION_ESQUIVAR, ctx({ amenazado: true })) > -Infinity);
+  check('amenazado pero al borde del vacío, esquivar tampoco',
+    puntajeAccion(ACCION_ESQUIVAR, ctx({ amenazado: true, cercaDelBorde: true })) === -Infinity);
 }
 
 console.log('\n== puntajeAccion: qué conviene más ==');
@@ -126,6 +135,18 @@ console.log('\n== planear: el árbol completo ==');
   check('acumulado alto pero al borde del vacío: no se tira',
     planear(ctx({ dañoPropio: 300, dañoRival: 0, cercaDelBorde: true }), ctx())
     !== ACCION_RETIRAR);
+
+  // Amenazado y sin barra para nada mejor: esquiva en vez de acercarse.
+  check('amenazado, sin barra propia, esquiva',
+    planear(ctx({ amenazado: true }), ctx()) === ACCION_ESQUIVAR);
+
+  // Amenazado pero con el super listo: rematar conviene más que esquivar.
+  check('amenazado pero con el super listo, prefiere rematar',
+    planear(ctx({ amenazado: true, energia: 1 }), ctx()) === ACCION_SUPER);
+
+  // Sin amenaza, nunca esquiva -- no hay nada de qué escapar.
+  check('sin amenaza, no esquiva',
+    planear(ctx({ amenazado: false }), ctx()) !== ACCION_ESQUIVAR);
 
   // Determinismo: mismo estado, misma decisión, siempre.
   const a = planear(ctx({ energia: 0.7, dañoPropio: 40 }), ctx({ energia: 0.2 }));

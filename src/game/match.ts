@@ -4,6 +4,7 @@ import { characterFor } from './roster';
 import {
   ACCION_ACERCAR,
   ACCION_ESPECIAL,
+  ACCION_ESQUIVAR,
   ACCION_RETIRAR,
   ACCION_SUPER,
   COMBO_CHAINS,
@@ -204,6 +205,23 @@ const SUPER_COOLDOWN = 6;
  * plan constantemente no se lee como una decisión, se lee como un tic.
  */
 const REPLAN_INTERVAL = 0.4;
+/**
+ * El esquive (`ACCION_ESQUIVAR`, fighters.ts): un pulso de velocidad hacia
+ * atrás/arriba, invulnerable a poder y super (no al cuerpo a cuerpo, ver el
+ * comentario de `dodgeUntil`), disparado por la IA cuando el rival ya
+ * decidió tirar especial o super (`m.plan[target]`, sin esperar a ver el
+ * golpe conectar -- el plan del rival YA es la telegrafía).
+ *
+ * `DODGE_INVULN` (0,3s) tiene que alcanzar para que el pulso de velocidad
+ * saque al peleador del radio del poder/super antes de que expire; menos y
+ * la ventana se cierra con el golpe todavía en camino. `DODGE_COOLDOWN`
+ * (1,2s) es más corto que `SKILL_COOLDOWN` a propósito: la especial rival
+ * puede volver a estar lista antes que la propia, y esquivar tiene que
+ * poder responder de nuevo.
+ */
+const DODGE_INVULN = 0.3;
+const DODGE_COOLDOWN = 1.2;
+const DODGE_SPEED = 9;
 const CONTACT = 0.85;
 /**
  * Distancia de guardia. Apenas menor que `CONTACT` para que el cuerpo a cuerpo
@@ -553,6 +571,16 @@ export interface Match {
    */
   plan: Uint8Array;
   lastPlan: Float32Array;
+  /**
+   * Hasta cuándo el esquive (`ACCION_ESQUIVAR`) lo hace invulnerable a un
+   * poder o un super. Ver `DODGE_INVULN`/`DODGE_COOLDOWN` y el bloque
+   * "esquivar" en `stepMatch`. El cuerpo a cuerpo NO lo respeta a propósito
+   * -- esquivar es la respuesta al golpe que se ve venir cargado, no un
+   * escudo contra todo.
+   */
+  dodgeUntil: Float32Array;
+  /** Cuándo esquivó por última vez. Ver `DODGE_COOLDOWN`. */
+  lastDodge: Float32Array;
   hitstun: Float32Array;
   whale: Uint8Array;
   /**
@@ -669,6 +697,8 @@ export function createMatch(
     lastSuperAt: new Float32Array(CAPACITY),
     plan: new Uint8Array(CAPACITY).fill(ACCION_ACERCAR),
     lastPlan: new Float32Array(CAPACITY),
+    dodgeUntil: new Float32Array(CAPACITY),
+    lastDodge: new Float32Array(CAPACITY).fill(-DODGE_COOLDOWN),
     hitstun: new Float32Array(CAPACITY),
     whale: new Uint8Array(CAPACITY),
     scale: new Float32Array(CAPACITY).fill(1),
@@ -800,6 +830,12 @@ export function stepMatch(
       // se cae de vuelta en ACERCAR, que con `target < 0` ya vale "caminar
       // hacia el centro" más abajo, en `desired`.
       if (target >= 0 && now - m.lastPlan[i] >= REPLAN_INTERVAL) {
+        // El rival ya tirado (plan ESPECIAL/SUPER de su última
+        // replanificación) es la telegrafía: no hay que predecir nada, sólo
+        // leerla. Propio enfriamiento aparte, para no elegir ESQUIVAR cuando
+        // no hay pulso de escape disponible todavía.
+        const propioListo = now - m.lastDodge[i] >= DODGE_COOLDOWN;
+        const rivalListo = now - m.lastDodge[target] >= DODGE_COOLDOWN;
         const ctx: PlanContext = {
           distancia: Math.abs(dx),
           energia: m.energy[i],
@@ -808,6 +844,8 @@ export function stepMatch(
           dañoPropio: m.damage[i],
           dañoRival: m.damage[target],
           superEnfriando: now - m.lastSuperAt[i] < SUPER_COOLDOWN,
+          amenazado: propioListo
+            && (m.plan[target] === ACCION_ESPECIAL || m.plan[target] === ACCION_SUPER),
         };
         const ctxRival: PlanContext = {
           distancia: ctx.distancia,
@@ -817,6 +855,8 @@ export function stepMatch(
           dañoPropio: m.damage[target],
           dañoRival: m.damage[i],
           superEnfriando: now - m.lastSuperAt[target] < SUPER_COOLDOWN,
+          amenazado: rivalListo
+            && (m.plan[i] === ACCION_ESPECIAL || m.plan[i] === ACCION_SUPER),
         };
         m.plan[i] = planear(ctx, ctxRival);
         m.lastPlan[i] = now;
@@ -836,6 +876,23 @@ export function stepMatch(
       // igual que `aTiro`, sólo que a esperar su propio turno de descargarlo
       // (ver el bloque del super, más abajo).
       const retirando = m.plan[i] === ACCION_RETIRAR;
+      // El esquive SE LANZA una sola vez, en el cuadro en que el plan pasa a
+      // ESQUIVAR con el cooldown propio ya cumplido -- no en cada cuadro que
+      // el plan siga diciendo ESQUIVAR, o el pulso se relanzaría solo hasta
+      // la próxima replanificación. Mientras dura la ventana de invulnerable
+      // (`dodgeUntil`), el bloque de aceleración de más abajo se salta
+      // entero: es un PULSO, no un objetivo de velocidad que el steering
+      // normal puede pisar en el mismo cuadro que se lanza.
+      const esquivando = now < m.dodgeUntil[i];
+      const lanzarEsquive = m.plan[i] === ACCION_ESQUIVAR && !esquivando
+        && now - m.lastDodge[i] >= DODGE_COOLDOWN;
+      if (lanzarEsquive) {
+        m.vx[i] = -dir * DODGE_SPEED;
+        if (grounded) m.vy[i] = JUMP_SPEED * 0.5;
+        m.dodgeUntil[i] = now + DODGE_INVULN;
+        m.lastDodge[i] = now;
+        m.grounded[i] = 0;
+      }
       const moveDir = retirando ? -dir : dir;
       const closing = m.plan[i] === ACCION_ACERCAR && Math.abs(dx) > rango;
       m.engaged[i] = closing ? 0 : 1;
@@ -850,7 +907,11 @@ export function stepMatch(
         : closing ? (moveDir + spread * 0.5) * RUN_SPEED * boost
           : (spread * SPACING_GAIN + moveDir * HOLD_PULL) * RUN_SPEED;
 
-      if (grounded) {
+      if (esquivando || lanzarEsquive) {
+        // El pulso decae solo, arrastrado por el mismo AIR_CONTROL de
+        // siempre en el próximo cuadro -- acá sólo se evita que el steering
+        // normal lo cancele en el instante en que se lanza.
+      } else if (grounded) {
         // Acelera hacia lo que quiere, no salta a ello. Ver `GROUND_ACCEL`.
         const limite = GROUND_ACCEL * dt;
         m.vx[i] += Math.max(-limite, Math.min(limite, desired - m.vx[i]));
@@ -875,8 +936,10 @@ export function stepMatch(
 
       // El que está por tirar (especial o super) tampoco salta: el poder
       // viaja recto y en el aire no se puede corregir la puntería, y el
-      // super pierde alcance si sale de un salto a medias.
-      const jump = !aTiro && !tirandoSuper
+      // super pierde alcance si sale de un salto a medias. El que recién
+      // lanzó el esquive tampoco: `wantsJump` pisaría el `vy` del pulso en
+      // el mismo cuadro en que se lanzó.
+      const jump = !aTiro && !tirandoSuper && !lanzarEsquive
         && wantsJump({ grounded, dy, dx, groundAhead, sinceJump: now - m.lastJump[i] });
       // Recuperación: cayéndose por debajo del escenario gasta el salto extra.
       // Sin esto el primer empujón es siempre KO y no hay pelea.
@@ -1215,6 +1278,10 @@ function moverPoderes(m: Match, dt: number, now: number): void {
 
     for (let j = 0; j < CAPACITY; j++) {
       if (m.slot[j] !== SLOT_ACTIVE || m.team[j] === p.team[k]) continue;
+      // El esquive lo hace invulnerable a poder y super mientras dura (ver
+      // `DODGE_INVULN`), no al cuerpo a cuerpo -- ese chequeo vive en el
+      // bloque del forcejeo, no acá.
+      if (m.dodgeUntil[j] > now) continue;
       const dx = m.x[j] - p.x[k];
       const dy = m.y[j] - p.y[k];
       const distance = Math.hypot(dx, dy);
@@ -1352,6 +1419,8 @@ function activate(m: Match, slot: number, team: number, now: number): void {
   // que decida de nuevo apenas tenga rival.
   m.plan[slot] = ACCION_ACERCAR;
   m.lastPlan[slot] = 0;
+  m.dodgeUntil[slot] = 0;
+  m.lastDodge[slot] = -DODGE_COOLDOWN;
 
   // Repartidos por carril: los tres apareciendo en el mismo punto caen uno
   // encima del otro y arrancan la pelea amontonados.
@@ -1380,6 +1449,7 @@ function unleash(m: Match, self: number, now: number, spent: number): void {
   m.shake = 1;
   for (let i = 0; i < CAPACITY; i++) {
     if (i === self || m.slot[i] !== SLOT_ACTIVE || m.team[i] === m.team[self]) continue;
+    if (m.dodgeUntil[i] > now) continue;
     const dx = m.x[i] - m.x[self];
     const dy = m.y[i] - m.y[self];
     const distance = Math.hypot(dx, dy);
