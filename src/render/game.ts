@@ -1026,12 +1026,18 @@ export async function startGame(
     }
 
     if (kind === ACT_SKILL) {
-      // La especial ya NO lleva bola de energía, rayos ni esquirlas: por más
-      // que se les bajó el tamaño dos veces, seguían tapando al personaje
-      // (ver docs/pendiente-estilo-realista.md). Se deja lo mismo que un
-      // golpe de cuerpo a cuerpo — un fogonazo corto y el tajo direccional —
-      // así que el poder se ve pero no cubre a nadie.
+      // La especial ya NO lleva bola de energía, rayos ni esquirlas grandes:
+      // por más que se les bajó el tamaño dos veces, seguían tapando al
+      // personaje (ver docs/pendiente-estilo-realista.md). Se deja lo mismo
+      // que un golpe de cuerpo a cuerpo — un fogonazo corto y el tajo
+      // direccional — así que el poder se ve pero no cubre a nadie.
       impact(fx, x, y, hacia > 0 ? 0 : Math.PI, 0.9, teamColor);
+      // La textura de Kling (impacto/tajo), a un tamaño bien por debajo del
+      // cuerpo (ver la cuenta de radio×~3,1 en pendiente-estilo-realista.md
+      // — acá 0,5 con ESCALA 1,1-1,2 da ~0,55-0,6 unidades de mundo, la
+      // mitad de FIGHTER_HALF_HEIGHT*2). Agregado encima del fogonazo, no en
+      // vez de él: si la textura no cargó, el golpe se sigue viendo igual.
+      vfxSprites.burst('impacto', x, y, 0.5, 0.3, teamColor);
       return;
     }
 
@@ -1042,6 +1048,10 @@ export async function startGame(
     // marca cualquier golpe fuerte) y el hitstop/cámara que ya marcan que
     // pasó algo importante.
     flash(fx, x, y, 0.65, 0.18, teamColor);
+    // Igual que la especial: la textura de Kling (onda) se agrega chica,
+    // encima del fogonazo, sin volver a la bola/rayos/esquirlas grandes que
+    // se sacaron el 20/08 por tapar al personaje.
+    vfxSprites.burst('onda', x, y, 0.6, 0.35, teamColor);
     destellar(DESTELLO_KO, 0xffffff);
     hitstop = Math.max(hitstop, HITSTOP_SUPER);
     camera.cine = CINE_TIEMPO;
@@ -1113,6 +1123,7 @@ export async function startGame(
           // que marca cualquier golpe fuerte, más el tinte de pantalla que
           // dice de qué bando fue el KO.
           flash(target, x, y, 0.65, 0.18, teamColor);
+          vfxSprites.burst('esquirlas', x, y, 0.5, 0.3, teamColor);
           destellar(DESTELLO_KO, teamColor);
           stop = Math.max(stop, HITSTOP_KO);
           // Sin acercamiento: un salto de plano en cada caída es la cámara
@@ -1128,6 +1139,7 @@ export async function startGame(
           // fogonazo, igual que un golpe cuerpo a cuerpo fuerte.
           const fuerza = Math.min(1, magnitude);
           flash(target, x, y, 0.55 + fuerza * 0.2, 0.16, 0xffffff);
+          vfxSprites.burst('humo', x, y, 0.45 + fuerza * 0.15, 0.3, 0xffffff);
           destellar(DESTELLO_TIEMPO, 0xffffff);
           stop = Math.max(stop, HITSTOP_SKILL);
           // La cámara se acerca al impacto y no al que disparó: lo que hay que
