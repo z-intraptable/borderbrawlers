@@ -187,7 +187,16 @@ const MIN_HALF_WIDTH = 8;
  */
 const MAX_HALF_HEIGHT = 8.6;
 const MAX_HALF_WIDTH = STAGE_HALF_WIDTH + 1;
-const CAMERA_LAMBDA = 3.2;
+/**
+ * Bajó de 3,2 a 1,4. Reportado con video real: con las especiales ahora
+ * exigiendo casi cuerpo a cuerpo (ver ALCANCE en match.ts), la pelea entera
+ * pasa pegada y moviéndose rápido, y a 3,2 la cámara perseguía cada
+ * corrección de posición -- el resultado se leía como que "pierde el foco
+ * de la pelea", no como una cámara que sigue la acción. Más lenta, la
+ * cámara se comporta más como fija: sigue el CENTRO de la pelea sin
+ * reaccionar a cada paso.
+ */
+const CAMERA_LAMBDA = 1.4;
 /**
  * El acercamiento de los momentos clave.
  *
@@ -212,15 +221,27 @@ const CAMERA_LAMBDA = 3.2;
  * personaje — golpes y poderes "se acercan demasiado", que es distinto de
  * "tapan al personaje" (ya resuelto aparte, en el tamaño de los VFX).
  */
-const ZOOM_CLAVE = 0.1;
-const ZOOM_DECAE = 1.9;
+/**
+ * Bajó de 0,1 a 0,04, y `ZOOM_LAMBDA`/`ZOOM_DECAE` bajaron con él. Con
+ * las especiales ahora saliendo dentro del forcejeo (ver ALCANCE en
+ * match.ts) el punch-in de super/estallido pasó de disparar unas pocas
+ * veces por partido a disparar todo el tiempo -- el resultado era una
+ * cámara respirando (entra-sale-entra-sale) en vez de un acercamiento
+ * puntual. Pedido explícito: "mínimo acercamiento lento cinematográfico".
+ * 0,04 es un empujón apenas perceptible, no un primer plano.
+ */
+const ZOOM_CLAVE = 0.04;
+const ZOOM_DECAE = 0.7;
 /**
  * A qué velocidad `zoom` alcanza a `zoomTarget`. Separado de `CAMERA_LAMBDA`
  * porque el acercamiento de momento clave tiene que sentirse más decidido que
  * el paneo de encuadre normal — más lento que un salto instantáneo, más
  * rápido que seguir la pelea.
+ *
+ * Bajó de 9 a 2,5: a 9 el acercamiento entraba en ~0,1s, un salto duro. A
+ * 2,5 entra en más de un segundo -- "lento cinematográfico" en vez de un tic.
  */
-const ZOOM_LAMBDA = 9;
+const ZOOM_LAMBDA = 2.5;
 /**
  * Hasta dónde puede subir y bajar la mirada de la cámara, como fracción del alto
  * visible. Con 0,55 el piso del escenario queda a poco más de tres cuartos de
@@ -280,19 +301,8 @@ const SHOCKWAVE_TIME = 0.85;
  * si una sube, la otra tiene que acompañar.
  */
 const CINE_TIEMPO = 1.3;
-/**
- * Cuánto alto de mundo se ve durante el plano, en unidades.
- *
- * Se pide el ALTO y no el ancho porque es lo único que se lee igual en un
- * teléfono vertical y en un monitor: un `halfWidth` fijo encuadra la cabeza en
- * uno y medio escenario en el otro. Con 4,5 el peleador —que mide 1,04— ocupa
- * casi un cuarto de la pantalla en las dos.
- */
-const CINE_ALTO = 4.5;
 /** Qué fracción del alto de pantalla se come cada barra. */
 const CINE_BARRA = 0.11;
-/** A qué velocidad se pega la cámara al plano cerrado. Más rápida que la normal. */
-const CINE_LAMBDA = 9;
 
 /* --- el fotograma de impacto ----------------------------------------- */
 
@@ -1727,20 +1737,19 @@ function drawBars(g: Graphics, match: Match): void {
 }
 
 function updateCamera(camera: Camera, match: Match, dt: number, aspect: number): void {
-  // Mientras dura el plano cerrado, la cámara NO encuadra la pelea: encuadra al
-  // que tiró el super. Se sale temprano a propósito — todo el cálculo de abajo
-  // es el encuadre de grupo, que es justo lo que este plano viene a suspender.
-  if (camera.cine > 0) {
-    camera.cine = Math.max(0, camera.cine - dt);
-    const cerca = 1 - Math.exp(-CINE_LAMBDA * dt);
-    const medio = aspect > 0 ? CINE_ALTO / (2 * aspect) : MIN_HALF_WIDTH;
-    camera.x += (camera.cineX - camera.x) * cerca;
-    // Un poco arriba del centro del cuerpo: encuadrado al centro exacto, la
-    // mitad del plano es el piso.
-    camera.y += (camera.cineY + 0.6 - camera.y) * cerca;
-    camera.halfWidth += (medio - camera.halfWidth) * cerca;
-    return;
-  }
+  // El plano cerrado que reemplazaba el encuadre de grupo por un primer
+  // plano de quien tiró el super SE SACÓ. Reportado con video real: "el
+  // zoom de cámara es el error, pierde el foco de la pelea" -- literal,
+  // durante 1,3s la cámara dejaba de mostrar al rival por completo. Con las
+  // especiales ahora saliendo dentro del forcejeo (ver ALCANCE en
+  // match.ts), el super pasó de ser un momento raro a uno frecuente, así
+  // que ese corte pasó de ocasional a constante. Pedido explícito: cámara
+  // fija, con mínimo acercamiento lento -- eso lo sigue dando el punch-in
+  // de `zoomTarget` más abajo (suavizado, ver `ZOOM_CLAVE`), no un corte de
+  // plano. `camera.cine` sigue contando para las barras de letterbox
+  // (`dibujarCine`) -- el look cinematográfico queda, sólo que sin mover la
+  // cámara lejos de la pelea.
+  camera.cine = Math.max(0, camera.cine - dt);
 
   let minX = Infinity;
   let maxX = -Infinity;
