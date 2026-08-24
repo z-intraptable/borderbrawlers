@@ -347,11 +347,36 @@ export const ACCION_ESQUIVAR = 5;
  * porque no se mueve.
  */
 export const ACCION_ESCUDO = 6;
+/**
+ * Flanqueo: en vez de cerrar en línea recta (la embestida de match.ts),
+ * aproxima saltando de plataforma en plataforma cuando el rival viene
+ * jugando defensivo (`ctx.rivalDefensivo`). Reportado con video real:
+ * "sólo los veo embestirse y rebotar" -- la embestida en línea recta era el
+ * ÚNICO patrón de acercamiento que existía, así que contra un rival
+ * plantado en escudo se veía siempre la misma carga frontal. Legal sólo a
+ * distancia real (`FLANQUEO_DISTANCIA_MIN`): a cuerpo a cuerpo flanquear no
+ * aporta nada, ya se está encima.
+ */
+export const ACCION_FLANQUEAR = 7;
+/**
+ * Finta: un compromiso corto -- venía acercándose y de golpe frena y se
+ * repliega un instante -- para gastarle el cooldown de escudo/esquive al
+ * rival sin exponerse. Se elige con daño propio alto (`FINTA_DAÑO_MIN`): ahí
+ * comprometerse del todo a golpear es más caro que amagar. Compite
+ * directamente con `ACCION_RETIRAR` -- la diferencia es que retirar es huir
+ * sin volver, fintar es parte de una secuencia de acercamiento.
+ */
+export const ACCION_FINTA = 8;
 
 const CANDIDATAS = [
   ACCION_ACERCAR, ACCION_RETIRAR, ACCION_SOSTENER, ACCION_ESPECIAL, ACCION_SUPER,
-  ACCION_ESQUIVAR, ACCION_ESCUDO,
+  ACCION_ESQUIVAR, ACCION_ESCUDO, ACCION_FLANQUEAR, ACCION_FINTA,
 ] as const;
+
+/** A qué distancia mínima vale la pena flanquear en vez de embestir derecho. */
+const FLANQUEO_DISTANCIA_MIN = 3;
+/** Daño propio (%) a partir del cual fintar empieza a valer la pena. */
+const FINTA_DAÑO_MIN = 40;
 
 /** Lo que un peleador ve de sí mismo (o del rival, para el paso 1-ply) al planear. */
 export interface PlanContext {
@@ -387,6 +412,25 @@ export interface PlanContext {
   esquivarListo: boolean;
   /** Si `ACCION_ESCUDO` no está enfriando (`SHIELD_COOLDOWN` en match.ts). */
   escudoListo: boolean;
+  /**
+   * Si `ACCION_FINTA` no está enfriando (`FINTA_COOLDOWN` en match.ts).
+   * Mismo criterio que `esquivarListo`/`escudoListo`: legalidad y
+   * disponibilidad son cosas separadas.
+   */
+  fintaListo: boolean;
+  /** El rival tiene el escudo plantado (`m.plan[target] === ACCION_ESCUDO`
+   * en su última replanificación) -- la señal para preferir flanquear en
+   * vez de embestir derecho contra algo que no se va a mover. */
+  rivalDefensivo: boolean;
+  /**
+   * Bono ADITIVO por arquetipo (`Character.agresividad` en roster.ts) sobre
+   * ACERCAR/ESPECIAL/SUPER/FLANQUEAR. Aditivo y no multiplicador a propósito:
+   * varios scores de abajo pueden ser negativos o cero, y multiplicar
+   * invertiría el signo en vez de sumar una preferencia.
+   */
+  agresividad: number;
+  /** Bono aditivo por arquetipo sobre RETIRAR/ESQUIVAR/ESCUDO/FINTA. */
+  cautela: number;
 }
 
 /**
@@ -407,16 +451,16 @@ export function puntajeAccion(accion: number, ctx: PlanContext): number {
       // con las dos listas a la vez, gana el remate. Conviene todavía más
       // cuanto más daño acumuló el rival: el super lo manda lejos con menos
       // empuje si ya viene golpeado.
-      return 7 + ctx.dañoRival * 0.02;
+      return 7 + ctx.dañoRival * 0.02 + ctx.agresividad;
     case ACCION_ESPECIAL:
       if (ctx.energia < COST_SKILL || ctx.distancia > ctx.alcance) return -Infinity;
       // Cuanto más cargada, más vale la pena tirarla ya en vez de acercarse.
-      return 4 + ctx.energia * 2;
+      return 4 + ctx.energia * 2 + ctx.agresividad;
     case ACCION_RETIRAR:
       if (ctx.cercaDelBorde) return -Infinity;
       // Conviene retirarse cuando uno mismo acumuló más daño que el rival:
       // el próximo golpe que se reciba duele más que el que se da.
-      return (ctx.dañoPropio - ctx.dañoRival) * 0.03;
+      return (ctx.dañoPropio - ctx.dañoRival) * 0.03 + ctx.cautela;
     case ACCION_ESQUIVAR:
       // Al borde del vacío tampoco: el pulso de escape es hacia atrás, igual
       // que retirarse, y ahí atrás no hay piso.
@@ -424,7 +468,7 @@ export function puntajeAccion(accion: number, ctx: PlanContext): number {
       // Más que ACERCAR/SOSTENER siempre que haya amenaza real, pero menos
       // que tirar la propia especial/super -- si las dos barras están
       // listas a la vez, conviene más rematar que esquivar.
-      return 3;
+      return 3 + ctx.cautela;
     case ACCION_ESCUDO:
       if (!ctx.amenazado || !ctx.escudoListo) return -Infinity;
       // Un poco menos que esquivar: mitiga en vez de anular, así que a
@@ -432,12 +476,23 @@ export function puntajeAccion(accion: number, ctx: PlanContext): number {
       // ACERCAR/SOSTENER, y a diferencia del esquive no necesita piso
       // detrás -- cubre justo el caso en que `ACCION_ESQUIVAR` devuelve
       // -Infinity por estar al borde.
-      return 2.5;
+      return 2.5 + ctx.cautela;
+    case ACCION_FLANQUEAR:
+      if (ctx.distancia <= FLANQUEO_DISTANCIA_MIN || !ctx.rivalDefensivo) return -Infinity;
+      // Apenas por sobre ACERCAR: sólo gana cuando el rival está plantado
+      // (`rivalDefensivo`), que es justo cuando la línea recta no sirve.
+      return 1.4 + ctx.agresividad * 0.5;
+    case ACCION_FINTA:
+      if (ctx.dañoPropio < FINTA_DAÑO_MIN || ctx.cercaDelBorde) return -Infinity;
+      // Entre SOSTENER y RETIRAR: compite directo contra RETIRAR (mismo
+      // gate de daño alto), y la cautela decide cuál gana -- alta cautela
+      // prefiere fintar (mantiene la iniciativa) sobre huir del todo.
+      return 0.5 + ctx.cautela * 0.4;
     case ACCION_SOSTENER:
       return 0.5;
     case ACCION_ACERCAR:
     default:
-      return 1;
+      return 1 + ctx.agresividad;
   }
 }
 
@@ -450,8 +505,18 @@ export function puntajeAccion(accion: number, ctx: PlanContext): number {
  * no lo que el rival vaya a hacer de verdad, sino el techo de lo que podría,
  * que es lo que un rival racional puede aprovechar. Si esa resta lo empareja
  * o le gana a `ACCION_ACERCAR`, no vale la pena abrir el juego.
+ *
+ * `planVigente` (el plan de la replanificación anterior, `-1` si no hubo)
+ * recibe un bono chico y fijo (`HISTERESIS`) antes de comparar: sin esto, un
+ * empate o una diferencia marginal entre dos acciones dispara un cambio de
+ * plan cada `REPLAN_INTERVAL`, que se lee como indecisión/rebote en vez de
+ * una secuencia con intención (acercar → forcejeo → retirar →
+ * reposicionar). Sigue siendo determinista: el bono es un número fijo, no
+ * depende de reloj de pared ni de azar.
  */
-export function planear(ctx: PlanContext, ctxRival: PlanContext): number {
+const HISTERESIS = 0.2;
+
+export function planear(ctx: PlanContext, ctxRival: PlanContext, planVigente = -1): number {
   let mejor = ACCION_ACERCAR;
   let mejorPuntaje = -Infinity;
   for (const accion of CANDIDATAS) {
@@ -466,6 +531,7 @@ export function planear(ctx: PlanContext, ctxRival: PlanContext): number {
       );
       puntaje -= respuesta * 0.3;
     }
+    if (accion === planVigente) puntaje += HISTERESIS;
     if (puntaje > mejorPuntaje) {
       mejorPuntaje = puntaje;
       mejor = accion;

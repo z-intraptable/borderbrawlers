@@ -47,6 +47,22 @@ console.log('\n== la plantilla ==');
   check('cada personaje declara nueve animaciones distintas', nine);
 }
 
+console.log('\n== arquetipos: no todos juegan igual ==');
+{
+  // Antes del arquetipo por personaje, los seis eran mecánicamente
+  // idénticos salvo el sprite -- causa raíz reportada como "siempre la
+  // misma secuencia de batalla". Esto se rompe si alguien vuelve a poner
+  // los seis en los mismos valores sin querer.
+  const speeds = new Set(ROSTER.map((c) => c.speedMult));
+  const ranges = new Set(ROSTER.map((c) => c.rangeMult));
+  check('no los seis tienen el mismo speedMult', speeds.size > 1, `${[...speeds]}`);
+  check('no los seis tienen el mismo rangeMult', ranges.size > 1, `${[...ranges]}`);
+
+  const positivos = ROSTER.filter((c) => c.speedMult > 0 && c.rangeMult > 0);
+  check('speedMult y rangeMult son siempre positivos (multiplican velocidad/alcance)',
+    positivos.length === ROSTER.length);
+}
+
 console.log('\n== reaparición al caerse ==');
 {
   const m = createMatch();

@@ -56,6 +56,30 @@ export interface Character {
    * quién "debería" pesar más.
    */
   weight: number;
+  /**
+   * Arquetipo de combate: cuatro multiplicadores/bonos deterministas que
+   * `activate()` (match.ts) copia a arrays por slot y que `puntajeAccion`
+   * (fighters.ts) lee al planear. Sin esto los seis jugaban EXACTAMENTE
+   * igual salvo el sprite -- toda constante de movimiento (`RUN_SPEED`,
+   * `ALCANCE`, los pesos del árbol de decisión) era global. Reportado por el
+   * usuario como "siempre la misma secuencia de batalla" tras ver la build
+   * en producción: la causa de fondo no era la IA (ya deliberaba bien), era
+   * que cualquier matchup jugaba igual.
+   *
+   * Placeholders de arranque, no de lore -- ajustar jugando. Dos rápidos y
+   * agresivos, dos balanceados, dos lentos con más alcance y más cautos: la
+   * fricción sale de mezclar arquetipos, no de la mecánica de cada uno por
+   * separado.
+   */
+  speedMult: number;
+  /** Multiplica `ALCANCE` (match.ts): más alcance, menos necesidad de
+   * meterse encima para tirar la especial. */
+  rangeMult: number;
+  /** Bono ADITIVO (no multiplicador: evita invertir el signo de scores que
+   * pueden ser negativos) sobre el puntaje de ACERCAR/ESPECIAL/SUPER. */
+  agresividad: number;
+  /** Bono aditivo sobre el puntaje de RETIRAR/ESQUIVAR/ESCUDO/FINTA. */
+  cautela: number;
   /** Se muestra en el marcador y en los KO. */
   label: string;
   idle: string;
@@ -97,19 +121,31 @@ const BASE = {
  */
 export const ROSTER: readonly Character[] = [
   /* --- verde: el bando comprador ------------------------------------- */
-  { armature: 'Kor', team: TEAM_GREEN, weight: 1, label: 'KOR', ...BASE,
+  { armature: 'Kor', team: TEAM_GREEN, weight: 1,
+    speedMult: 1, rangeMult: 1, agresividad: 0.6, cautela: -0.3,
+    label: 'KOR', ...BASE,
     skill1: 'attack_stone_fist', skill2: 'guard_stance', super: 'super_avalancha' },
-  { armature: 'Mako', team: TEAM_GREEN, weight: 1, label: 'MAKO', ...BASE,
+  { armature: 'Mako', team: TEAM_GREEN, weight: 1,
+    speedMult: 1.25, rangeMult: 0.9, agresividad: 0.3, cautela: 0.2,
+    label: 'MAKO', ...BASE,
     skill1: 'attack_fin_slash', skill2: 'dash_frenzy', super: 'super_marea_carnicera' },
-  { armature: 'Asuri', team: TEAM_GREEN, weight: 1, label: 'ASU', ...BASE,
+  { armature: 'Asuri', team: TEAM_GREEN, weight: 1,
+    speedMult: 1.15, rangeMult: 0.85, agresividad: 0.8, cautela: -0.4,
+    label: 'ASU', ...BASE,
     skill1: 'attack_claw_dash', skill2: 'attack_pounce', super: 'super_frenesi_felino' },
 
   /* --- rojo: el bando vendedor --------------------------------------- */
-  { armature: 'Ragnir', team: TEAM_RED, weight: 1, label: 'RAGN', ...BASE,
+  { armature: 'Ragnir', team: TEAM_RED, weight: 1,
+    speedMult: 1.1, rangeMult: 0.9, agresividad: 0.7, cautela: -0.2,
+    label: 'RAGN', ...BASE,
     skill1: 'attack_claw_rake', skill2: 'leap_pounce', super: 'super_aliento_de_fuego' },
-  { armature: 'WuShang', team: TEAM_RED, weight: 1, label: 'WU', ...BASE,
+  { armature: 'WuShang', team: TEAM_RED, weight: 1,
+    speedMult: 0.9, rangeMult: 1.1, agresividad: -0.2, cautela: 0.6,
+    label: 'WU', ...BASE,
     skill1: 'attack_palm_strike', skill2: 'dash_meditate', super: 'super_puno_del_dragon' },
-  { armature: 'Dusk', team: TEAM_RED, weight: 1, label: 'DUSK', ...BASE,
+  { armature: 'Dusk', team: TEAM_RED, weight: 1,
+    speedMult: 0.8, rangeMult: 1.3, agresividad: -0.3, cautela: 0.7,
+    label: 'DUSK', ...BASE,
     skill1: 'attack_spirit_bolt', skill2: 'summon_totem', super: 'super_invocacion_ancestral' },
 ];
 

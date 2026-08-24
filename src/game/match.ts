@@ -6,6 +6,8 @@ import {
   ACCION_ESCUDO,
   ACCION_ESPECIAL,
   ACCION_ESQUIVAR,
+  ACCION_FINTA,
+  ACCION_FLANQUEAR,
   ACCION_RETIRAR,
   ACCION_SUPER,
   COMBO_CHAINS,
@@ -281,6 +283,19 @@ const SHIELD_MITIGATION = 0.3;
  */
 const EMBESTIR_RANGE = 4;
 const EMBESTIR_SPEED = 9;
+/**
+ * Finta (`ACCION_FINTA`, fighters.ts): un pulso de retirada corto -- venía
+ * acercándose y de golpe frena y se repliega un instante -- para leerse como
+ * un amague, no como `ACCION_RETIRAR` (que es huir sin volver). Mismo patrón
+ * de un-solo-disparo que el esquive/escudo: se lanza una vez al entrar al
+ * plan y decae con el steering normal, no es un objetivo de velocidad que se
+ * reevalúe cada cuadro. Más corto y más rápido en enfriar que esquivar/
+ * escudo a propósito: es sólo movimiento, no una ventaja de combate real, no
+ * hace falta racionarla tanto.
+ */
+const FINTA_WINDOW = 0.25;
+const FINTA_COOLDOWN = 1;
+const FINTA_SPEED = 5;
 /**
  * Agarre de borde (Fase 2 de dinámicas Brawlhalla/Smash). Automático, no una
  * `ACCION_*` de la IA -- a diferencia de esquivar/escudo, agarrarse no es
@@ -681,6 +696,19 @@ export interface Match {
   shieldUntil: Float32Array;
   /** Cuándo levantó el escudo por última vez. Ver `SHIELD_COOLDOWN`. */
   lastShield: Float32Array;
+  /** Hasta cuándo dura el pulso de `ACCION_FINTA`. Ver `FINTA_WINDOW`. */
+  fintaHasta: Float32Array;
+  /** Cuándo fintó por última vez. Ver `FINTA_COOLDOWN`. */
+  lastFinta: Float32Array;
+  /**
+   * Arquetipo de combate por slot, copiado de `Character` (roster.ts) en
+   * `activate()`. Placeholder de arranque -- ver el comentario de
+   * `Character.speedMult` en roster.ts para el porqué.
+   */
+  speedMult: Float32Array;
+  rangeMult: Float32Array;
+  agresividad: Float32Array;
+  cautela: Float32Array;
   /**
    * 1 si está colgado de un borde (Fase 2, agarre de borde). Mientras dura
    * la física normal se salta entera para ese slot -- ver el bloque
@@ -813,6 +841,12 @@ export function createMatch(
     lastDodge: new Float32Array(CAPACITY).fill(-DODGE_COOLDOWN),
     shieldUntil: new Float32Array(CAPACITY),
     lastShield: new Float32Array(CAPACITY).fill(-SHIELD_COOLDOWN),
+    fintaHasta: new Float32Array(CAPACITY),
+    lastFinta: new Float32Array(CAPACITY).fill(-FINTA_COOLDOWN),
+    speedMult: new Float32Array(CAPACITY).fill(1),
+    rangeMult: new Float32Array(CAPACITY).fill(1),
+    agresividad: new Float32Array(CAPACITY),
+    cautela: new Float32Array(CAPACITY),
     colgado: new Uint8Array(CAPACITY),
     colgadoPlat: new Int8Array(CAPACITY).fill(-1),
     colgadoHasta: new Float32Array(CAPACITY),
@@ -978,7 +1012,7 @@ export function stepMatch(
         const ctx: PlanContext = {
           distancia: Math.abs(dx),
           energia: m.energy[i],
-          alcance: ALCANCE,
+          alcance: ALCANCE * m.rangeMult[i],
           cercaDelBorde: !hasGroundAhead(m.skyline, m.x[i], -dir, LOOKAHEAD),
           dañoPropio: m.damage[i],
           dañoRival: m.damage[target],
@@ -986,11 +1020,15 @@ export function stepMatch(
           amenazado: propioAmenazado,
           esquivarListo: now - m.lastDodge[i] >= DODGE_COOLDOWN,
           escudoListo: now - m.lastShield[i] >= SHIELD_COOLDOWN,
+          fintaListo: now - m.lastFinta[i] >= FINTA_COOLDOWN,
+          rivalDefensivo: m.plan[target] === ACCION_ESCUDO,
+          agresividad: m.agresividad[i],
+          cautela: m.cautela[i],
         };
         const ctxRival: PlanContext = {
           distancia: ctx.distancia,
           energia: m.energy[target],
-          alcance: ALCANCE,
+          alcance: ALCANCE * m.rangeMult[target],
           cercaDelBorde: !hasGroundAhead(m.skyline, m.x[target], dir, LOOKAHEAD),
           dañoPropio: m.damage[target],
           dañoRival: m.damage[i],
@@ -998,8 +1036,12 @@ export function stepMatch(
           amenazado: rivalAmenazado,
           esquivarListo: now - m.lastDodge[target] >= DODGE_COOLDOWN,
           escudoListo: now - m.lastShield[target] >= SHIELD_COOLDOWN,
+          fintaListo: now - m.lastFinta[target] >= FINTA_COOLDOWN,
+          rivalDefensivo: m.plan[i] === ACCION_ESCUDO,
+          agresividad: m.agresividad[target],
+          cautela: m.cautela[target],
         };
-        m.plan[i] = planear(ctx, ctxRival);
+        m.plan[i] = planear(ctx, ctxRival, m.plan[i]);
         m.lastPlan[i] = now;
       } else if (target < 0) {
         m.plan[i] = ACCION_ACERCAR;
@@ -1011,7 +1053,7 @@ export function stepMatch(
       // tiene que apagarse aunque el plan siga diciendo ESPECIAL hasta la
       // próxima vuelta. Mismo criterio para el super.
       const aTiro = m.plan[i] === ACCION_ESPECIAL && target >= 0
-        && m.energy[i] >= COST_SKILL && Math.abs(dx) <= ALCANCE * 0.8;
+        && m.energy[i] >= COST_SKILL && Math.abs(dx) <= ALCANCE * m.rangeMult[i] * 0.8;
       const tirandoSuper = m.plan[i] === ACCION_SUPER && m.energy[i] >= COST_SUPER;
       // Con el super listo tampoco se acerca ni tira la especial: se planta
       // igual que `aTiro`, sólo que a esperar su propio turno de descargarlo
@@ -1046,8 +1088,24 @@ export function stepMatch(
         m.lastShield[i] = now;
         emit(m.events, EVENT_ESCUDO, m.x[i], m.y[i], 0, m.team[i], i);
       }
+      // La finta, mismo criterio de un solo disparo: un pulso corto hacia
+      // atrás en vez de un objetivo de velocidad sostenido, ver su
+      // comentario más arriba.
+      const fintando = now < m.fintaHasta[i];
+      const lanzarFinta = m.plan[i] === ACCION_FINTA && !fintando
+        && now - m.lastFinta[i] >= FINTA_COOLDOWN;
+      if (lanzarFinta) {
+        m.vx[i] = -dir * FINTA_SPEED * m.speedMult[i];
+        m.fintaHasta[i] = now + FINTA_WINDOW;
+        m.lastFinta[i] = now;
+      }
       const moveDir = retirando ? -dir : dir;
-      const closing = m.plan[i] === ACCION_ACERCAR && Math.abs(dx) > rango;
+      // El flanqueo cuenta como "cerrando distancia" para `engaged`/`mira`
+      // igual que ACERCAR -- la diferencia entre los dos está sólo en CÓMO
+      // se cierra (embestida en línea recta vs. saltos), no en si se cierra.
+      const closing = (m.plan[i] === ACCION_ACERCAR || m.plan[i] === ACCION_FLANQUEAR)
+        && Math.abs(dx) > rango;
+      const flanqueando = m.plan[i] === ACCION_FLANQUEAR && Math.abs(dx) > EMBESTIR_RANGE;
       m.engaged[i] = closing ? 0 : 1;
       // Frena antes de girar en vez de acelerar para el otro lado ya: sin esto
       // `vx` cruzaba al signo nuevo antes de que `TURN_COOLDOWN` dejara girar
@@ -1057,14 +1115,16 @@ export function stepMatch(
       const turning = m.engaged[i] !== 1
         && shouldBrakeToTurn(m.vx[i], m.facing[i], moveDir, TURN_BRAKE_SPEED);
       const desired = brake || turning ? 0
-        : closing ? (moveDir + spread * 0.5) * RUN_SPEED * boost
-          : (spread * SPACING_GAIN + moveDir * HOLD_PULL) * RUN_SPEED;
+        : closing ? (moveDir + spread * 0.5) * RUN_SPEED * boost * m.speedMult[i]
+          : (spread * SPACING_GAIN + moveDir * HOLD_PULL) * RUN_SPEED * m.speedMult[i];
       // Embestida: cierre de distancia en tierra a `EMBESTIR_SPEED`, ver su
       // comentario más arriba. Gana por encima de la aceleración normal
       // hacia `desired` (que apunta a RUN_SPEED) mientras el tramo sea
       // largo; deja de aplicar sola en cuanto la distancia baja de
-      // `EMBESTIR_RANGE`, sin ningún estado propio que limpiar.
-      const embistiendo = closing && grounded && !brake && !turning
+      // `EMBESTIR_RANGE`, sin ningún estado propio que limpiar. Excluye
+      // `flanqueando`: el flanqueo es justo la alternativa a la línea
+      // recta, así que ahí no corresponde la embestida.
+      const embistiendo = closing && !flanqueando && grounded && !brake && !turning
         && Math.abs(dx) > EMBESTIR_RANGE;
 
       if (esquivando || lanzarEsquive) {
@@ -1075,8 +1135,11 @@ export function stepMatch(
         // Plantado: a diferencia del esquive no hay pulso que preservar,
         // sólo dejar de acelerar hacia cualquier lado mientras dura.
         m.vx[i] = 0;
+      } else if (fintando || lanzarFinta) {
+        // Mismo criterio que el esquive: el pulso decae solo con el
+        // steering normal del próximo cuadro.
       } else if (embistiendo) {
-        m.vx[i] = moveDir * EMBESTIR_SPEED;
+        m.vx[i] = moveDir * EMBESTIR_SPEED * m.speedMult[i];
       } else if (grounded) {
         // Acelera hacia lo que quiere, no salta a ello. Ver `GROUND_ACCEL`.
         const limite = GROUND_ACCEL * dt;
@@ -1104,10 +1167,17 @@ export function stepMatch(
       // viaja recto y en el aire no se puede corregir la puntería, y el
       // super pierde alcance si sale de un salto a medias. El que recién
       // lanzó el esquive tampoco: `wantsJump` pisaría el `vy` del pulso en
-      // el mismo cuadro en que se lanzó. Escudando tampoco: saltar es
-      // moverse, y el escudo es justo lo contrario.
+      // el mismo cuadro en que se lanzó. Escudando y fintando tampoco: los
+      // dos son un pulso de `vx` que un salto en el mismo cuadro pisaría.
       const jump = !aTiro && !tirandoSuper && !lanzarEsquive && !escudando && !lanzarEscudo
-        && wantsJump({ grounded, dy, dx, groundAhead, sinceJump: now - m.lastJump[i] });
+        && !fintando && !lanzarFinta
+        // Flanqueando fuerza el salto en tierra en vez de esperar a que
+        // `wantsJump` lo pida por altura/hueco: es lo que distingue el
+        // acercamiento en saltos de la embestida en línea recta -- sin
+        // esto, en un tramo llano `wantsJump` casi nunca dispara y
+        // flanquear se vería idéntico a caminar.
+        && (flanqueando && grounded
+          || wantsJump({ grounded, dy, dx, groundAhead, sinceJump: now - m.lastJump[i] }));
       // Recuperación: cayéndose por debajo del escenario gasta el salto extra.
       // Sin esto el primer empujón es siempre KO y no hay pelea.
       const recover = !grounded && m.vy[i] < 0 && m.y[i] < 0 && m.jumps[i] > 0
@@ -1594,7 +1664,14 @@ function activate(m: Match, slot: number, team: number, now: number): void {
   // El peso es un stat fijo por personaje (ver `ROSTER[].weight`), no algo
   // que trae el trade que lo hizo entrar — desde el pivot de 2026-08-23 (ver
   // CLAUDE.md) el mercado ya no decide quién aparece ni cuánto pesa.
-  m.weight[slot] = characterFor(team, m.character[slot]).weight;
+  const character = characterFor(team, m.character[slot]);
+  m.weight[slot] = character.weight;
+  // El arquetipo de combate es un dato del personaje, no del slot que
+  // ocupaba antes -- se relee cada vez que entra alguien, igual que el peso.
+  m.speedMult[slot] = character.speedMult;
+  m.rangeMult[slot] = character.rangeMult;
+  m.agresividad[slot] = character.agresividad;
+  m.cautela[slot] = character.cautela;
   m.damage[slot] = 0;
   m.stocks[slot] = STOCKS;
   m.jumps[slot] = MAX_JUMPS;
@@ -1614,6 +1691,8 @@ function activate(m: Match, slot: number, team: number, now: number): void {
   m.lastDodge[slot] = -DODGE_COOLDOWN;
   m.shieldUntil[slot] = 0;
   m.lastShield[slot] = -SHIELD_COOLDOWN;
+  m.fintaHasta[slot] = 0;
+  m.lastFinta[slot] = -FINTA_COOLDOWN;
   m.colgado[slot] = 0;
   m.colgadoPlat[slot] = -1;
   m.colgadoHasta[slot] = 0;

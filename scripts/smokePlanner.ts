@@ -12,6 +12,8 @@ import {
   ACCION_ESCUDO,
   ACCION_ESPECIAL,
   ACCION_ESQUIVAR,
+  ACCION_FINTA,
+  ACCION_FLANQUEAR,
   ACCION_RETIRAR,
   ACCION_SOSTENER,
   ACCION_SUPER,
@@ -48,6 +50,10 @@ function ctx(over: Partial<PlanContext> = {}): PlanContext {
     amenazado: false,
     esquivarListo: true,
     escudoListo: true,
+    fintaListo: true,
+    rivalDefensivo: false,
+    agresividad: 0,
+    cautela: 0,
     ...over,
   };
 }
@@ -184,6 +190,61 @@ console.log('\n== planear: el árbol completo ==');
   const a = planear(ctx({ energia: 0.7, dañoPropio: 40 }), ctx({ energia: 0.2 }));
   const b = planear(ctx({ energia: 0.7, dañoPropio: 40 }), ctx({ energia: 0.2 }));
   check('el mismo estado da siempre la misma decisión', a === b, `${a} === ${b}`);
+}
+
+console.log('\n== flanqueo: variedad de acercamiento contra un rival plantado ==');
+{
+  check('cerca del rival, flanquear no se puede (ya no aporta nada)',
+    puntajeAccion(ACCION_FLANQUEAR, ctx({ distancia: 1, rivalDefensivo: true })) === -Infinity);
+  check('lejos pero el rival no está defensivo, flanquear tampoco',
+    puntajeAccion(ACCION_FLANQUEAR, ctx({ distancia: 5, rivalDefensivo: false })) === -Infinity);
+  check('lejos y el rival plantado en escudo, flanquear sí se puede',
+    puntajeAccion(ACCION_FLANQUEAR, ctx({ distancia: 5, rivalDefensivo: true })) > -Infinity);
+  check('con el rival plantado, planear elige flanquear en vez de acercar derecho',
+    planear(ctx({ distancia: 5, rivalDefensivo: true }), ctx()) === ACCION_FLANQUEAR);
+}
+
+console.log('\n== finta: amagar en vez de comprometerse con daño alto ==');
+{
+  check('con poco daño propio, fintar no se puede',
+    puntajeAccion(ACCION_FINTA, ctx({ dañoPropio: 10 })) === -Infinity);
+  check('con daño alto, fintar sí se puede',
+    puntajeAccion(ACCION_FINTA, ctx({ dañoPropio: 80 })) > -Infinity);
+  check('con daño alto pero al borde del vacío, fintar tampoco',
+    puntajeAccion(ACCION_FINTA, ctx({ dañoPropio: 80, cercaDelBorde: true })) === -Infinity);
+  check('a más cautela, fintar puntúa más',
+    puntajeAccion(ACCION_FINTA, ctx({ dañoPropio: 80, cautela: 1 }))
+    > puntajeAccion(ACCION_FINTA, ctx({ dañoPropio: 80, cautela: 0 })));
+}
+
+console.log('\n== arquetipos: agresividad y cautela inclinan la decisión ==');
+{
+  check('más agresividad, ACERCAR puntúa más',
+    puntajeAccion(ACCION_ACERCAR, ctx({ agresividad: 1 }))
+    > puntajeAccion(ACCION_ACERCAR, ctx({ agresividad: 0 })));
+  check('más cautela, RETIRAR puntúa más',
+    puntajeAccion(ACCION_RETIRAR, ctx({ dañoPropio: 50, cautela: 1 }))
+    > puntajeAccion(ACCION_RETIRAR, ctx({ dañoPropio: 50, cautela: 0 })));
+}
+
+console.log('\n== histéresis: no cambia de plan por una diferencia marginal ==');
+{
+  // Con agresividad -0,35, ACERCAR (1 - 0,35 = 0,65) le gana a SOSTENER
+  // (0,5 fijo) por apenas 0,15 -- menos que HISTERESIS (0,2). Sin plan
+  // previo, ACERCAR gana igual por ser la mejor puntuación pura.
+  const cercano = ctx({ agresividad: -0.35 });
+  const rival = ctx();
+  check('sin plan previo, elige la de mejor puntaje aunque sea por poco',
+    planear(cercano, rival) === ACCION_ACERCAR);
+  // Con SOSTENER como plan vigente, el bono de histéresis (0,5+0,2=0,7)
+  // alcanza para retenerlo por sobre ACERCAR (0,65): no cambia de plan por
+  // una diferencia menor que la histéresis.
+  check('con SOSTENER vigente, una diferencia menor que la histéresis no lo cambia',
+    planear(cercano, rival, ACCION_SOSTENER) === ACCION_SOSTENER);
+  // Pero si de verdad conviene mucho más otra cosa (barra llena para el
+  // super), el bono chico no alcanza para retenerlo: sigue cambiando.
+  check('con SOSTENER vigente, una ventaja real sí cambia el plan',
+    planear(ctx({ energia: 1 }), rival, ACCION_SOSTENER) === ACCION_SUPER);
 }
 
 console.log(failures === 0 ? '\nTODO OK\n' : `\n${failures} FALLOS\n`);
