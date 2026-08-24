@@ -33,6 +33,26 @@ _spec.loader.exec_module(_alfa)
 # luminosidad; la línea baja de 70.
 UMBRAL_TINTA = 70
 
+# Lado máximo de la textura final, en píxeles.
+#
+# Las ocho fuentes (Nano Banana/Kling) salen a 1024-2048px; en pantalla el
+# burst mide unos 60-150px de lado (`ESCALA` en vfxSprites.ts, sobre un
+# personaje de ~80-150px de alto) -- 15-30x más chico que la fuente. PixiJS
+# no genera mipmaps para estas texturas, así que ese achique lo hace la GPU
+# con un solo filtro bilineal sobre unos pocos texels de la imagen ENTERA
+# sin promediar el resto: en una textura con detalle fino disperso (los
+# rayos de una explosión, no un blob macizo) el resultado es un moiré que se
+# ve como un rectángulo blanco/gris sólido pegado al personaje -- reportado
+# con capturas reales, visible tanto en los VFX viejos (impacto/onda) como
+# en escudo/esquive, recién agregados.
+#
+# La corrección real sería habilitar mipmaps en PixiJS; se resuelve acá en
+# cambio, más simple y sin tocar el pipeline de render: bajar la fuente a un
+# tamaño donde el filtro bilineal de la GPU alcanza solo (2-8x de sobra
+# sobre el tamaño real en pantalla), con LANCZOS de PIL que sí promedia la
+# imagen completa al reescalar.
+MAX_LADO = 512
+
 
 def separar(origen: pathlib.Path, destino_base: pathlib.Path) -> None:
     con_alfa = _alfa.sacar_fondo(Image.open(origen).convert('RGB'))
@@ -43,11 +63,19 @@ def separar(origen: pathlib.Path, destino_base: pathlib.Path) -> None:
 
     es_tinta = (luz < UMBRAL_TINTA) & (alfa > 10)
 
+    def guardar_achicado(capa: np.ndarray, destino: pathlib.Path) -> None:
+        img = Image.fromarray(capa.astype(np.uint8), 'RGBA')
+        if max(img.size) > MAX_LADO:
+            factor = MAX_LADO / max(img.size)
+            nuevo = (round(img.width * factor), round(img.height * factor))
+            img = img.resize(nuevo, Image.LANCZOS)
+        img.save(destino)
+
     # --- ink: sólo la línea, negra, tal cual ---
     ink = np.zeros_like(a)
     ink[..., 0:3] = 5
     ink[..., 3] = np.where(es_tinta, alfa, 0)
-    Image.fromarray(ink.astype(np.uint8), 'RGBA').save(f'{destino_base}-ink.png')
+    guardar_achicado(ink, pathlib.Path(f'{destino_base}-ink.png'))
 
     # --- glow: el relleno, a blanco, con la caída de luz como alfa ---
     # `luz/255` es la caída natural del degradé del generador: el centro
@@ -58,7 +86,7 @@ def separar(origen: pathlib.Path, destino_base: pathlib.Path) -> None:
     glow = np.zeros_like(a)
     glow[..., 0:3] = 255
     glow[..., 3] = np.where(es_tinta, 0, alfa * peso)
-    Image.fromarray(glow.astype(np.uint8), 'RGBA').save(f'{destino_base}-glow.png')
+    guardar_achicado(glow, pathlib.Path(f'{destino_base}-glow.png'))
 
     print(f'{origen.name}: ink {ink[...,3].astype(bool).mean()*100:.0f}% · '
           f'glow {glow[...,3].astype(bool).mean()*100:.0f}%')
