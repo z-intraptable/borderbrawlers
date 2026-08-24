@@ -3,6 +3,7 @@ import type { MatchState, Skyline } from './fighters';
 import { characterFor } from './roster';
 import {
   ACCION_ACERCAR,
+  ACCION_ESCUDO,
   ACCION_ESPECIAL,
   ACCION_ESQUIVAR,
   ACCION_RETIRAR,
@@ -222,6 +223,22 @@ const REPLAN_INTERVAL = 0.4;
 const DODGE_INVULN = 0.3;
 const DODGE_COOLDOWN = 1.2;
 const DODGE_SPEED = 9;
+/**
+ * El escudo (`ACCION_ESCUDO`, fighters.ts): se planta y MITIGA -- no anula
+ * como el esquive -- el golpe entrante mientras dura `SHIELD_WINDOW`. Cubre
+ * el caso en que el esquive no se puede (`cercaDelBorde`): no necesita
+ * espacio detrás porque no se mueve, sólo aguanta.
+ *
+ * `SHIELD_MITIGATION` en 0,3 dice CUÁNTO del empuje/daño/aturdimiento
+ * original queda tras bloquear -- 30%, no 0%: un escudo perfecto sería
+ * estrictamente mejor que esquivar (invulnerable Y sin gastar movimiento),
+ * y entonces la IA nunca elegiría esquivar. `SHIELD_COOLDOWN` un poco más
+ * largo que `DODGE_COOLDOWN`: mitigar en vez de anular ya es la ventaja de
+ * poder plantarse, no hace falta que además recargue más rápido.
+ */
+const SHIELD_WINDOW = 0.35;
+const SHIELD_COOLDOWN = 1.5;
+const SHIELD_MITIGATION = 0.3;
 const CONTACT = 0.85;
 /**
  * Distancia de guardia. Apenas menor que `CONTACT` para que el cuerpo a cuerpo
@@ -581,6 +598,14 @@ export interface Match {
   dodgeUntil: Float32Array;
   /** Cuándo esquivó por última vez. Ver `DODGE_COOLDOWN`. */
   lastDodge: Float32Array;
+  /**
+   * Hasta cuándo el escudo (`ACCION_ESCUDO`) mitiga un poder o un super. Ver
+   * `SHIELD_WINDOW`/`SHIELD_MITIGATION`. Tampoco respeta el cuerpo a
+   * cuerpo, mismo criterio que `dodgeUntil`.
+   */
+  shieldUntil: Float32Array;
+  /** Cuándo levantó el escudo por última vez. Ver `SHIELD_COOLDOWN`. */
+  lastShield: Float32Array;
   hitstun: Float32Array;
   whale: Uint8Array;
   /**
@@ -699,6 +724,8 @@ export function createMatch(
     lastPlan: new Float32Array(CAPACITY),
     dodgeUntil: new Float32Array(CAPACITY),
     lastDodge: new Float32Array(CAPACITY).fill(-DODGE_COOLDOWN),
+    shieldUntil: new Float32Array(CAPACITY),
+    lastShield: new Float32Array(CAPACITY).fill(-SHIELD_COOLDOWN),
     hitstun: new Float32Array(CAPACITY),
     whale: new Uint8Array(CAPACITY),
     scale: new Float32Array(CAPACITY).fill(1),
@@ -832,10 +859,11 @@ export function stepMatch(
       if (target >= 0 && now - m.lastPlan[i] >= REPLAN_INTERVAL) {
         // El rival ya tirado (plan ESPECIAL/SUPER de su última
         // replanificación) es la telegrafía: no hay que predecir nada, sólo
-        // leerla. Propio enfriamiento aparte, para no elegir ESQUIVAR cuando
-        // no hay pulso de escape disponible todavía.
-        const propioListo = now - m.lastDodge[i] >= DODGE_COOLDOWN;
-        const rivalListo = now - m.lastDodge[target] >= DODGE_COOLDOWN;
+        // leerla. `amenazado` es la señal PURA -- si además hay algo
+        // disponible para responderle es un dato aparte, uno por acción
+        // defensiva, para que puedan estar habilitadas por separado.
+        const propioAmenazado = m.plan[target] === ACCION_ESPECIAL || m.plan[target] === ACCION_SUPER;
+        const rivalAmenazado = m.plan[i] === ACCION_ESPECIAL || m.plan[i] === ACCION_SUPER;
         const ctx: PlanContext = {
           distancia: Math.abs(dx),
           energia: m.energy[i],
@@ -844,8 +872,9 @@ export function stepMatch(
           dañoPropio: m.damage[i],
           dañoRival: m.damage[target],
           superEnfriando: now - m.lastSuperAt[i] < SUPER_COOLDOWN,
-          amenazado: propioListo
-            && (m.plan[target] === ACCION_ESPECIAL || m.plan[target] === ACCION_SUPER),
+          amenazado: propioAmenazado,
+          esquivarListo: now - m.lastDodge[i] >= DODGE_COOLDOWN,
+          escudoListo: now - m.lastShield[i] >= SHIELD_COOLDOWN,
         };
         const ctxRival: PlanContext = {
           distancia: ctx.distancia,
@@ -855,8 +884,9 @@ export function stepMatch(
           dañoPropio: m.damage[target],
           dañoRival: m.damage[i],
           superEnfriando: now - m.lastSuperAt[target] < SUPER_COOLDOWN,
-          amenazado: rivalListo
-            && (m.plan[i] === ACCION_ESPECIAL || m.plan[i] === ACCION_SUPER),
+          amenazado: rivalAmenazado,
+          esquivarListo: now - m.lastDodge[target] >= DODGE_COOLDOWN,
+          escudoListo: now - m.lastShield[target] >= SHIELD_COOLDOWN,
         };
         m.plan[i] = planear(ctx, ctxRival);
         m.lastPlan[i] = now;
@@ -893,6 +923,16 @@ export function stepMatch(
         m.lastDodge[i] = now;
         m.grounded[i] = 0;
       }
+      // El escudo, mismo criterio de "se lanza una vez": mientras dura
+      // `shieldUntil` se planta (vx a cero, ver el bloque de más abajo) en
+      // vez de moverse hacia el plan vigente.
+      const escudando = now < m.shieldUntil[i];
+      const lanzarEscudo = m.plan[i] === ACCION_ESCUDO && !escudando
+        && now - m.lastShield[i] >= SHIELD_COOLDOWN;
+      if (lanzarEscudo) {
+        m.shieldUntil[i] = now + SHIELD_WINDOW;
+        m.lastShield[i] = now;
+      }
       const moveDir = retirando ? -dir : dir;
       const closing = m.plan[i] === ACCION_ACERCAR && Math.abs(dx) > rango;
       m.engaged[i] = closing ? 0 : 1;
@@ -911,6 +951,10 @@ export function stepMatch(
         // El pulso decae solo, arrastrado por el mismo AIR_CONTROL de
         // siempre en el próximo cuadro -- acá sólo se evita que el steering
         // normal lo cancele en el instante en que se lanza.
+      } else if (escudando || lanzarEscudo) {
+        // Plantado: a diferencia del esquive no hay pulso que preservar,
+        // sólo dejar de acelerar hacia cualquier lado mientras dura.
+        m.vx[i] = 0;
       } else if (grounded) {
         // Acelera hacia lo que quiere, no salta a ello. Ver `GROUND_ACCEL`.
         const limite = GROUND_ACCEL * dt;
@@ -938,8 +982,9 @@ export function stepMatch(
       // viaja recto y en el aire no se puede corregir la puntería, y el
       // super pierde alcance si sale de un salto a medias. El que recién
       // lanzó el esquive tampoco: `wantsJump` pisaría el `vy` del pulso en
-      // el mismo cuadro en que se lanzó.
-      const jump = !aTiro && !tirandoSuper && !lanzarEsquive
+      // el mismo cuadro en que se lanzó. Escudando tampoco: saltar es
+      // moverse, y el escudo es justo lo contrario.
+      const jump = !aTiro && !tirandoSuper && !lanzarEsquive && !escudando && !lanzarEscudo
         && wantsJump({ grounded, dy, dx, groundAhead, sinceJump: now - m.lastJump[i] });
       // Recuperación: cayéndose por debajo del escenario gasta el salto extra.
       // Sin esto el primer empujón es siempre KO y no hay pelea.
@@ -1292,12 +1337,17 @@ function moverPoderes(m: Match, dt: number, now: number): void {
       const nx = distance > 1e-6 ? dx / distance : 1;
       const ny = distance > 1e-6 ? dy / distance : 0;
       const falloff = 0.55 + 0.45 * (1 - distance / radio);
+      // El escudo mitiga en vez de anular: mismo empuje/daño, escalado por
+      // `SHIELD_MITIGATION` si el escudo sigue en pie. No hay `continue`
+      // acá -- a diferencia del esquive, el escudo NO cancela el evento de
+      // impacto ni el hitstop, sólo lo hace más chico.
+      const mitigacion = m.shieldUntil[j] > now ? SHIELD_MITIGATION : 1;
       const force = knockback(m.damage[j], m.weight[j], pesoDelQueTira)
-        * falloff * skillForce(spent);
+        * falloff * skillForce(spent) * mitigacion;
       m.vx[j] = nx * force * 1.15;
       m.vy[j] = ny * force * 0.3 + force * 0.5;
       m.grounded[j] = 0;
-      m.damage[j] += skillDamage(spent);
+      m.damage[j] += skillDamage(spent) * mitigacion;
       // El aturdimiento sale de la fuerza del empujón, no de una constante: es
       // lo que hace que el poder cargado se sienta distinto del que salió con la
       // barra a medias. Ver `stunFor`.
@@ -1421,6 +1471,8 @@ function activate(m: Match, slot: number, team: number, now: number): void {
   m.lastPlan[slot] = 0;
   m.dodgeUntil[slot] = 0;
   m.lastDodge[slot] = -DODGE_COOLDOWN;
+  m.shieldUntil[slot] = 0;
+  m.lastShield[slot] = -SHIELD_COOLDOWN;
 
   // Repartidos por carril: los tres apareciendo en el mismo punto caen uno
   // encima del otro y arrancan la pelea amontonados.
@@ -1454,13 +1506,15 @@ function unleash(m: Match, self: number, now: number, spent: number): void {
     const dy = m.y[i] - m.y[self];
     const distance = Math.hypot(dx, dy);
     if (distance > SUPER_RADIUS) continue;
-    const force = superForce(distance) * power;
+    // Mismo criterio que en el estallido: el escudo mitiga, no anula.
+    const mitigacion = m.shieldUntil[i] > now ? SHIELD_MITIGATION : 1;
+    const force = superForce(distance) * power * mitigacion;
     const nx = distance > 1e-6 ? dx / distance : 1;
     const ny = distance > 1e-6 ? dy / distance : 0;
     m.vx[i] = nx * force * 1.3;
     m.vy[i] = ny * force * 0.4 + force * 0.55;
     m.grounded[i] = 0;
-    m.damage[i] += SUPER_DAMAGE * power;
+    m.damage[i] += SUPER_DAMAGE * power * mitigacion;
     m.hitstun[i] = now - HITSTUN + stunFor(force);
     m.lastHit[i] = now;
     emit(m.events, EVENT_HIT, m.x[i], m.y[i], 1.4, m.team[i], i);

@@ -308,10 +308,18 @@ export const ACCION_SUPER = 4;
  * de verdad" -- puede elegirse aunque retirarse no convenga.
  */
 export const ACCION_ESQUIVAR = 5;
+/**
+ * Escudo/parry: se planta y mitiga (no anula) el golpe que viene, ver
+ * `SHIELD_MITIGATION` en match.ts. Cubre el hueco que deja el esquive: al
+ * borde del vacío `ACCION_ESQUIVAR` no se puede (no hay adónde escapar), y
+ * ahí el escudo sigue siendo una opción -- no necesita espacio detrás,
+ * porque no se mueve.
+ */
+export const ACCION_ESCUDO = 6;
 
 const CANDIDATAS = [
   ACCION_ACERCAR, ACCION_RETIRAR, ACCION_SOSTENER, ACCION_ESPECIAL, ACCION_SUPER,
-  ACCION_ESQUIVAR,
+  ACCION_ESQUIVAR, ACCION_ESCUDO,
 ] as const;
 
 /** Lo que un peleador ve de sí mismo (o del rival, para el paso 1-ply) al planear. */
@@ -337,11 +345,17 @@ export interface PlanContext {
   superEnfriando: boolean;
   /**
    * El rival ya decidió tirar especial o super (su `plan` de la última
-   * replanificación) y el esquive propio no está enfriando. Es la señal de
-   * "hay algo cargado viniendo", no una predicción -- se lee directo del
-   * plan vigente del rival, que YA es la telegrafía del golpe.
+   * replanificación). Es la señal de "hay algo cargado viniendo", no una
+   * predicción -- se lee directo del plan vigente del rival, que YA es la
+   * telegrafía del golpe. Pura: NO mira si esquivar/escudo están
+   * disponibles, eso lo deciden `esquivarListo`/`escudoListo` aparte, para
+   * que cada acción defensiva pueda estar habilitada o no por separado.
    */
   amenazado: boolean;
+  /** Si `ACCION_ESQUIVAR` no está enfriando (`DODGE_COOLDOWN` en match.ts). */
+  esquivarListo: boolean;
+  /** Si `ACCION_ESCUDO` no está enfriando (`SHIELD_COOLDOWN` en match.ts). */
+  escudoListo: boolean;
 }
 
 /**
@@ -369,11 +383,19 @@ export function puntajeAccion(accion: number, ctx: PlanContext): number {
     case ACCION_ESQUIVAR:
       // Al borde del vacío tampoco: el pulso de escape es hacia atrás, igual
       // que retirarse, y ahí atrás no hay piso.
-      if (!ctx.amenazado || ctx.cercaDelBorde) return -Infinity;
+      if (!ctx.amenazado || !ctx.esquivarListo || ctx.cercaDelBorde) return -Infinity;
       // Más que ACERCAR/SOSTENER siempre que haya amenaza real, pero menos
       // que tirar la propia especial/super -- si las dos barras están
       // listas a la vez, conviene más rematar que esquivar.
       return 3;
+    case ACCION_ESCUDO:
+      if (!ctx.amenazado || !ctx.escudoListo) return -Infinity;
+      // Un poco menos que esquivar: mitiga en vez de anular, así que a
+      // igualdad de condiciones el esquive gana. Sigue siendo mejor que
+      // ACERCAR/SOSTENER, y a diferencia del esquive no necesita piso
+      // detrás -- cubre justo el caso en que `ACCION_ESQUIVAR` devuelve
+      // -Infinity por estar al borde.
+      return 2.5;
     case ACCION_SOSTENER:
       return 0.5;
     case ACCION_ACERCAR:

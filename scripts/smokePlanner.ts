@@ -9,6 +9,7 @@
  */
 import {
   ACCION_ACERCAR,
+  ACCION_ESCUDO,
   ACCION_ESPECIAL,
   ACCION_ESQUIVAR,
   ACCION_RETIRAR,
@@ -29,7 +30,12 @@ function check(name: string, ok: boolean, detail = ''): void {
 
 const ALCANCE = 22;
 
-/** Un contexto neutro, para no repetir los ocho campos en cada caso. */
+/**
+ * Un contexto neutro, para no repetir los diez campos en cada caso.
+ * `esquivarListo`/`escudoListo` en `true` por default -- no enfriando, así
+ * que los tests existentes que sólo tocan `amenazado` siguen probando lo
+ * mismo que antes de separar la disponibilidad de la señal de amenaza.
+ */
 function ctx(over: Partial<PlanContext> = {}): PlanContext {
   return {
     distancia: 3,
@@ -40,6 +46,8 @@ function ctx(over: Partial<PlanContext> = {}): PlanContext {
     dañoRival: 0,
     superEnfriando: false,
     amenazado: false,
+    esquivarListo: true,
+    escudoListo: true,
     ...over,
   };
 }
@@ -79,6 +87,20 @@ console.log('\n== puntajeAccion: qué se puede y qué no ==');
     puntajeAccion(ACCION_ESQUIVAR, ctx({ amenazado: true })) > -Infinity);
   check('amenazado pero al borde del vacío, esquivar tampoco',
     puntajeAccion(ACCION_ESQUIVAR, ctx({ amenazado: true, cercaDelBorde: true })) === -Infinity);
+  check('amenazado pero el esquive enfriando, tampoco',
+    puntajeAccion(ACCION_ESQUIVAR, ctx({ amenazado: true, esquivarListo: false })) === -Infinity);
+
+  check('sin amenaza, el escudo tampoco se puede',
+    puntajeAccion(ACCION_ESCUDO, ctx({ amenazado: false })) === -Infinity);
+  check('amenazado pero el escudo enfriando, tampoco',
+    puntajeAccion(ACCION_ESCUDO, ctx({ amenazado: true, escudoListo: false })) === -Infinity);
+  // A diferencia del esquive, el escudo SÍ se puede al borde del vacío: no
+  // necesita espacio detrás porque no se mueve.
+  check('amenazado y al borde del vacío, el escudo sí se puede',
+    puntajeAccion(ACCION_ESCUDO, ctx({ amenazado: true, cercaDelBorde: true })) > -Infinity);
+  check('a igualdad de condiciones, esquivar puntúa más que el escudo',
+    puntajeAccion(ACCION_ESQUIVAR, ctx({ amenazado: true }))
+    > puntajeAccion(ACCION_ESCUDO, ctx({ amenazado: true })));
 }
 
 console.log('\n== puntajeAccion: qué conviene más ==');
@@ -139,6 +161,16 @@ console.log('\n== planear: el árbol completo ==');
   // Amenazado y sin barra para nada mejor: esquiva en vez de acercarse.
   check('amenazado, sin barra propia, esquiva',
     planear(ctx({ amenazado: true }), ctx()) === ACCION_ESQUIVAR);
+
+  // Amenazado, al borde del vacío (esquivar no se puede): recurre al
+  // escudo en vez de quedarse sin ninguna respuesta.
+  check('amenazado al borde del vacío, recurre al escudo',
+    planear(ctx({ amenazado: true, cercaDelBorde: true }), ctx()) === ACCION_ESCUDO);
+
+  // Amenazado y con el esquive enfriando (pero el escudo no): recurre al
+  // escudo -- la disponibilidad de cada defensa se lee por separado.
+  check('amenazado con el esquive enfriando, recurre al escudo',
+    planear(ctx({ amenazado: true, esquivarListo: false }), ctx()) === ACCION_ESCUDO);
 
   // Amenazado pero con el super listo: rematar conviene más que esquivar.
   check('amenazado pero con el super listo, prefiere rematar',
