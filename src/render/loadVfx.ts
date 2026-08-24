@@ -16,7 +16,9 @@ export interface VfxSheet {
   ink: Texture;
 }
 
-const NOMBRES = ['impacto', 'orbe', 'tajo', 'onda', 'humo', 'esquirlas'] as const;
+const NOMBRES = [
+  'impacto', 'orbe', 'tajo', 'onda', 'humo', 'esquirlas', 'escudo', 'esquive',
+] as const;
 export type VfxNombre = (typeof NOMBRES)[number];
 
 export type VfxTexturas = Record<VfxNombre, VfxSheet>;

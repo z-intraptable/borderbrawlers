@@ -5,6 +5,8 @@ import { ShockwaveFilter } from 'pixi-filters/shockwave';
 import type { Match } from '../game/match';
 import {
   EVENT_ENTRA,
+  EVENT_ESCUDO,
+  EVENT_ESQUIVAR,
   EVENT_ESTALLIDO,
   EVENT_HIT,
   EVENT_KO,
@@ -1187,6 +1189,20 @@ export async function startGame(
           wave(target, x, y - FIGHTER_HALF_HEIGHT, 1.1, 0.34, teamColor);
           burst(target, x, y - FIGHTER_HALF_HEIGHT * 0.6, 9, 6, 0.12, 0.4, teamColor);
           dust(target, x, y - FIGHTER_HALF_HEIGHT, 1.1);
+          break;
+        case EVENT_ESQUIVAR:
+          // Un solo disparo por pulso (ver `lanzarEsquive` en match.ts). Una
+          // estela corta del color del bando: dice "se fue de ahí", no "pasó
+          // algo grande" -- por eso más chica y más rápida que el resto.
+          wave(target, x, y, 0.55, 0.16, teamColor);
+          vfxSprites.burst('esquive', x, y, 0.45, 0.22, teamColor);
+          break;
+        case EVENT_ESCUDO:
+          // Igual criterio que el esquive: se lanza una sola vez por
+          // ventana. El anillo se planta en vez de expandirse rápido -- lee
+          // como "se puso firme", no como un golpe.
+          wave(target, x, y, 0.7, 0.2, teamColor);
+          vfxSprites.burst('escudo', x, y, 0.55, 0.28, teamColor);
           break;
         default:
           break;

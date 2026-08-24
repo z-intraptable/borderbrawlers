@@ -47,6 +47,8 @@ const ESCALA: Record<VfxNombre, number> = {
   onda: 1.5,
   humo: 1.1,
   esquirlas: 1.1,
+  escudo: 1.3,
+  esquive: 1.0,
 };
 
 interface Rafaga {

@@ -544,6 +544,10 @@ export const EVENT_SALTO = 8;
  * pero la entrada en sí no tenía ningún efecto que la anunciara.
  */
 export const EVENT_ENTRA = 9;
+/** Alguien lanzó el esquive (`ACCION_ESQUIVAR`). Un solo disparo por pulso. */
+export const EVENT_ESQUIVAR = 10;
+/** Alguien levantó el escudo (`ACCION_ESCUDO`). Un solo disparo por ventana. */
+export const EVENT_ESCUDO = 11;
 
 /**
  * Cola de eventos del paso. La capa de render la drena y la vacía: es cómo la
@@ -1029,6 +1033,7 @@ export function stepMatch(
         m.dodgeUntil[i] = now + DODGE_INVULN;
         m.lastDodge[i] = now;
         m.grounded[i] = 0;
+        emit(m.events, EVENT_ESQUIVAR, m.x[i], m.y[i], 0, m.team[i], i);
       }
       // El escudo, mismo criterio de "se lanza una vez": mientras dura
       // `shieldUntil` se planta (vx a cero, ver el bloque de más abajo) en
@@ -1039,6 +1044,7 @@ export function stepMatch(
       if (lanzarEscudo) {
         m.shieldUntil[i] = now + SHIELD_WINDOW;
         m.lastShield[i] = now;
+        emit(m.events, EVENT_ESCUDO, m.x[i], m.y[i], 0, m.team[i], i);
       }
       const moveDir = retirando ? -dir : dir;
       const closing = m.plan[i] === ACCION_ACERCAR && Math.abs(dx) > rango;
