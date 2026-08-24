@@ -1504,23 +1504,11 @@ function drawFighters(
     view.y = -match.y[i]
       - (stretch + vuelta * GIRO_ALTO) * FIGHTER_HALF_HEIGHT * scale;
 
-    // El baile del final. Se compone acá y no sale de la hoja porque ninguno de
-    // los seis tiene una animación de baile: lo que hay es una pose de pie. Con
-    // un salto, una inclinación y un balanceo que se contrapesan alcanza, y es
-    // la misma capa que ya hace el squash & stretch.
-    //
-    // Cada uno entra con su propio desfase. Tres muñecos saltando exactamente
-    // juntos no se leen como que festejan, se leen como un error.
-    if (match.state.ganador >= 0 && match.team[i] === match.state.ganador) {
-      const fase = elapsed * 2.4 + i * 0.9;
-      view.y -= Math.abs(Math.sin(fase)) * 0.36;
-      view.rotation = Math.sin(fase * 0.5) * 0.18;
-      const rebote = Math.cos(fase * 2) * 0.09;
-      view.scale.x = scale * ancho * (1 - rebote);
-      view.scale.y = scale * (1 + rebote);
-    } else if (view.rotation !== 0) {
-      view.rotation = 0;
-    }
+    // El final: reportado con capturas reales, el salto+aplastón de acá abajo
+    // se leía como que el ganador queda flotando y estirado, no festejando --
+    // sacado entero. Quietos parados sobre la losa, sin rotación ni squash,
+    // es lo que pide la captura: "mejor queden quietos sobre la superficie".
+    if (view.rotation !== 0) view.rotation = 0;
   }
 }
 
