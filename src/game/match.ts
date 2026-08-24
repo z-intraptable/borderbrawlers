@@ -260,6 +260,28 @@ const SHIELD_WINDOW = 0.35;
 const SHIELD_COOLDOWN = 1.5;
 const SHIELD_MITIGATION = 0.3;
 /**
+ * Embestida: un cierre de distancia en tierra, mucho más rápido que
+ * `RUN_SPEED`, para el caso que `RUN_SPEED`/`AIR_CONTROL` (subidos el
+ * 24/08) no resuelven -- un rival mandado lejos por un golpe grande deja
+ * varios segundos de acercamiento caminado, de plataforma en plataforma,
+ * sin pegar ni una vez: reportado con video real como "saltan sin pelear".
+ * No es una `ACCION_*` de la IA (no compite con especial/super, es a nivel
+ * de movimiento, no de plan, sin cooldown propio): mientras el plan sea
+ * ACERCAR, en tierra, sin frenar ni girar, y la distancia supere
+ * `EMBESTIR_RANGE`, se sostiene `vx` a `EMBESTIR_SPEED` en vez de acelerar
+ * hacia `RUN_SPEED`. Se autolimita sola: en cuanto la distancia baja de
+ * `EMBESTIR_RANGE` (siempre pasa, cerrando a `EMBESTIR_SPEED`) vuelve a la
+ * aceleración normal de siempre, sin flicker porque la distancia baja
+ * monótona mientras se acerca, nunca oscila cerca del umbral.
+ *
+ * `EMBESTIR_RANGE` (4, bastante más que `ENGAGE_RANGE`) para que la
+ * embestida sea el cruce de un tramo largo, no un empujón final que
+ * atropelle el enganche a cuerpo a cuerpo -- a esa distancia la aceleración
+ * normal ya alcanza.
+ */
+const EMBESTIR_RANGE = 4;
+const EMBESTIR_SPEED = 9;
+/**
  * Agarre de borde (Fase 2 de dinámicas Brawlhalla/Smash). Automático, no una
  * `ACCION_*` de la IA -- a diferencia de esquivar/escudo, agarrarse no es
  * una decisión que convenga sopesar contra otras: si el borde está ahí Y se
@@ -1031,6 +1053,13 @@ export function stepMatch(
       const desired = brake || turning ? 0
         : closing ? (moveDir + spread * 0.5) * RUN_SPEED * boost
           : (spread * SPACING_GAIN + moveDir * HOLD_PULL) * RUN_SPEED;
+      // Embestida: cierre de distancia en tierra a `EMBESTIR_SPEED`, ver su
+      // comentario más arriba. Gana por encima de la aceleración normal
+      // hacia `desired` (que apunta a RUN_SPEED) mientras el tramo sea
+      // largo; deja de aplicar sola en cuanto la distancia baja de
+      // `EMBESTIR_RANGE`, sin ningún estado propio que limpiar.
+      const embistiendo = closing && grounded && !brake && !turning
+        && Math.abs(dx) > EMBESTIR_RANGE;
 
       if (esquivando || lanzarEsquive) {
         // El pulso decae solo, arrastrado por el mismo AIR_CONTROL de
@@ -1040,6 +1069,8 @@ export function stepMatch(
         // Plantado: a diferencia del esquive no hay pulso que preservar,
         // sólo dejar de acelerar hacia cualquier lado mientras dura.
         m.vx[i] = 0;
+      } else if (embistiendo) {
+        m.vx[i] = moveDir * EMBESTIR_SPEED;
       } else if (grounded) {
         // Acelera hacia lo que quiere, no salta a ello. Ver `GROUND_ACCEL`.
         const limite = GROUND_ACCEL * dt;
