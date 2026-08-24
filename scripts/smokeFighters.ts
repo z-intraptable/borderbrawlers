@@ -15,6 +15,7 @@ import {
   TEAM_GREEN,
   TEAM_RED,
   createSkyline,
+  findLedge,
   groundYAt,
   hasGroundAhead,
   hitDamage,
@@ -76,6 +77,22 @@ console.log('\n== hay piso adelante ==');
   check('caminando hacia el centro sí hay', hasGroundAhead(sky, 0.5, 1, 0.4));
   check('caminando hacia el pozo no hay', !hasGroundAhead(sky, 1, 1, 0.8));
   check('mirando para el otro lado sí hay', hasGroundAhead(sky, 1, -1, 0.8));
+}
+
+console.log('\n== agarre de borde (Fase 2, Brawlhalla/Smash) ==');
+{
+  const REACH = 0.45;
+  const BAND = 0.25;
+  // Plataforma 1: minX -1, maxX 1, topY 0.
+  check('cayendo justo al lado del borde derecho, agarra', findLedge(sky, 1.1, 0, -1, REACH, BAND) === 1);
+  check('cayendo justo al lado del borde izquierdo, agarra', findLedge(sky, -1.1, 0, -1, REACH, BAND) === 1);
+  check('lejos del borde, no agarra nada', findLedge(sky, 0, 0, -1, REACH, BAND) === -1);
+  check('subiendo (todavía en el salto) no agarra aunque esté cerca del borde',
+    findLedge(sky, 1.1, 0, 1, REACH, BAND) === -1);
+  check('muy por debajo del borde, ya pasó de largo, no agarra',
+    findLedge(sky, 1.1, -5, -1, REACH, BAND) === -1);
+  check('muy por arriba del borde, todavía no cayó lo suficiente, no agarra',
+    findLedge(sky, 1.1, 2, -1, REACH, BAND) === -1);
 }
 
 console.log('\n== elegir a quién pegarle ==');

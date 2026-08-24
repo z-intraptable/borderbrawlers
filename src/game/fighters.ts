@@ -99,6 +99,37 @@ export function hasGroundAhead(
   return groundYAt(sky, x + dir * lookahead) !== -Infinity;
 }
 
+/**
+ * El borde agarrable más cercano bajo `(x, y)`, cayendo, o -1 si no hay
+ * ninguno a mano.
+ *
+ * Sólo mientras cae (`vy <= 0`): un salto de despegue nunca agarra el borde
+ * de la losa de la que se está yendo. La banda vertical es angosta hacia
+ * arriba (`band`) -- si todavía está por encima del borde no cayó lo
+ * bastante como para que la mano llegue -- y más generosa hacia abajo
+ * (`band * 3`) para no perder el agarre en un cuadro donde ya pasó de largo
+ * por caer rápido. Mira los DOS bordes de cada losa (`minX` y `maxX`) sin
+ * distinguir de qué lado viene: a esta distancia (`reach`, poco más que
+ * medio cuerpo) no hace falta, cualquiera de los dos es "el borde de al
+ * lado".
+ */
+export function findLedge(
+  sky: Skyline,
+  x: number,
+  y: number,
+  vy: number,
+  reach: number,
+  band: number,
+): number {
+  if (vy > 0) return -1;
+  for (let i = 0; i < sky.count; i++) {
+    const top = sky.topY[i];
+    if (y > top + band || y < top - band * 3) continue;
+    if (Math.abs(x - sky.minX[i]) <= reach || Math.abs(x - sky.maxX[i]) <= reach) return i;
+  }
+  return -1;
+}
+
 /* ------------------------------------------------------------------ */
 /* Decisiones                                                          */
 /* ------------------------------------------------------------------ */

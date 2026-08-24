@@ -24,6 +24,7 @@ import {
   chargeFromTrade,
   createMatchState,
   createSkyline,
+  findLedge,
   hasGroundAhead,
   hitDamage,
   isKO,
@@ -239,6 +240,22 @@ const DODGE_SPEED = 9;
 const SHIELD_WINDOW = 0.35;
 const SHIELD_COOLDOWN = 1.5;
 const SHIELD_MITIGATION = 0.3;
+/**
+ * Agarre de borde (Fase 2 de dinámicas Brawlhalla/Smash). Automático, no una
+ * `ACCION_*` de la IA -- a diferencia de esquivar/escudo, agarrarse no es
+ * una decisión que convenga sopesar contra otras: si el borde está ahí Y se
+ * está cayendo, agarrarse siempre es mejor que seguir cayendo. Ver
+ * `findLedge` en fighters.ts para el detalle geométrico.
+ *
+ * `LEDGE_REACH` un poco más que `FIGHTER_HALF_WIDTH` (0,3): si fuera igual,
+ * el CENTRO tendría que estar exactamente sobre el borde para agarrarse, y
+ * en la práctica nunca cae tan preciso. `LEDGE_HANG` (0,4s) es el tiempo
+ * colgado antes de subir solo -- lo bastante para que se LEA como que se
+ * agarró de algo, no una corrección instantánea de posición.
+ */
+const LEDGE_REACH = 0.45;
+const LEDGE_BAND = 0.25;
+const LEDGE_HANG = 0.4;
 const CONTACT = 0.85;
 /**
  * Distancia de guardia. Apenas menor que `CONTACT` para que el cuerpo a cuerpo
@@ -606,6 +623,18 @@ export interface Match {
   shieldUntil: Float32Array;
   /** Cuándo levantó el escudo por última vez. Ver `SHIELD_COOLDOWN`. */
   lastShield: Float32Array;
+  /**
+   * 1 si está colgado de un borde (Fase 2, agarre de borde). Mientras dura
+   * la física normal se salta entera para ese slot -- ver el bloque
+   * "colgado" en `stepMatch` -- e invulnerable a todo, poder/super Y cuerpo
+   * a cuerpo (a diferencia de esquivar/escudo): nadie puede pegarle a una
+   * mano agarrada de una piedra.
+   */
+  colgado: Uint8Array;
+  /** De qué losa está colgado, mientras `colgado` es 1. */
+  colgadoPlat: Int8Array;
+  /** Cuándo suelta el borde y sube solo. Ver `LEDGE_HANG`. */
+  colgadoHasta: Float32Array;
   hitstun: Float32Array;
   whale: Uint8Array;
   /**
@@ -726,6 +755,9 @@ export function createMatch(
     lastDodge: new Float32Array(CAPACITY).fill(-DODGE_COOLDOWN),
     shieldUntil: new Float32Array(CAPACITY),
     lastShield: new Float32Array(CAPACITY).fill(-SHIELD_COOLDOWN),
+    colgado: new Uint8Array(CAPACITY),
+    colgadoPlat: new Int8Array(CAPACITY).fill(-1),
+    colgadoHasta: new Float32Array(CAPACITY),
     hitstun: new Float32Array(CAPACITY),
     whale: new Uint8Array(CAPACITY),
     scale: new Float32Array(CAPACITY).fill(1),
@@ -814,6 +846,27 @@ export function stepMatch(
   m.claims.fill(0);
   for (let i = 0; i < CAPACITY; i++) {
     if (m.slot[i] !== SLOT_ACTIVE) continue;
+
+    // Colgado: se salta IA, física y todo lo demás -- sólo espera a que se
+    // cumpla `LEDGE_HANG` para subir solo. `platformIndexAt`/`skyline.topY`
+    // dan el tope de la losa de la que está colgado; se sube un poco hacia
+    // ADENTRO del borde (no justo en el filo) para no quedar parado a medio
+    // caer nada más subir.
+    if (m.colgado[i] === 1) {
+      if (now >= m.colgadoHasta[i]) {
+        const plat = m.colgadoPlat[i];
+        const centro = m.skyline.minX[plat] * 0.5 + m.skyline.maxX[plat] * 0.5;
+        const haciaAdentro = m.x[i] < centro ? 1 : -1;
+        m.x[i] += haciaAdentro * FIGHTER_HALF_WIDTH;
+        m.y[i] = m.skyline.topY[plat] + FIGHTER_HALF_HEIGHT;
+        m.vx[i] = 0;
+        m.vy[i] = 0;
+        m.grounded[i] = 1;
+        m.jumps[i] = MAX_JUMPS;
+        m.colgado[i] = 0;
+      }
+      continue;
+    }
 
     const inHitstun = now - m.hitstun[i] < HITSTUN;
     if (!inHitstun) {
@@ -1022,6 +1075,22 @@ export function stepMatch(
       emit(m.events, EVENT_LAND, m.x[i], m.y[i],
         LANDING_SOFT + fallSpeed / LANDING_FULL, m.team[i], i);
     }
+
+    // Agarre de borde: sólo cayendo (no en el instante de despegue) y sin
+    // haber aterrizado ya este mismo cuadro -- `move.grounded` sería el
+    // caso de haber caído justo ENCIMA de la losa, que no es agarrarse, es
+    // pisar. No mira `inHitstun`: un empujón que manda al vacío es
+    // exactamente el caso que esto existe para atajar.
+    if (!move.grounded && move.vy <= 0) {
+      const plat = findLedge(m.skyline, move.x, move.y, move.vy, LEDGE_REACH, LEDGE_BAND);
+      if (plat >= 0) {
+        m.colgado[i] = 1;
+        m.colgadoPlat[i] = plat;
+        m.colgadoHasta[i] = now + LEDGE_HANG;
+        m.vx[i] = 0;
+        m.vy[i] = 0;
+      }
+    }
   }
 
   /* --- super: lo dispara el plan, no un umbral suelto ------------------- */
@@ -1116,9 +1185,11 @@ export function stepMatch(
 
   /* --- empujones ----------------------------------------------------- */
   for (let i = 0; i < CAPACITY; i++) {
-    if (m.slot[i] !== SLOT_ACTIVE) continue;
+    if (m.slot[i] !== SLOT_ACTIVE || m.colgado[i] === 1) continue;
     for (let j = i + 1; j < CAPACITY; j++) {
-      if (m.slot[j] !== SLOT_ACTIVE || m.team[j] === m.team[i]) continue;
+      // Colgado del borde: invulnerable a todo, cuerpo a cuerpo incluido
+      // (ver el comentario de `colgado` en el struct `Match`).
+      if (m.slot[j] !== SLOT_ACTIVE || m.team[j] === m.team[i] || m.colgado[j] === 1) continue;
       const dx = m.x[j] - m.x[i];
       const dy = m.y[j] - m.y[i];
       const distance = Math.hypot(dx, dy);
@@ -1325,8 +1396,9 @@ function moverPoderes(m: Match, dt: number, now: number): void {
       if (m.slot[j] !== SLOT_ACTIVE || m.team[j] === p.team[k]) continue;
       // El esquive lo hace invulnerable a poder y super mientras dura (ver
       // `DODGE_INVULN`), no al cuerpo a cuerpo -- ese chequeo vive en el
-      // bloque del forcejeo, no acá.
-      if (m.dodgeUntil[j] > now) continue;
+      // bloque del forcejeo, no acá. Colgado del borde SÍ es invulnerable a
+      // todo -- ver el comentario de `colgado` más arriba.
+      if (m.dodgeUntil[j] > now || m.colgado[j] === 1) continue;
       const dx = m.x[j] - p.x[k];
       const dy = m.y[j] - p.y[k];
       const distance = Math.hypot(dx, dy);
@@ -1473,6 +1545,9 @@ function activate(m: Match, slot: number, team: number, now: number): void {
   m.lastDodge[slot] = -DODGE_COOLDOWN;
   m.shieldUntil[slot] = 0;
   m.lastShield[slot] = -SHIELD_COOLDOWN;
+  m.colgado[slot] = 0;
+  m.colgadoPlat[slot] = -1;
+  m.colgadoHasta[slot] = 0;
 
   // Repartidos por carril: los tres apareciendo en el mismo punto caen uno
   // encima del otro y arrancan la pelea amontonados.
@@ -1501,7 +1576,7 @@ function unleash(m: Match, self: number, now: number, spent: number): void {
   m.shake = 1;
   for (let i = 0; i < CAPACITY; i++) {
     if (i === self || m.slot[i] !== SLOT_ACTIVE || m.team[i] === m.team[self]) continue;
-    if (m.dodgeUntil[i] > now) continue;
+    if (m.dodgeUntil[i] > now || m.colgado[i] === 1) continue;
     const dx = m.x[i] - m.x[self];
     const dy = m.y[i] - m.y[self];
     const distance = Math.hypot(dx, dy);
