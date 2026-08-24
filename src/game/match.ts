@@ -414,8 +414,21 @@ export const PODERES = 12;
 const PODER_VELOCIDAD = 16;
 /** Cuánto vive si no le pega a nadie. Alcanza para cruzar el escenario. */
 export const PODER_VIDA = 2;
-/** Desde qué distancia se anima a tirar. */
-const ALCANCE = 22;
+/**
+ * Desde qué distancia se anima a tirar.
+ *
+ * **Bajó de 22 a 2.2.** El escenario real (post-pivot del 23/08, ver
+ * CLAUDE.md) mide `STAGE_HALF_WIDTH * 2 = 18` de punta a punta -- 22 cubría
+ * el escenario ENTERO, así que la especial se podía tirar desde el spawn sin
+ * caminar un paso. Peor: en cuanto el plan es ESPECIAL, `closing` se apaga
+ * más abajo y el peleador deja de acercarse del todo -- el resultado medido
+ * en video fue una pelea de bolas de energía a distancia, sin nunca llegar
+ * al cuerpo a cuerpo. 2,2 es apenas más que `DISENGAGE_RANGE` (0,95): para
+ * tirarla hay que estar casi encima del rival, así que la especial pasa a
+ * ser una herramienta DENTRO del forcejeo (un golpe que además lanza),
+ * no un francotirador que reemplaza acercarse.
+ */
+const ALCANCE = 2.2;
 /**
  * A qué altura del cuerpo apunta.
  *

@@ -397,6 +397,12 @@ export function puntajeAccion(accion: number, ctx: PlanContext): number {
   switch (accion) {
     case ACCION_SUPER:
       if (ctx.energia < COST_SUPER || ctx.superEnfriando) return -Infinity;
+      // `unleash()` (match.ts) NO es un proyectil: es una onda instantánea
+      // centrada en quien la tira, de radio `SUPER_RADIUS`. Sin este chequeo
+      // la IA podía "tirar" el super con el rival a cualquier distancia --
+      // se gastaba la barra entera, corría la animación, y no le pegaba a
+      // nadie por estar fuera del radio real de la onda.
+      if (ctx.distancia > SUPER_RADIUS) return -Infinity;
       // Más que el techo de la especial (4 + 1×2 = 6, con la barra llena):
       // con las dos listas a la vez, gana el remate. Conviene todavía más
       // cuanto más daño acumuló el rival: el super lo manda lejos con menos

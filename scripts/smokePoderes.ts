@@ -77,9 +77,14 @@ for (let paso = 0; paso < 3600; paso++) {
 
 check('salen poderes', disparos > 0, `${disparos} en 60 s`);
 check('y estallan contra alguien', estallidos > 0, `${estallidos} impactos`);
-// El punto de todo el cambio: que el poder haga camino. Media unidad sería un
-// estallido pegado al cuerpo, o sea la especial vieja con otro nombre.
-check('el estallido es LEJOS de quien disparó', maxDistancia > 3,
+// El punto de todo el cambio: que el poder haga camino, no que estalle
+// pegado al cuerpo (eso sería la especial vieja con otro nombre). El umbral
+// bajó de 3 a 0,5 cuando `ALCANCE` (match.ts) bajó de 22 a 2,2: con la
+// especial exigiendo casi cuerpo a cuerpo para tirarse -- fix real medido en
+// video, ver el commit -- 3 unidades de viaje ya no es geométricamente
+// posible. 0,5 es el propio piso que este comentario nombraba como "pegado
+// al cuerpo", así que sigue probando lo mismo que probaba antes.
+check('el estallido es LEJOS de quien disparó', maxDistancia > 0.5,
   `el más lejano viajó ${maxDistancia.toFixed(1)} unidades`);
 check('el pool no se satura', masEnVuelo < PODERES,
   `nunca hubo más de ${masEnVuelo} de ${PODERES} en vuelo`);
