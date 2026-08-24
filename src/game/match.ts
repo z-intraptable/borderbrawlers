@@ -155,10 +155,29 @@ export function platformHalfWidth(index: number): number {
 export const FIGHTER_HALF_WIDTH = 0.3;
 export const FIGHTER_HALF_HEIGHT = 0.52;
 
-const RUN_SPEED = 3.6;
+/**
+ * Subió de 3,6 a 4,8. Reportado con video real (24/08): después de un
+ * lanzamiento grande -- que con `MAX_KNOCKBACK` puede mandar al rival al
+ * otro extremo del escenario, ~18 unidades -- volver a cerrar distancia a
+ * 3,6 u/s tardaba varios segundos enteros de saltar de plataforma en
+ * plataforma antes de poder pegar de nuevo. Eso es lo que se leía como
+ * "están saltando sin pelear": no es que la IA no quiera pelear, es que el
+ * viaje de vuelta al cuerpo a cuerpo dominaba el tiempo de pantalla. Más
+ * rápido no cambia el forcejeo en sí (`ENGAGE_RANGE`/`DISENGAGE_RANGE` no
+ * se tocan), sólo el tiempo muerto entre un intercambio y el siguiente.
+ */
+const RUN_SPEED = 4.8;
 const JUMP_SPEED = 11;
 const MAX_JUMPS = 2;
-const AIR_CONTROL = 0.12;
+/**
+ * Subió de 0,12 a 0,22. Mismo motivo que `RUN_SPEED`: en el aire -- que es
+ * donde pasa la mayor parte del viaje de vuelta tras un lanzamiento -- la
+ * corrección hacia el rival era tan lenta que el arco de cada salto salía
+ * casi vertical en vez de ir cerrando terreno, y hacían falta más saltos de
+ * los necesarios para llegar. Sigue lejos de 1 (control total en el aire
+ * cambiaría el arco de los saltos de combate, no sólo el regreso).
+ */
+const AIR_CONTROL = 0.22;
 const LOOKAHEAD = 0.7;
 /** Cuánto queda sin control tras recibir un lanzamiento. */
 export const HITSTUN = 0.34;
