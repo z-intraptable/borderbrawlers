@@ -36,6 +36,25 @@ export const ACT_KICK = 2;
 export const ACT_SKILL = 3;
 export const ACT_SUPER = 4;
 
+/**
+ * Estados sostenidos (no golpes de un cuadro como `ACT_*`): mientras dura uno
+ * de estos, `pose()` lo prioriza por sobre golpeado/acción/salto/correr. Un
+ * solo entero primitivo, mismo criterio que `action` — no un objeto, `pose()`
+ * se llama seis veces por frame.
+ *
+ * `EST_NONE` es el default de siempre; los otros cuatro cubren dinámicas que
+ * hoy no tienen dibujo propio y caen en `idle`/`run`/`jump` genéricos (ver la
+ * auditoría de cobertura de arte, 2026-08-24): escudo plantado, esquive/dash,
+ * colgado del borde, finta. El muñeco de piezas (`createFighterView`, más
+ * abajo) los ignora a propósito -- girar rotando de verdad ya lo diferencia
+ * lo suficiente y no vale la pena una pose procedural para cada uno.
+ */
+export const EST_NONE = 0;
+export const EST_ESCUDO = 1;
+export const EST_ESQUIVAR = 2;
+export const EST_COLGADO = 3;
+export const EST_FINTA = 4;
+
 /** Cuánto dura cada acción en pantalla, en segundos. */
 export const ACTION_TIME: readonly number[] = [0, 0.26, 0.3, 0.45, 0.75];
 
@@ -151,6 +170,11 @@ export interface FighterView extends Container {
      * del cruce; el muñeco de piezas lo ignora porque gira rotando de verdad.
      */
     turn: number,
+    /**
+     * Estado sostenido vigente (`EST_*`), o `EST_NONE`. Va al final y con
+     * default implícito en quien no lo pase -- ver el comentario de `EST_*`.
+     */
+    estado?: number,
   ): void;
   /** Se llama al entrar o salir del gigantismo. */
   paint(color: number, glow: boolean): void;

@@ -1,5 +1,8 @@
 import { Container, Sprite } from 'pixi.js';
-import { ACTION_HIT, ACT_KICK, ACT_NONE, ACT_PUNCH, ACT_SKILL, ACT_SUPER } from './fighter';
+import {
+  ACTION_HIT, ACT_KICK, ACT_NONE, ACT_PUNCH, ACT_SKILL, ACT_SUPER,
+  EST_COLGADO, EST_ESCUDO, EST_ESQUIVAR, EST_FINTA, EST_NONE,
+} from './fighter';
 import type { FighterView } from './fighter';
 import type { FighterSheets, SheetAnimation } from './loadSheets';
 
@@ -72,6 +75,28 @@ const FALLBACK: Record<number, readonly string[]> = {
   [ACT_SKILL]: ['skill', 'punch', 'attack'],
   [ACT_SUPER]: ['super', 'skill', 'punch', 'attack'],
 };
+
+/**
+ * Nombre de la pose de UN cuadro para cada estado sostenido (`EST_*`, ver su
+ * comentario en fighter.ts), en orden de preferencia. Al revés que
+ * `FALLBACK`: acá NO hay último recurso genérico -- si la hoja no trae
+ * ninguno de estos nombres, `pose()` no intercepta nada y sigue de largo
+ * hacia golpeado/salto/correr/parado, que es exactamente el comportamiento
+ * de antes de que existieran estos estados. Así una hoja sin la pose nueva
+ * no se rompe ni muestra nada raro: simplemente no gana nada todavía.
+ *
+ * `bloqueo` es aparte de `escudo`: el mismo estado (`EST_ESCUDO`) tiene dos
+ * poses según si en ESE instante están golpeando el escudo o no -- plantado
+ * quieto vs. el impacto que mitiga. Sin `bloqueo`, un escudo golpeado cae en
+ * `escudo` (si la hoja lo tiene) o sigue de largo hacia `hurt`.
+ */
+const ESTADO_NOMBRES: Record<number, readonly string[]> = {
+  [EST_COLGADO]: ['colgado'],
+  [EST_ESCUDO]: ['escudo'],
+  [EST_ESQUIVAR]: ['esquive'],
+  [EST_FINTA]: ['finta'],
+};
+const BLOQUEO_NOMBRES: readonly string[] = ['bloqueo', 'escudo'];
 
 /**
  * Cuánto se corre el dibujo hacia adelante en el golpe, en unidades de rig.
@@ -286,6 +311,7 @@ export function createSpriteFighterView(sheets: FighterSheets): FighterView {
   root.pose = (
     vx: number, vy: number, grounded: boolean, hurt: boolean,
     action: number, actionT: number, elapsed: number, turn: number,
+    estado: number = EST_NONE,
   ): void => {
     const dt = Math.max(0, Math.min(0.1, elapsed - lastElapsed));
     lastElapsed = elapsed;
@@ -303,6 +329,40 @@ export function createSpriteFighterView(sheets: FighterSheets): FighterView {
     if (gira !== null && turn >= UMBRAL_GIRO_FRENTE) {
       show(gira, 0);
       return;
+    }
+
+    // Estados sostenidos, antes de golpeado: colgado del borde es
+    // invulnerable a todo (ver LEDGE_HANG en match.ts), así que si por algún
+    // motivo `hurt` sigue prendido de un golpe anterior no puede ganarle a la
+    // pose de agarrado -- verse golpeado mientras cuelga de una piedra no
+    // tiene sentido. El resto de los estados sí compiten con golpeado más
+    // abajo (el bloqueo es justo la reacción a un golpe).
+    if (estado === EST_COLGADO) {
+      for (const nombre of ESTADO_NOMBRES[EST_COLGADO]) {
+        const animation = sheets.animations.get(nombre);
+        if (animation === undefined) continue;
+        show(animation, 0);
+        return;
+      }
+    }
+
+    if (hurt && estado === EST_ESCUDO) {
+      for (const nombre of BLOQUEO_NOMBRES) {
+        const animation = sheets.animations.get(nombre);
+        if (animation === undefined) continue;
+        show(animation, 0);
+        return;
+      }
+    }
+
+    if (!hurt && estado !== EST_NONE && estado !== EST_COLGADO) {
+      const nombres = ESTADO_NOMBRES[estado] ?? [];
+      for (const nombre of nombres) {
+        const animation = sheets.animations.get(nombre);
+        if (animation === undefined) continue;
+        show(animation, 0);
+        return;
+      }
     }
 
     if (hurt) {

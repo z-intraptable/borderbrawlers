@@ -37,6 +37,11 @@ import {
   ACT_PUNCH,
   ACT_SKILL,
   ACT_SUPER,
+  EST_COLGADO,
+  EST_ESCUDO,
+  EST_ESQUIVAR,
+  EST_FINTA,
+  EST_NONE,
 } from '../art/fighter';
 import { lookFor } from '../art/looks';
 import { loadArt, unloadArt } from '../art/loadArt';
@@ -1462,9 +1467,20 @@ function drawFighters(
     // `vuelta` vale 0 mirando de frente a su lado y 1 en el medio del giro.
     const vuelta = 1 - Math.min(1, Math.abs(suave.giro[i]));
 
+    // Estado sostenido para `pose()` (ver EST_* en fighter.ts): un solo
+    // entero, primera lectura de m.colgado/shieldUntil/dodgeUntil/fintaHasta
+    // que gana gana la pose -- son mutuamente excluyentes en match.ts (un
+    // slot no puede estar colgado y esquivando a la vez), así que el orden
+    // acá sólo importa como desempate imposible en la práctica.
+    let estado = EST_NONE;
+    if (match.colgado[i] === 1) estado = EST_COLGADO;
+    else if (match.clock < match.shieldUntil[i]) estado = EST_ESCUDO;
+    else if (match.clock < match.dodgeUntil[i]) estado = EST_ESQUIVAR;
+    else if (match.clock < match.fintaHasta[i]) estado = EST_FINTA;
+
     view.pose(
       match.vx[i], match.vy[i], match.grounded[i] === 1, hurt,
-      action[i], progress, elapsed, vuelta,
+      action[i], progress, elapsed, vuelta, estado,
     );
 
     // Al tocar el piso la simulación pone `vy` en cero en el mismo frame, así
