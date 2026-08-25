@@ -175,6 +175,12 @@ export interface FighterView extends Container {
      * default implícito en quien no lo pase -- ver el comentario de `EST_*`.
      */
     estado?: number,
+    /**
+     * Si `hurt` es por el golpe del super, no por cuerpo a cuerpo/especial.
+     * Ver `hitBySuper` en match.ts -- el super manda mucho más lejos y la
+     * reacción tiene que leerse distinta de un golpe cualquiera.
+     */
+    hurtSuper?: boolean,
   ): void;
   /** Se llama al entrar o salir del gigantismo. */
   paint(color: number, glow: boolean): void;

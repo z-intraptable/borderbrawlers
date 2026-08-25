@@ -97,6 +97,12 @@ const ESTADO_NOMBRES: Record<number, readonly string[]> = {
   [EST_FINTA]: ['finta'],
 };
 const BLOQUEO_NOMBRES: readonly string[] = ['bloqueo', 'escudo'];
+/**
+ * Reacción al golpe del super: sin nombre propio en la hoja, sigue de largo
+ * hacia `hurt`/`fall` como antes -- mismo criterio de "ausencia no rompe
+ * nada" que el resto de las poses nuevas.
+ */
+const SUPERHIT_NOMBRES: readonly string[] = ['superhit'];
 
 /**
  * Cuánto se corre el dibujo hacia adelante en el golpe, en unidades de rig.
@@ -311,7 +317,7 @@ export function createSpriteFighterView(sheets: FighterSheets): FighterView {
   root.pose = (
     vx: number, vy: number, grounded: boolean, hurt: boolean,
     action: number, actionT: number, elapsed: number, turn: number,
-    estado: number = EST_NONE,
+    estado: number = EST_NONE, hurtSuper: boolean = false,
   ): void => {
     const dt = Math.max(0, Math.min(0.1, elapsed - lastElapsed));
     lastElapsed = elapsed;
@@ -361,6 +367,15 @@ export function createSpriteFighterView(sheets: FighterSheets): FighterView {
         const animation = sheets.animations.get(nombre);
         if (animation === undefined) continue;
         show(animation, 0);
+        return;
+      }
+    }
+
+    if (hurt && hurtSuper) {
+      for (const nombre of SUPERHIT_NOMBRES) {
+        const animation = sheets.animations.get(nombre);
+        if (animation === undefined) continue;
+        show(animation, Math.floor(ritmo(actionT, 0.15) * animation.frames.length));
         return;
       }
     }

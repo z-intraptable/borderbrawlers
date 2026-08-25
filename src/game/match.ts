@@ -722,6 +722,13 @@ export interface Match {
   /** Cuándo suelta el borde y sube solo. Ver `LEDGE_HANG`. */
   colgadoHasta: Float32Array;
   hitstun: Float32Array;
+  /**
+   * 1 si el golpe que puso `hitstun` fue el super, 0 si fue cuerpo a cuerpo
+   * o especial. Sólo para elegir la pose de reacción (ver EST_* y `hurtSuper`
+   * en fighter.ts/spriteFighter.ts) -- el super manda MUCHO más lejos que un
+   * golpe cualquiera y la reacción tiene que leerse distinta.
+   */
+  hitBySuper: Uint8Array;
   whale: Uint8Array;
   /**
    * Tamaño visual, 1 siempre. Quedó del gigantismo (ver el pivot de
@@ -851,6 +858,7 @@ export function createMatch(
     colgadoPlat: new Int8Array(CAPACITY).fill(-1),
     colgadoHasta: new Float32Array(CAPACITY),
     hitstun: new Float32Array(CAPACITY),
+    hitBySuper: new Uint8Array(CAPACITY),
     whale: new Uint8Array(CAPACITY),
     scale: new Float32Array(CAPACITY).fill(1),
     claims: new Uint8Array(CAPACITY),
@@ -1384,6 +1392,7 @@ export function stepMatch(
         m.grounded[j] = 0;
         m.damage[j] += hitDamage(m.weight[i], blow === 1) * (esFinisher ? COMBO_FINISHER_MULT : 1);
         m.hitstun[j] = now - HITSTUN + stunFor(force);
+        m.hitBySuper[j] = 0;
         emit(m.events, EVENT_MELEE, m.x[i], m.y[i], m.lastBlow[i], m.team[i], i);
       }
       {
@@ -1395,6 +1404,7 @@ export function stepMatch(
         m.grounded[i] = 0;
         m.damage[i] += hitDamage(m.weight[j], blow === 1) * (esFinisher ? COMBO_FINISHER_MULT : 1);
         m.hitstun[i] = now - HITSTUN + stunFor(force);
+        m.hitBySuper[i] = 0;
         emit(m.events, EVENT_MELEE, m.x[j], m.y[j], m.lastBlow[j], m.team[j], j);
       }
 
@@ -1563,6 +1573,7 @@ function moverPoderes(m: Match, dt: number, now: number): void {
       // lo que hace que el poder cargado se sienta distinto del que salió con la
       // barra a medias. Ver `stunFor`.
       m.hitstun[j] = now - HITSTUN + stunFor(force);
+      m.hitBySuper[j] = 0;
       m.lastHit[j] = now;
       emit(m.events, EVENT_HIT, m.x[j], m.y[j], 0.8 + spent * 0.9, m.team[j], j);
     }
@@ -1678,6 +1689,7 @@ function activate(m: Match, slot: number, team: number, now: number): void {
   m.lastJump[slot] = now;
   m.lastHit[slot] = now;
   m.hitstun[slot] = -10;
+  m.hitBySuper[slot] = 0;
   m.whale[slot] = 0;
   m.lastSkill[slot] = 1;
   // La barra arranca vacía: un peleador que acaba de entrar todavía no tiene
@@ -1739,6 +1751,7 @@ function unleash(m: Match, self: number, now: number, spent: number): void {
     m.grounded[i] = 0;
     m.damage[i] += SUPER_DAMAGE * power * mitigacion;
     m.hitstun[i] = now - HITSTUN + stunFor(force);
+    m.hitBySuper[i] = 1;
     m.lastHit[i] = now;
     emit(m.events, EVENT_HIT, m.x[i], m.y[i], 1.4, m.team[i], i);
   }

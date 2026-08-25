@@ -1481,6 +1481,7 @@ function drawFighters(
     view.pose(
       match.vx[i], match.vy[i], match.grounded[i] === 1, hurt,
       action[i], progress, elapsed, vuelta, estado,
+      hurt && match.hitBySuper[i] === 1,
     );
 
     // Al tocar el piso la simulación pone `vy` en cero en el mismo frame, así
