@@ -37,6 +37,11 @@ def centroide(figura: Image.Image) -> tuple[float, float]:
     return float(cx), float(cy)
 
 
+def tinta(img: Image.Image) -> int:
+    """Píxeles opacos de una figura -- misma medida que usa `recortar-accion.py`."""
+    return int((np.array(img.getchannel('A')) > 40).sum())
+
+
 def main() -> int:
     if len(sys.argv) != 4:
         raise SystemExit(__doc__)
@@ -56,11 +61,26 @@ def main() -> int:
         raise SystemExit(f'{origen}: no tiene alfa -- ¿se olvidó de sacarle el fondo?')
     caja = (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
     figura = figura.crop(caja)
-    centro = centroide(figura)
 
     datos, piezas = ra.desempacar(carpeta)
+
+    # Kling entrega el lienzo a ~1750px de lado; el resto de la hoja quedó
+    # cortada a ~300px. Sin reescalar, la pose nueva entra 5-7x más grande
+    # que el personaje -- mismo criterio que `recortar-accion.py`: igualar el
+    # LADO de silueta (raíz del área de tinta) contra una acción ya en escala.
+    REFERENCIA = 'idle'
+    if REFERENCIA not in piezas:
+        raise SystemExit(f'{carpeta} no tiene la acción "{REFERENCIA}" para escalar contra ella')
+    viejo = float(np.median([np.sqrt(tinta(f)) for f, _ in piezas[REFERENCIA]]))
+    nuevo = float(np.sqrt(tinta(figura)))
+    escala = viejo / nuevo
+    w, h = max(1, round(figura.width * escala)), max(1, round(figura.height * escala))
+    figura = figura.resize((w, h), Image.LANCZOS)
+    centro = centroide(figura)
+
     piezas[accion] = [(figura, centro)]
     ra.empacar(carpeta, datos, piezas)
+    print(f'  escala aplicada: {escala:.3f} (contra "{REFERENCIA}")')
     print(f'{slug}: "{accion}" metida, {figura.width}x{figura.height}px, '
           f'centroide {round(centro[0], 1)},{round(centro[1], 1)}')
     return 0
